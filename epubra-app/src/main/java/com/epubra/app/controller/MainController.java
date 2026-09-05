@@ -36,6 +36,7 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
@@ -97,6 +98,13 @@ public class MainController {
     private FindController findBarController;
     @FXML
     private ValidationController bottomPanelController;
+    @FXML
+    private WelcomePageController welcomePageController;
+    // 欢迎页 FXML 的根节点：JavaFX fx:include 既会注入子控制器也会注入根节点。
+    // 当前不直接使用，但保留以便后续需要整体替换 / 定位节点时不必再补字段。
+    @SuppressWarnings("unused")
+    @FXML
+    private StackPane welcomePage;
 
     @FXML
     private MenuItem problemsItem;
@@ -174,6 +182,14 @@ public class MainController {
         sidebarController.setupDefault();
         bindProblemsAccelerator();
 
+        welcomePageController.bind(
+                this::onNew,
+                this::onOpen,
+                this::onOpenRecent,
+                () -> onExit());
+        // 订阅 BookLoadedEvent 自动收起欢迎页（新建 / 打开 / 自动暂存恢复 都触发）
+        welcomePageController.subscribeVisibility(ctx);
+
         bottomPanelController.bind(ctx, validator, editorTabs, contentArea,
                 tocViewController, sidebarController,
                 this::commitPendingEdits, this::setStatus);
@@ -194,7 +210,7 @@ public class MainController {
                 this::setStatus, this::confirmDiscardChanges);
 
         contentArea.textProperty().addListener((obs, oldValue, text) -> {
-            if (ctx.loading()) {
+            if (ctx.loading() || ctx.book() == null) {
                 return;
             }
             // 一段连续输入只在第一次击键时记录一次快照（此时 book 还是变更前的状态）
@@ -215,7 +231,9 @@ public class MainController {
         // 启动恢复扫描：必须在 newBook() 之前判断——否则新建的空书会覆盖 ctx，
         // findRecoverable(ctx) 看到的 currentFile 就是新建后的 null，找不到任何东西。
         promptRecoveryIfAny();
-        documentController.newBook();
+        // 故意不在这里 newBook()：启动后欢迎页是初始视图，用户从欢迎页挑一个动作（新建项目 /
+        // 打开 EPUB / 打开最近项目）才落到 ctx.book() 上，避免一开始就凭空创建一本书造成
+        // 「自动暂存里多出一份不会有人认领的临时草稿」的窘境。
     }
 
     /**
@@ -251,6 +269,54 @@ public class MainController {
     public void onOpen() {
         ensureDocumentController();
         documentController.onOpen();
+    }
+
+    /**
+     * 欢迎页「最近」列表入口：把目录或 .epub 路径解析成可打开的 .epub 后走标准 open 流程。
+     * 工作空间目录会取它下面的第一个 .epub；项目 .epub 直接走原路径。任一步失败都打 warn。
+     */
+    private void onOpenRecent(java.nio.file.Path path) {
+        java.nio.file.Path target = resolveOpenTarget(path);
+        if (target == null) {
+            warn("无法打开：" + path + "（文件不存在或目录下没有 .epub）");
+            return;
+        }
+        if (!confirmDiscardChanges()) {
+            return;
+        }
+        Autosave.discardFor(ctx);
+        ensureDocumentController();
+        try {
+            documentController.openFile(target);
+            statusLabel.setText("已打开 " + target.getFileName());
+        } catch (java.io.IOException e) {
+            reportError("打开失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 解析「最近」点击的真实目标：直接 .epub → 原路径；目录 → 第一个 .epub；都不匹配 → null。
+     * 仅做磁盘 I/O，最多重读一层浅目录。
+     */
+    private static java.nio.file.Path resolveOpenTarget(java.nio.file.Path path) {
+        if (path == null) {
+            return null;
+        }
+        if (java.nio.file.Files.isRegularFile(path) && path.toString().toLowerCase().endsWith(".epub")) {
+            return path;
+        }
+        if (java.nio.file.Files.isDirectory(path)) {
+            try (java.util.stream.Stream<java.nio.file.Path> stream = java.nio.file.Files.list(path)) {
+                return stream
+                        .filter(java.nio.file.Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().toLowerCase().endsWith(".epub"))
+                        .min((a, b) -> a.getFileName().toString().compareTo(b.getFileName().toString()))
+                        .orElse(null);
+            } catch (java.io.IOException e) {
+                return null;
+            }
+        }
+        return null;
     }
 
     @FXML
@@ -582,6 +648,7 @@ public class MainController {
             ctx.setDirty(true);
             ctx.history().reset();
             ctx.setEditCaptured(false);
+            ctx.bus().publish(new com.epubra.app.support.AppEventBus.BookLoadedEvent());
             setStatus("已从草稿恢复：" + file.getFileName());
         } catch (IOException e) {
             warn("草稿恢复失败：" + e.getMessage());
@@ -778,6 +845,9 @@ private void bindProblemsAccelerator() {
     // 目录树交互已迁出到 TocController，MainController 仅保留 showChapter 用于「章节被选中」回调。
 
     private void refreshAll() {
+        if (ctx.book() == null) {
+            return;
+        }
         ctx.invalidateWordCounts();
         ctx.setLoading(true);
         try {
@@ -798,6 +868,9 @@ private void bindProblemsAccelerator() {
     }
 
     private void showChapter(ChapterNode node) {
+        if (ctx.book() == null) {
+            return;
+        }
         flushCurrentChapter();
         ctx.setCurrentNode(node);
         ctx.setLoading(true);
@@ -901,6 +974,12 @@ private void bindProblemsAccelerator() {
     }
 
     private void updateStatus() {
+        if (ctx.book() == null) {
+            chapterStatusLabel.setText("章节 —");
+            wordStatusLabel.setText("字数 —");
+            updateHistoryControls();
+            return;
+        }
         chapterStatusLabel.setText("章节 " + ctx.book().spineResources().size());
         wordStatusLabel.setText("字数 " + wordCount());
         updateIssueCounters();
@@ -926,6 +1005,9 @@ private void bindProblemsAccelerator() {
      * 在内容被程序化改写或换书时整体失效。
      */
     private int wordCount() {
+        if (ctx.book() == null) {
+            return 0;
+        }
         Resource current = ctx.currentNode() == null ? null : ctx.currentNode().resource();
         int total = 0;
         for (Resource chapter : ctx.book().spineResources()) {
@@ -939,8 +1021,8 @@ private void bindProblemsAccelerator() {
     }
 
     private void updateHistoryControls() {
-        boolean canUndo = ctx.history().canUndo();
-        boolean canRedo = ctx.history().canRedo();
+        boolean canUndo = ctx.book() != null && ctx.history().canUndo();
+        boolean canRedo = ctx.book() != null && ctx.history().canRedo();
         if (undoItem != null) {
             undoItem.setDisable(!canUndo);
         }

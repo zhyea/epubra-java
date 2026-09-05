@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Separator?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Priority?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.layout.VBox?>
+
+<!--
+  启动欢迎页：覆盖在主编辑区之上。
+
+  初始状态 visible="true" —— 用户首启看到的就是这一屏。
+  父控制器 MainController 在 BookLoadedEvent 触发时调 hide() 让出编辑面板。
+
+  设计取舍：
+    * 单列居中，最大宽度 480px——避免在 4K 屏上按钮被拉得过长
+    * 主操作 [新建项目] 用 welcome-primary-button 样式（中性蓝），[打开 EPUB…] 走普通扁平
+    * 最近列表用 VBox + Button，Button 自带 tooltip 显示完整路径——少一个专有 ListView 控件
+-->
+<StackPane xmlns="http://javafx.com/javafx/24" xmlns:fx="http://javafx.com/fxml"
+           styleClass="welcome-page" prefWidth="600.0" prefHeight="500.0"
+           fx:controller="com.epubra.app.controller.WelcomePageController">
+    <!-- 居中主体 -->
+    <VBox fx:id="welcomePane" alignment="CENTER" spacing="20.0"
+          maxWidth="480.0" StackPane.alignment="CENTER">
+        <padding>
+            <Insets top="40.0" right="40.0" bottom="40.0" left="40.0"/>
+        </padding>
+
+        <!-- 标题区 -->
+        <VBox alignment="CENTER" spacing="6.0">
+            <Label text="Epubra" styleClass="welcome-title"/>
+            <Label text="EPUB 项目编辑器" styleClass="welcome-subtitle"/>
+            <Label text="把每本书当作一个项目——工作空间 + 项目目录 + EPUB 主文件 + .epubra/ 元数据"
+                   styleClass="welcome-tagline" wrapText="true" textAlignment="CENTER"/>
+        </VBox>
+
+        <!-- 主操作区 -->
+        <VBox alignment="CENTER" spacing="8.0" fillWidth="true">
+            <Button fx:id="newProjectBtn" text="新建项目…" styleClass="welcome-primary-button"
+                    onAction="#onNewProjectAction" maxWidth="320.0" prefWidth="320.0"/>
+            <Button fx:id="openFileBtn" text="打开 EPUB 文件…" styleClass="welcome-secondary-button"
+                    onAction="#onOpenFileAction" maxWidth="320.0" prefWidth="320.0"/>
+            <Button fx:id="exitBtn" text="退出" styleClass="welcome-secondary-button"
+                    onAction="#onExitAction" maxWidth="320.0" prefWidth="320.0"/>
+        </VBox>
+
+        <!-- 最近列表区：双方都空时显示提示；任一非空则显示整段 -->
+        <VBox fx:id="recentSection" alignment="CENTER" spacing="6.0" fillWidth="true" visible="false"
+              managed="false" maxWidth="460.0">
+            <Separator/>
+            <Label text="最近" styleClass="welcome-section-title"/>
+            <Label text="项目" styleClass="welcome-section-caption"/>
+            <VBox fx:id="recentProjectsList" spacing="4.0" fillWidth="true"/>
+            <Label text="工作空间" styleClass="welcome-section-caption"/>
+            <VBox fx:id="recentWorkspacesList" spacing="4.0" fillWidth="true"/>
+            <HBox alignment="CENTER" spacing="6.0">
+                <Label text="未保存的修改只保留在「自动暂存」目录中——重启后会提示恢复。"
+                       styleClass="welcome-note" wrapText="true" textAlignment="CENTER"/>
+            </HBox>
+        </VBox>
+
+        <!-- 空状态提示 -->
+        <Label fx:id="recentEmptyHint" styleClass="welcome-empty-hint"
+               text="还没有最近的项目或工作空间——新建一个，或拖一个 .epub 文件到此处"
+               wrapText="true" textAlignment="CENTER"/>
+
+        <!-- 撑开剩余空间 -->
+        <Region VBox.vgrow="ALWAYS"/>
+    </VBox>
+</StackPane>

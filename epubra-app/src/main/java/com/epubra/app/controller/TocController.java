@@ -7,12 +7,17 @@ import com.epubra.epublib.domain.TOCReference;
 import com.epubra.epublib.domain.TocEditor;
 import com.epubra.epublib.util.Hrefs;
 import javafx.fxml.FXML;
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.TextInputDialog;
 import javafx.scene.control.TreeCell;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeView;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.Dragboard;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.input.TransferMode;
 
 import java.util.Collections;
@@ -89,9 +94,11 @@ public class TocController {
             };
             attachRenameHandler(cell);
             attachDragHandlers(cell);
+            attachContextMenu(cell);
             return cell;
         });
         attachTreeDropHandlers();
+        attachKeyboardShortcuts();
         tocTree.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, selected) -> {
             if (!ctx.loading()) {
                 onChapterSelected.accept(selected == null ? null : selected.getValue());
@@ -435,5 +442,98 @@ public class TocController {
             case AFTER -> "-fx-border-color: -epubra-accent; -fx-border-width: 0 0 2 0;";
             case INSIDE -> "-fx-background-color: -epubra-selected-bg;";
         });
+    }
+
+    // ---- 右键菜单 ----
+
+    /**
+     * 给每个单元格挂一个 ContextMenu：添加 / 重命名 / 上移 / 下移 / 删除。
+     *
+     * <p>关键细节：右键时先把单元格选中——若不预先选中，菜单操作的 {@code ctx.currentNode()}
+     * 仍是旧选中节点，会出现「右键 B 实际删 A」的错位。JavaFX 的 MenuItem 没有「目标参数」
+     * 概念，最简单的修正是先 select 再弹菜单。
+     *
+     * <p>菜单项 disable 绑 {@code cell.itemProperty().isNull()}——空单元格（行尾、占位）不
+     * 弹可点击的菜单。
+     */
+    private void attachContextMenu(TreeCell<ChapterNode> cell) {
+        MenuItem addItem = menuItem("添加章节", e -> onAddChapter());
+        MenuItem renameItem = menuItem("重命名", e -> onRenameChapter());
+        MenuItem upItem = menuItem("上移", e -> onMoveUp());
+        MenuItem downItem = menuItem("下移", e -> onMoveDown());
+        MenuItem deleteItem = menuItem("删除", e -> onDeleteChapter());
+
+        addItem.disableProperty().bind(cell.itemProperty().isNull());
+        renameItem.disableProperty().bind(cell.itemProperty().isNull());
+        upItem.disableProperty().bind(cell.itemProperty().isNull());
+        downItem.disableProperty().bind(cell.itemProperty().isNull());
+        deleteItem.disableProperty().bind(cell.itemProperty().isNull());
+
+        // 右键时先把被点击单元格选中——再弹菜单，避免操作错位
+        cell.setOnContextMenuRequested(event -> {
+            TreeItem<ChapterNode> item = cell.getTreeItem();
+            if (item != null) {
+                tocTree.getSelectionModel().select(item);
+            }
+        });
+
+        ContextMenu menu = new ContextMenu();
+        menu.getItems().addAll(addItem, renameItem,
+                new SeparatorMenuItem(), upItem, downItem,
+                new SeparatorMenuItem(), deleteItem);
+        cell.setContextMenu(menu);
+    }
+
+    private static MenuItem menuItem(String text, javafx.event.EventHandler<javafx.event.ActionEvent> handler) {
+        MenuItem item = new MenuItem(text);
+        item.setOnAction(handler);
+        return item;
+    }
+
+    // ---- 键盘快捷键 ----
+
+    /**
+     * 给目录树挂键盘快捷键（仅在 TreeView 持有焦点时生效，避免与全局 accelerator 抢键）：
+     * <ul>
+     *   <li>{@code Delete} → 删除选中章节</li>
+     *   <li>{@code Insert} → 在选中节点后插入新章节</li>
+     *   <li>{@code Alt+↑} / {@code Alt+↓} → 上移 / 下移</li>
+     * </ul>
+     *
+     * <p>{@code F2}（重命名）已有 FXML 全局 accelerator；TreeView 默认会把方向键用于导航，
+     * 因此移动用 {@code Alt} 修饰避开冲突。{@code Insert} 与 {@code Delete} 走 TreeView
+     * 默认不消费的键，无需修饰。
+     */
+    private void attachKeyboardShortcuts() {
+        tocTree.setOnKeyPressed(this::handleTreeKey);
+    }
+
+    private void handleTreeKey(KeyEvent event) {
+        if (tocTree.getSelectionModel().getSelectedItem() == null) {
+            return;
+        }
+        KeyCode code = event.getCode();
+        boolean consumed = switch (code) {
+            case DELETE -> { onDeleteChapter(); yield true; }
+            case INSERT -> { onAddChapter(); yield true; }
+            case UP -> {
+                if (event.isAltDown()) {
+                    onMoveUp();
+                    yield true;
+                }
+                yield false;
+            }
+            case DOWN -> {
+                if (event.isAltDown()) {
+                    onMoveDown();
+                    yield true;
+                }
+                yield false;
+            }
+            default -> false;
+        };
+        if (consumed) {
+            event.consume();
+        }
     }
 }

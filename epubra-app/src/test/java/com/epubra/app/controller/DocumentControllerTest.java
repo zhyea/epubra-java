@@ -2,15 +2,25 @@ package com.epubra.app.controller;
 
 import com.epubra.app.support.AppEventBus.BookLoadedEvent;
 import com.epubra.app.support.BookContext;
+import com.epubra.app.support.ProjectLayout;
+import com.epubra.app.support.RecentProjectsStore;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -79,5 +89,102 @@ class DocumentControllerTest {
 
         assertTrue(error.get() == null || error.get().startsWith("打开失败"),
                 "打开失败时应调 errorReporter，或在异常路径上报错");
+    }
+
+    // ---- newProject ----
+
+    @TempDir
+    Path workspace;
+
+    private java.util.List<String> originalWorkspaces;
+    private java.util.List<String> originalProjects;
+
+    @BeforeEach
+    void backUpRecents() {
+        originalWorkspaces = RecentProjectsStore.workspaces();
+        originalProjects = RecentProjectsStore.projects();
+        clearRecents();
+    }
+
+    @AfterEach
+    void restoreRecents() {
+        clearRecents();
+        originalWorkspaces.forEach(RecentProjectsStore::addWorkspace);
+        originalProjects.forEach(RecentProjectsStore::addProject);
+    }
+
+    private void clearRecents() {
+        new java.util.ArrayList<>(RecentProjectsStore.workspaces()).forEach(RecentProjectsStore::removeWorkspace);
+        new java.util.ArrayList<>(RecentProjectsStore.projects()).forEach(RecentProjectsStore::removeProject);
+    }
+
+    @Test
+    void newProject_createsScaffoldingAndLoadsBook() throws IOException {
+        BookContext ctx = new BookContext();
+        AtomicInteger loadEvents = new AtomicInteger();
+        AtomicReference<String> status = new AtomicReference<>();
+        ctx.bus().subscribe(BookLoadedEvent.class, e -> loadEvents.incrementAndGet());
+        DocumentController doc = new DocumentController(ctx, status::set, () -> true,
+                noopDialogs(), s -> {});
+
+        Path target = doc.newProject(workspace, "Alpha", "测试标题");
+
+        // 1. EPUB 文件已写入磁盘
+        assertTrue(Files.exists(target));
+        assertEquals(ProjectLayout.epubFile(workspace, "Alpha"), target);
+
+        // 2. 项目标记 + .epubra 目录都存在
+        assertTrue(Files.isDirectory(ProjectLayout.metadataDir(workspace, "Alpha")));
+        assertTrue(Files.exists(ProjectLayout.projectMarker(workspace, "Alpha")));
+
+        // 3. ctx 切换为新书
+        assertNotNull(ctx.book());
+        assertEquals(target, ctx.currentFile());
+        assertEquals(1, ctx.book().metadata().firstTitle().length() > 0 ? 1 : 0); // sanity
+        assertEquals("测试标题", ctx.book().metadata().firstTitle());
+        assertEquals("Alpha", ctx.book().metadata().property("epubra:project-name"));
+
+        // 4. 广播 BookLoadedEvent
+        assertEquals(1, loadEvents.get());
+        assertEquals("已创建项目 Alpha", status.get());
+
+        // 5. 最近列表写入
+        assertTrue(RecentProjectsStore.workspaces().contains(workspace.toString()),
+                "工作空间应加入最近列表");
+        assertTrue(RecentProjectsStore.projects().contains(target.toString()),
+                "项目文件应加入最近列表");
+    }
+
+    @Test
+    void newProject_rejectsAlreadyExistingDir() throws IOException {
+        // 先创建同名目录
+        Files.createDirectory(workspace.resolve("Dupe"));
+        BookContext ctx = new BookContext();
+        DocumentController doc = new DocumentController(ctx, s -> {}, () -> true,
+                noopDialogs(), s -> {});
+
+        IOException ex = assertThrows(IOException.class,
+                () -> doc.newProject(workspace, "Dupe", "标题"));
+        assertTrue(ex.getMessage().contains("已存在"));
+    }
+
+    @Test
+    void newProject_noSideEffectsOnFailure() throws IOException {
+        // 制造 IO 失败：把 workspace 设为只读目录
+        // 兜底方案——直接用空字符串触发 Path.of 失败之外，最稳的是预先占用同名 dir
+        Files.createDirectory(workspace.resolve("Block"));
+        BookContext ctx = new BookContext();
+        AtomicInteger loadEvents = new AtomicInteger();
+        ctx.bus().subscribe(BookLoadedEvent.class, e -> loadEvents.incrementAndGet());
+        DocumentController doc = new DocumentController(ctx, s -> {}, () -> true,
+                noopDialogs(), s -> {});
+
+        assertThrows(IOException.class,
+                () -> doc.newProject(workspace, "Block", "x"));
+
+        assertNull(ctx.book(), "失败时不应有 book");
+        assertEquals(0, loadEvents.get(), "失败时不应广播 BookLoadedEvent");
+        assertFalse(RecentProjectsStore.workspaces().contains(workspace.toString()),
+                "失败时不应写 workspace 到 recents");
     }
 }

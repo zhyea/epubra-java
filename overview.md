@@ -1,55 +1,59 @@
-# Epubra 自动暂存（autosave / draft）落地（2026-09-05 · #21–#29）
+# Epubra 项目交付概览
 
-按用户「方案 B：定时自动暂存 + `.draft` 后缀 + EPUB 内 `dcterms:status` 双标识」实施。前两轮已完成 `Autosave`/`AutosaveConfig`/`AutosaveTest`，本轮串起 UI 与控制器层。
+## 当前轮：IDEA 风格项目模型 + 欢迎页（Sprint 9，2026-09-05）
 
-## 关键交付
+用户指令：「参考 jetbrains idea，每本 epub 书可以视为一个项目，创建 epub 项目前需要选择工作空间」；通过 AskUserQuestion 锁定范围：**新建 + 欢迎页**（不汽车化 autosave dir、不做完整 IDEA 化）。
 
-### 新文件
-- `support/Autosave.java`（225 行）：markDraft/unmarkDraft/draftPathFor/flushNow/discardFor/findRecoverable/readDraft
-- `support/AutosaveConfig.java`（86 行）：Preferences 持久化 enabled/debounceSeconds/dirOverride
-- `support/AutosaveTest.java`（23 例）：双标识、路径解析、写盘丢弃、扫描恢复、round-trip
+### 交付内容
 
-### 改动
-- `support/BookContext.java`：autosaveConfig 字段 + autosaveDir() 兜底链（user.dir → user.home → tmpdir，never throws）
-- `controller/DocumentController.java`：saveTo/onNew/onOpen 调 `Autosave.discardFor`
-- `controller/MainController.java`：
-  - `autosaveStatusLabel` + `PauseTransition autosaveDebounce`
-  - `wireAutosave()`：enabled=false 时只标"自动暂存 关"，不挂监听
-  - `promptRecoveryIfAny()`：在 `newBook()` 之前扫草稿，弹「恢复草稿 / 丢弃」Alert
-  - `markDirty()` 内 `playFromStart()` 触发节流
-- `view/main-window.fxml`：状态栏尾部加 `autosaveStatusLabel`
-- `css/app.css`：`.status-autosave-saving`（accent 加粗）+ `.status-autosave-off`（muted + 0.7 透明）
+**1. 项目目录模型**（IDEA 风）
+- `<workspace>/<name>/<name>.epub + .epubra/project.json` Maven-like 标准布局
+- 所有路径推导由 `support/ProjectLayout` 集中维护（含 marker JSON 读写）
+- 项目标记字段：`formatVersion=1` / `name` / `createdAt` / `lastOpenedAt` / `bookFile`
 
-## 双标识语义
+**2. 最近列表持久化**
+- `support/RecentProjectsStore`：Preferences 持久化最近 workspaces + 最近 projects
+- 上限 10 条；dedup + move-to-front；缺省 ASCII Unit Separator (`\u001F`) 序列化
 
-| 层 | 标识 |
-| --- | --- |
-| 文件系统 | `<name>.epub` → `<name>.draft`；未保存新书 → `untitled.draft` |
-| EPUB 包内 | `<meta property="dcterms:status">draft</meta>` + `<meta property="epubra:autosaved-at">ISO8601</meta>`（由 EpubWriter 自动序列化 `Metadata.properties()`，内核 0 改动） |
+**3. 新建项目对话框**
+- `NewProjectDialog`（静态包装）+ `NewProjectDialogController` + `NewProjectResult` record
+- 实时校验：workspace 必须是已存在目录、project name 不能含 FS 非法字符、目标不能重名
+- OK 按钮实时 enable；title 留空回退为 project name
 
-## 验证门禁（真实退出码）
+**4. 欢迎页**
+- `WelcomePageController` + `welcome-page.fxml`
+- 单列居中布局：标题 + 3 主操作（新建/打开/退出）+ 最近项目 / 最近工作空间 两段
+- 订阅 `BookLoadedEvent` 自动隐藏（新建/打开/自动暂存恢复都触发）
+- 最近列表按 `.epub` / 目录分类展示，点击解析为可打开目标
 
-- `mvn -B clean test`：**BUILD SUCCESS**，epublib 56 + app 123 = **179 / 179 全绿**（+31 vs 上轮的 148）
-- `mvn -B install -DskipTests`：BUILD SUCCESS
-- `cd epubra-app && timeout 40 mvn -B javafx:run`：Exit 143（timeout 杀前台 GUI = 进程存活 39s），**零** LoadException / NullPointer / ClassNotFound
+**5. MainController 集成**
+- `<center>` 包 `<StackPane>`，welcome-page 作为末位 child（Z 序最高）
+- 启动时不再调用 `newBook()`——ctx.book() 在欢迎页阶段为 null
+- 6 处 null-book guard 集中在控制器入口方法
+- 新加 `onOpenRecent(Path)` + `resolveOpenTarget` 处理工作空间→.epub 解析
 
-## 易踩坑（已避开）
+### 三道门禁（真实结果）
 
-1. **`promptRecoveryIfAny` 必须在 `newBook()` 之前**——newBook 重置 ctx.currentFile() 为 null，导致 findRecoverable 看不到旧文件草稿
-2. **节流挂点选 `markDirty()` 而非 textProperty**——单一入口覆盖内容 + 元数据两种改动
-3. **`autosaveDebounce` 是 PauseTransition，需要 JavaFX Toolkit**——单元测试只能测纯 IO 层（已 23 例）
-4. **草稿主文件路径反推**：`book.draft` → `book.epub`，推断后 `Files.exists` 二次校验防瞎设 currentFile
-5. **Preferences 关闭开关**走 `ctx.autosaveConfig().enabled()` 一次性判断，避免每按一键都查 prefs
-6. **@FXML 字段声明插入**易被 Edit 工具的 old_string 不匹配静默跳过——本轮一次坑，第二次重读文件确认再补
+| 门禁 | 命令 | 结果 |
+| --- | --- | --- |
+| 编译+测试 | `mvn -B clean test` | **BUILD SUCCESS**，epublib 56 + app 149 = **205 / 205 全绿**（+26） |
+| 安装 | `mvn -B clean install` | BUILD SUCCESS（两个 jar 进本地仓库）|
+| 启动 | `timeout 25 mvn -B javafx:run` | Exit 143（timeout 杀前台 GUI = 进程存活），**零** LoadException / NullPointer / ClassNotFound |
 
-## Follow-up
+### 关键实现要点
 
-- 用户在 Preferences 面板加 GUI 开关（目前仅 API 持久化，未暴露 UI）
-- 「编辑 → 立即暂存」菜单项（绕过 PauseTransition，立即 flushNow）
-- 文件菜单加「丢弃当前草稿」项（手动清 `untitled.draft`）
-- Git 未提交（按约定）
-- 详细日志：`.workbuddy/memory/2026-09-05.md` 末尾段
+- **`ProjectLayout.inferProjectDir(Path)` 用 while 循环一路上溯**——marker 文件（位于 `.epubra/`）作为输入时，单层 `getParent()` 会落到 `.epubra/` 误判为项目目录；改为「直到首个含 marker 的祖先」
+- **`DocumentController.newProject` 原子语义**——失败时绝不写 recents；UI 层包 try-catch 转 errorReporter
+- **`promptRecoveryIfAny()` 也广播 `BookLoadedEvent`**——恢复草稿后欢迎页会自动收起，否则会留下「草稿载入但欢迎页还盖在上面」
+- **null-book 容忍集中在 controller 入口方法**（`refreshAll()` 一次性 guard → 下游 `refreshToc` / `refreshResources` 自然安全）
+- **`fx:include` 双字段注入**——主 FXML 同时声明 `welcomePage`（StackPane 根节点）与 `welcomePageController`（子控制器），按命名规则 `<fx:id>Controller`
 
-## 20 项重构后总览
+### Follow-up
 
-#1–#20 全部闭环；本轮 #21–#29 是 autosave 落地。下一个增量候选见 Follow-up。
+- 用户偏好决定后再考虑：是否加「关闭项目」按钮回欢迎页
+- 跑一遍手动 UI 流程：在工作空间下创建项目 → 编辑 → 保存 → 重启 → 从「最近项目」打开 → 验证 Atomic 语义与 lastOpenedAt 更新
+- `drafts/` 目录（ProjectLayout 注释里提到）目前是占位，未与项目级自动暂存联动——后续若要把项目级草稿从全局 `epubra-autosave` 迁到 `<workspace>/<name>/.epubra/drafts/` 再做
+
+### Git 状态
+
+仍未提交（按约定，未获用户显式批准不执行）。

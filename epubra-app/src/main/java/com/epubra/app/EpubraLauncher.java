@@ -1,5 +1,6 @@
 package com.epubra.app;
 
+import com.epubra.app.support.AppPaths;
 import com.epubra.app.support.PlatformLogging;
 
 /**
@@ -13,8 +14,17 @@ import com.epubra.app.support.PlatformLogging;
  * <p>经由本类（非 Application 子类）间接调用即可绕开该校验，使同一份构建产物
  * 既能被 {@code javafx:run} 运行，也能被打包成可双击的桌面应用。
  *
- * <p>本方法同时做启动期日志降噪：非模块化运行方式必然触发 JavaFX 的
- * “Unsupported JavaFX configuration” 告警，用 {@link PlatformLogging} 精准压掉这一条。
+ * <p>本方法同时做两件启动期副作用：
+ * <ol>
+ *   <li>{@link AppPaths#redirectUserHome()}：把进程 {@code user.home} 重写到
+ *       {@code ~/.Epubra/}，让 JavaFX WebView 等 native 缓存不再落到
+ *       {@code ~/.com.epubra.app.EpubraApp/webview} 这种长名目录。</li>
+ *   <li>{@link PlatformLogging#quietJavaFx()}：非模块化运行方式必然触发 JavaFX 的
+ *       “Unsupported JavaFX configuration” 告警，精准压掉这一条。</li>
+ * </ol>
+ *
+ * <p>顺序：重定向必须先于日志降噪与 JavaFX 启动——日志降噪安装 JUL Handler，
+ * JavaFX 启动后任何 prefs / native 缓存都已根据当时的 {@code user.home} 决定位置。
  */
 public final class EpubraLauncher {
 
@@ -29,6 +39,7 @@ public final class EpubraLauncher {
      * “Main method not found in class”。
      */
     public static void main(String[] args) {
+        AppPaths.redirectUserHome();
         PlatformLogging.quietJavaFx();
         EpubraApp.main(args);
     }

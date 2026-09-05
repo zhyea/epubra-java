@@ -174,39 +174,47 @@
     </left>
 
     <center>
-        <VBox>
-            <SplitPane dividerPositions="0.26" VBox.vgrow="ALWAYS">
-                <items>
-                    <!-- 侧边栏：三个视图叠放，按活动栏切换 visible + managed -->
-                    <StackPane styleClass="side-panel">
-                        <children>
-                            <fx:include fx:id="tocView" source="toc-view.fxml"/>
-                            <fx:include fx:id="resourceView" source="resource-view.fxml"/>
-                            <fx:include fx:id="metadataView" source="metadata-view.fxml"/>
-                        </children>
-                    </StackPane>
+        <StackPane styleClass="main-center">
+            <children>
+                <!-- 常规编辑面板：无项目时也保留，但被 welcome-page 覆盖 -->
+                <VBox>
+                    <SplitPane dividerPositions="0.26" VBox.vgrow="ALWAYS">
+                        <items>
+                            <!-- 侧边栏：三个视图叠放，按活动栏切换 visible + managed -->
+                            <StackPane styleClass="side-panel">
+                                <children>
+                                    <fx:include fx:id="tocView" source="toc-view.fxml"/>
+                                    <fx:include fx:id="resourceView" source="resource-view.fxml"/>
+                                    <fx:include fx:id="metadataView" source="metadata-view.fxml"/>
+                                </children>
+                            </StackPane>
 
-                    <!-- 编辑区：内容 / 预览 + 底部问题面板 -->
-                    <VBox maxWidth="Infinity" maxHeight="Infinity">
-                        <TabPane fx:id="editorTabs" tabClosingPolicy="UNAVAILABLE" VBox.vgrow="ALWAYS">
-                            <tabs>
-                                <Tab text="内容">
-                                    <TextArea fx:id="contentArea" promptText="选择左侧章节后，在此编辑 XHTML 内容"/>
-                                </Tab>
-                                <Tab text="预览">
-                                    <WebView fx:id="previewView"/>
-                                </Tab>
-                            </tabs>
-                        </TabPane>
+                            <!-- 编辑区：内容 / 预览 + 底部问题面板 -->
+                            <VBox maxWidth="Infinity" maxHeight="Infinity">
+                                <TabPane fx:id="editorTabs" tabClosingPolicy="UNAVAILABLE" VBox.vgrow="ALWAYS">
+                                    <tabs>
+                                        <Tab text="内容">
+                                            <TextArea fx:id="contentArea" promptText="选择左侧章节后，在此编辑 XHTML 内容"/>
+                                        </Tab>
+                                        <Tab text="预览">
+                                            <WebView fx:id="previewView"/>
+                                        </Tab>
+                                    </tabs>
+                                </TabPane>
 
-                        <fx:include fx:id="bottomPanel" source="problems-panel.fxml"/>
-                    </VBox>
-                </items>
-            </SplitPane>
+                                <fx:include fx:id="bottomPanel" source="problems-panel.fxml"/>
+                            </VBox>
+                        </items>
+                    </SplitPane>
 
-            <!-- 查找替换条：默认隐藏，Ctrl+F 唤出 -->
-            <fx:include fx:id="findBar" source="find-bar.fxml"/>
-        </VBox>
+                    <!-- 查找替换条：默认隐藏，Ctrl+F 唤出 -->
+                    <fx:include fx:id="findBar" source="find-bar.fxml"/>
+                </VBox>
+
+                <!-- 欢迎页：覆盖在所有编辑面板之上，无项目时显示，BookLoadedEvent 触发时收起 -->
+                <fx:include fx:id="welcomePage" source="welcome-page.fxml"/>
+            </children>
+        </StackPane>
     </center>
 
     <bottom>

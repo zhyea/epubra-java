@@ -494,3 +494,129 @@
     -fx-text-fill: -epubra-muted-fg;
     -fx-opacity: 0.7;
 }
+
+/* ---------------------------------------------------------------- 欢迎页 */
+
+.welcome-page {
+    /* 与主区域同底色，看起来跟整页融在一起；半透明渐变留给将来需要时再用 */
+    -fx-background-color: -epubra-bg;
+}
+
+/* 主标题字号大一档 + 字重略加粗 */
+.welcome-title {
+    -fx-font-size: 40px;
+    -fx-font-weight: 600;
+    -fx-text-fill: -epubra-fg;
+}
+
+.welcome-subtitle {
+    -fx-font-size: 15px;
+    -fx-text-fill: -epubra-muted-fg;
+}
+
+.welcome-tagline {
+    -fx-font-size: 12px;
+    -fx-text-fill: -epubra-muted-fg;
+    -fx-max-width: 380px;
+    -fx-text-alignment: center;
+}
+
+.welcome-section-title {
+    -fx-font-size: 13px;
+    -fx-text-fill: -epubra-title-fg;
+    -fx-padding: 8 0 4 0;
+}
+
+.welcome-section-caption {
+    -fx-font-size: 11px;
+    -fx-text-fill: -epubra-muted-fg;
+    -fx-padding: 4 0 2 0;
+}
+
+.welcome-empty-hint {
+    -fx-font-size: 12px;
+    -fx-text-fill: -epubra-muted-fg;
+    -fx-padding: 16 0 0 0;
+    -fx-max-width: 380px;
+    -fx-text-alignment: center;
+}
+
+.welcome-note {
+    -fx-font-size: 11px;
+    -fx-text-fill: -epubra-muted-fg;
+    -fx-max-width: 380px;
+    -fx-text-alignment: center;
+}
+
+/* 主操作（新建项目…）：实心按钮，走主题强调色 */
+.welcome-primary-button {
+    -fx-background-color: -epubra-accent;
+    -fx-text-fill: white;
+    -fx-font-size: 13px;
+    -fx-padding: 9 24 9 24;
+    -fx-background-radius: 3;
+    -fx-cursor: hand;
+    -fx-border-color: transparent;
+}
+
+.welcome-primary-button:hover {
+    -fx-background-color: derive(-epubra-accent, 12%);
+}
+
+.welcome-primary-button:pressed {
+    -fx-background-color: derive(-epubra-accent, -8%);
+}
+
+/* 次要操作：扁平按钮——只在 hover 出底色，避免与主操作争抢视觉 */
+.welcome-secondary-button {
+    -fx-background-color: transparent;
+    -fx-text-fill: -epubra-fg;
+    -fx-font-size: 13px;
+    -fx-padding: 9 24 9 24;
+    -fx-background-radius: 3;
+    -fx-border-color: -epubra-border-input;
+    -fx-border-width: 1;
+    -fx-border-radius: 3;
+    -fx-cursor: hand;
+}
+
+.welcome-secondary-button:hover {
+    -fx-background-color: -epubra-hover-bg;
+    -fx-text-fill: -epubra-hover-fg;
+}
+
+.welcome-secondary-button:pressed {
+    -fx-background-color: -epubra-pressed-bg;
+}
+
+/* 「最近」列表里的可点击条目：扁平 + 左对齐 + 文件名加粗 + tooltip 模式提供完整路径 */
+.welcome-recent-project,
+.welcome-recent-workspace {
+    -fx-background-color: transparent;
+    -fx-text-fill: -epubra-fg;
+    -fx-font-size: 12px;
+    -fx-alignment: CENTER_LEFT;
+    -fx-padding: 8 14 8 14;
+    -fx-background-radius: 2;
+    -fx-border-color: -epubra-border;
+    -fx-border-width: 0 0 1 0;
+    -fx-cursor: hand;
+}
+
+.welcome-recent-project:hover,
+.welcome-recent-workspace:hover {
+    -fx-background-color: -epubra-hover-bg;
+    -fx-text-fill: -epubra-hover-fg;
+}
+
+.welcome-recent-project:pressed,
+.welcome-recent-workspace:pressed {
+    -fx-background-color: -epubra-pressed-bg;
+}
+
+/* ---------------------------------------------------------------- 对话框错误 */
+.dialog-error {
+    -fx-text-fill: -epubra-error-fg;
+    -fx-font-size: 12px;
+    -fx-padding: 4 0 0 0;
+}
