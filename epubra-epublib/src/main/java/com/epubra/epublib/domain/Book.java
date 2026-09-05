@@ -1,6 +1,7 @@
 package com.epubra.epublib.domain;
 
 import com.epubra.epublib.util.Hrefs;
+import com.epubra.epublib.util.ResourceReferences;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -8,6 +9,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 
@@ -206,17 +208,20 @@ public class Book {
 
     /**
      * 未被任何地方引用的资源：既不在 spine 与目录中，也不是 nav/ncx/封面，
-     * 且未出现在任何正文的 XHTML 源码里。
+     * 且没有被任何 XHTML / SVG / CSS 真实引用。
+     *
+     * <p>引用判定走 {@link ResourceReferences} 的精确提取（img src、link href、CSS url()、
+     * @font-face 等），而不是「把全文拼起来再找文件名」——后者会把正文里恰好提到某个
+     * 文件名的情况误判为引用，也会漏掉 CSS 里 {@code url()} 引用的字体。
+     *
+     * <p>校验器的「孤儿资源」规则直接复用本方法，因此「校验报 N 个孤儿」与
+     * 「点清理删 N 个」永远一致。
      */
     public List<Resource> unreferencedResources() {
         Set<String> spineIds = new HashSet<>();
         spine.references().forEach(ref -> spineIds.add(ref.resourceId()));
 
-        StringBuilder allText = new StringBuilder();
-        resources.all().stream()
-                .filter(Resource::isText)
-                .forEach(r -> allText.append(r.asString()).append('\n'));
-        String corpus = allText.toString();
+        Set<String> referencedHrefs = collectReferencedHrefs();
 
         Resource nav = navResource();
         String tocId = spine.tocResourceId();
@@ -230,7 +235,7 @@ public class Book {
                     || MediaTypes.NCX.equals(resource.mediaType())
                     || resource.id().equals(coverResourceId)
                     || (resource.properties() != null && resource.properties().contains("cover-image"))
-                    || isReferencedIn(corpus, resource)) {
+                    || isReferenced(referencedHrefs, resource)) {
                 continue;
             }
             orphans.add(resource);
@@ -238,13 +243,43 @@ public class Book {
         return orphans;
     }
 
-    /** 正文源码中是否出现该资源的文件名（覆盖 img src、link href、@font-face 等引用）。 */
-    private boolean isReferencedIn(String corpus, Resource resource) {
-        if (corpus.isEmpty()) {
+    /** 收集全书 XHTML / SVG / CSS 中出现的全部真实引用目标（容器内的绝对路径，忽略大小写）。 */
+    private Set<String> collectReferencedHrefs() {
+        Set<String> referenced = new HashSet<>();
+        for (Resource source : resources.all()) {
+            if (!isScannable(source)) {
+                continue;
+            }
+            String baseDir = Hrefs.parentDirectory(source.href());
+            for (ResourceReferences.Reference reference : ResourceReferences.extract(source).references()) {
+                String resolved = ResourceReferences.resolveTarget(baseDir, reference.rawTarget());
+                if (resolved == null || resolved.isEmpty()) {
+                    continue;
+                }
+                int hash = resolved.indexOf('#');
+                String path = hash < 0 ? resolved : resolved.substring(0, hash);
+                if (!path.isEmpty()) {
+                    referenced.add(path.toLowerCase(Locale.ROOT));
+                }
+            }
+        }
+        return referenced;
+    }
+
+    /** XHTML / SVG / CSS 才可能携带 URI 引用。 */
+    private static boolean isScannable(Resource resource) {
+        String mediaType = resource.mediaType();
+        return MediaTypes.XHTML.equals(mediaType)
+                || MediaTypes.SVG.equals(mediaType)
+                || MediaTypes.CSS.equals(mediaType);
+    }
+
+    private static boolean isReferenced(Set<String> referencedHrefs, Resource resource) {
+        String href = resource.href();
+        if (href == null || href.isEmpty() || referencedHrefs.isEmpty()) {
             return false;
         }
-        String fileName = resource.fileName();
-        return !fileName.isEmpty() && corpus.contains(fileName);
+        return referencedHrefs.contains(href.toLowerCase(Locale.ROOT));
     }
 
     /**

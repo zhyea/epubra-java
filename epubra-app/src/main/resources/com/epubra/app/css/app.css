@@ -1,91 +1,350 @@
-/* Epubra 主样式：对标 WPS / Office 的浅色扁平风格，去掉冗余装饰条。 */
+/* Epubra 主样式：VSCode 风格布局，提供浅色 / 深色 / 护眼米黄三套配色。
+ *
+ * 所有颜色都走 -epubra-* 自定义属性（JavaFX looked-up color）：
+ *   .root                 定义浅色默认值
+ *   .root.theme-dark      深色覆盖
+ *   .root.theme-sepia     护眼米黄覆盖
+ * 切换主题时只需在 Scene 根节点上换一个 theme-* 样式类，整棵控件树随之重算颜色。
+ * 下面各条规则只引用变量，不再出现字面量颜色，新增规则请沿用这一约定——
+ * 硬编码颜色在深色主题下会变成刺眼的白块。
+ */
+
+/* ------------------------------------------------------------ 调色板：浅色（默认） */
 
 .root {
     -fx-font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif;
     -fx-font-size: 13px;
-    -fx-background-color: #ffffff;
+
+    -epubra-bg: #ffffff;                 /* 主背景 */
+    -epubra-fg: #333333;                 /* 主文字 */
+    -epubra-muted-fg: #777777;           /* 弱化文字（统计、占位） */
+    -epubra-title-fg: #666666;           /* 面板小标题、未选中活动栏图标 */
+    -epubra-find-fg: #555555;            /* 查找条文字 */
+    -epubra-border: #e8e8e8;             /* 分隔线 / 常规边框 */
+    -epubra-border-input: #dcdcdc;       /* 输入控件边框、状态栏分隔竖线 */
+    -epubra-panel-bg: #fafafa;           /* 侧边面板 */
+    -epubra-activity-bg: #f3f3f3;        /* 活动栏 */
+    -epubra-toolbar-bg: #fbfbfb;         /* 菜单栏 / 页签栏 */
+    -epubra-panel-header-bg: #fbfbfb;    /* 底部面板头 */
+    -epubra-status-bg: #f5f5f5;          /* 状态栏 */
+    -epubra-control-bg: #ffffff;         /* 输入框 / 文本区背景 */
+    -epubra-control-fg: #1f1f1f;         /* 正文编辑文字 */
+    -epubra-accent: #1a5fb4;             /* 主色：焦点、选中、活动栏指示条 */
+    -epubra-error-fg: #c62828;           /* 错误计数（红系） */
+    -epubra-warning-fg: #a86200;         /* 警告计数（橙系） */
+    -epubra-hover-bg: #e8f0fe;           /* 悬停底色 */
+    -epubra-hover-fg: #1a5fb4;           /* 悬停文字 */
+    -epubra-pressed-bg: #d3e3fb;         /* 按下底色 */
+    -epubra-selected-bg: #cce4ff;        /* 选中底色 */
+    -epubra-selected-fg: #1a1a1a;        /* 选中文字 */
+    -epubra-scrollbar-thumb: #c8c8c8;    /* 滚动条滑块 */
+
+    -fx-background-color: -epubra-bg;
 }
 
-/* ---------------------------------------------------------------- 顶部区域 */
+/* ------------------------------------------------------------ 调色板：深色
+ * 除 -epubra-* 外，一并改写 Modena 的主色板变量，让表格、复选框、下拉等
+ * 未在下面显式列规则的通用控件也跟着变成深色。
+ */
+
+.root.theme-dark,
+.theme-dark {
+    -fx-base: #2b2b2b;
+    -fx-background: #1e1e1e;
+    -fx-control-inner-background: #1a1a1a;
+    -fx-control-inner-background-alt: #232323;
+    -fx-accent: #4a9ad4;
+    -fx-focus-color: #4a9ad4;
+    -fx-faint-focus-color: #4a9ad433;
+    -fx-text-base-color: #dcdcdc;
+    -fx-box-border: #3a3a3a;
+    -fx-text-box-border: #444444;
+    -fx-outer-border: #3f3f3f;
+    -fx-selection-bar: #2a5a8c;
+    -fx-selection-bar-text: #ffffff;
+
+    -epubra-bg: #1e1e1e;
+    -epubra-fg: #dcdcdc;
+    -epubra-muted-fg: #9a9a9a;
+    -epubra-title-fg: #a8a8a8;
+    -epubra-find-fg: #b8b8b8;
+    -epubra-border: #3a3a3a;
+    -epubra-border-input: #4a4a4a;
+    -epubra-panel-bg: #252526;
+    -epubra-activity-bg: #333333;
+    -epubra-toolbar-bg: #252526;
+    -epubra-panel-header-bg: #2a2a2a;
+    -epubra-status-bg: #232323;
+    -epubra-control-bg: #1a1a1a;
+    -epubra-control-fg: #e4e7ea;
+    -epubra-accent: #4a9ad4;
+    -epubra-error-fg: #f14c4c;
+    -epubra-warning-fg: #cca700;
+    -epubra-hover-bg: #2f4a66;
+    -epubra-hover-fg: #9ecbff;
+    -epubra-pressed-bg: #3a5a7a;
+    -epubra-selected-bg: #2a5a8c;
+    -epubra-selected-fg: #ffffff;
+    -epubra-scrollbar-thumb: #4a4a4a;
+}
+
+/* ------------------------------------------------------------ 调色板：护眼米黄 */
+
+.root.theme-sepia,
+.theme-sepia {
+    -fx-base: #e8dcc2;
+    -fx-background: #f5ecd9;
+    -fx-control-inner-background: #fbf6ea;
+    -fx-control-inner-background-alt: #f2e9d6;
+    -fx-accent: #a8702f;
+    -fx-focus-color: #b07a35;
+    -fx-faint-focus-color: #b07a3533;
+    -fx-text-base-color: #3f3524;
+    -fx-box-border: #d8c9a8;
+    -fx-text-box-border: #d2c19c;
+    -fx-outer-border: #d5c49f;
+    -fx-selection-bar: #d9c9a3;
+    -fx-selection-bar-text: #2f2717;
+
+    -epubra-bg: #f5ecd9;
+    -epubra-fg: #3f3524;
+    -epubra-muted-fg: #8a7c60;
+    -epubra-title-fg: #7a6b4f;
+    -epubra-find-fg: #6f6248;
+    -epubra-border: #ddd0b4;
+    -epubra-border-input: #d6c8a8;
+    -epubra-panel-bg: #efe6d2;
+    -epubra-activity-bg: #e7dcc4;
+    -epubra-toolbar-bg: #f2e9d6;
+    -epubra-panel-header-bg: #f2e9d6;
+    -epubra-status-bg: #ece2cc;
+    -epubra-control-bg: #fbf6ea;
+    -epubra-control-fg: #3b3122;
+    -epubra-accent: #a8702f;
+    -epubra-error-fg: #9c2a2a;
+    -epubra-warning-fg: #8a5a10;
+    -epubra-hover-bg: #e6dbc0;
+    -epubra-hover-fg: #7a4f1d;
+    -epubra-pressed-bg: #dccfae;
+    -epubra-selected-bg: #d9c9a3;
+    -epubra-selected-fg: #2f2717;
+    -epubra-scrollbar-thumb: #cfc09c;
+}
+
+/* ---------------------------------------------------------------- 通用控件 */
+
+.label {
+    -fx-text-fill: -epubra-fg;
+}
+
+.muted-label {
+    -fx-text-fill: -epubra-muted-fg;
+}
+
+.scroll-pane,
+.scroll-pane > .viewport {
+    -fx-background-color: -epubra-bg;
+}
+
+.scroll-bar {
+    -fx-background-color: transparent;
+}
+
+.scroll-bar .track {
+    -fx-background-color: transparent;
+}
+
+.scroll-bar .thumb {
+    -fx-background-color: -epubra-scrollbar-thumb;
+    -fx-background-radius: 4;
+}
+
+.check-box {
+    -fx-text-fill: -epubra-fg;
+}
+
+.check-box .box {
+    -fx-background-color: -epubra-control-bg;
+    -fx-border-color: -epubra-border-input;
+}
+
+/* ---------------------------------------------------------------- 顶部菜单栏 */
 
 .menu-bar {
-    -fx-background-color: #ffffff;
-    -fx-border-color: transparent transparent #e8e8e8 transparent;
+    -fx-background-color: -epubra-bg;
+    -fx-border-color: transparent transparent -epubra-border transparent;
     -fx-border-width: 0 0 1 0;
 }
 
 .menu-bar .label {
-    -fx-text-fill: #333333;
+    -fx-text-fill: -epubra-fg;
 }
 
 .menu-item .label {
-    -fx-text-fill: #333333;
+    -fx-text-fill: -epubra-fg;
 }
 
-.tool-bar {
-    -fx-background-color: #fbfbfb;
-    -fx-border-color: transparent transparent #e8e8e8 transparent;
-    -fx-border-width: 0 0 1 0;
-    -fx-padding: 4 8 4 8;
-    -fx-spacing: 4;
-}
-
-.wps-button {
+/* 扁平按钮：菜单里有的命令不再重复上工具栏，剩下的按钮（资源操作、面板头）
+ * 一律走这套无边框样式。 */
+.flat-button {
     -fx-background-color: transparent;
-    -fx-text-fill: #333333;
+    -fx-text-fill: -epubra-fg;
     -fx-padding: 4 10 4 10;
     -fx-background-radius: 2;
     -fx-border-color: transparent;
     -fx-cursor: hand;
 }
 
-.wps-button:hover {
-    -fx-background-color: #e8f0fe;
-    -fx-text-fill: #1a5fb4;
+.flat-button:hover {
+    -fx-background-color: -epubra-hover-bg;
+    -fx-text-fill: -epubra-hover-fg;
 }
 
-.wps-button:pressed {
-    -fx-background-color: #d3e3fb;
+.flat-button:pressed {
+    -fx-background-color: -epubra-pressed-bg;
 }
 
-.separator:vertical .line {
-    -fx-border-color: #dcdcdc;
+/* ---------------------------------------------------------------- 活动栏 */
+
+.activity-bar {
+    -fx-background-color: -epubra-activity-bg;
+    -fx-border-color: transparent -epubra-border transparent transparent;
     -fx-border-width: 0 1 0 0;
 }
 
-/* ---------------------------------------------------------------- 左侧目录 */
+/* 四个条目等宽 48px；默认四边边框宽度为 0，只在 :selected 时把左边那一条亮出来 */
+.activity-button {
+    -fx-min-width: 48px;
+    -fx-pref-width: 48px;
+    -fx-max-width: 48px;
+    -fx-min-height: 42px;
+    -fx-pref-height: 42px;
+    -fx-max-height: 42px;
+    -fx-background-color: transparent;
+    -fx-background-radius: 0;
+    -fx-padding: 0;
+    -fx-border-color: transparent transparent transparent -epubra-accent;
+    -fx-border-width: 0;
+    -fx-cursor: hand;
+}
+
+/* 关掉 Modena 的聚焦光晕：活动栏只需要左侧指示条来表达状态 */
+.activity-button:focused {
+    -fx-background-color: transparent;
+}
+
+.activity-button:hover {
+    -fx-background-color: -epubra-hover-bg;
+}
+
+/* VSCode 的标志性细节：选中项左侧 2px 竖条 */
+.activity-button:selected {
+    -fx-border-width: 0 0 0 2;
+}
+
+/* 图标是 SVGPath，颜色靠 -fx-fill 走同一套变量，三主题自动换色 */
+.activity-icon {
+    -fx-fill: -epubra-title-fg;
+}
+
+.activity-button:hover .activity-icon,
+.activity-button:focused .activity-icon {
+    -fx-fill: -epubra-fg;
+}
+
+.activity-button:selected .activity-icon {
+    -fx-fill: -epubra-accent;
+}
+
+/* ---------------------------------------------------------------- 侧边栏 */
 
 .side-panel {
-    -fx-background-color: #fafafa;
+    -fx-background-color: -epubra-panel-bg;
+}
+
+/* 三个视图叠放在 side-panel 上，自身透明，背景由 side-panel 统一给 */
+.side-view {
+    -fx-background-color: transparent;
 }
 
 .panel-title {
     -fx-font-size: 12px;
-    -fx-text-fill: #666666;
+    -fx-text-fill: -epubra-title-fg;
     -fx-padding: 0 0 2 4;
 }
 
 .tree-view {
     -fx-background-color: transparent;
-    -fx-border-color: #e8e8e8;
+    -fx-border-color: -epubra-border;
     -fx-border-width: 1;
 }
 
 .tree-view .tree-cell {
     -fx-background-color: transparent;
-    -fx-text-fill: #333333;
+    -fx-text-fill: -epubra-fg;
     -fx-padding: 3 6 3 6;
 }
 
 .tree-view .tree-cell:selected {
-    -fx-background-color: #cce4ff;
-    -fx-text-fill: #1a1a1a;
+    -fx-background-color: -epubra-selected-bg;
+    -fx-text-fill: -epubra-selected-fg;
+}
+
+/* ---------------------------------------------------------------- 资源表格 */
+
+.table-view {
+    -fx-background-color: -epubra-bg;
+    -fx-border-color: -epubra-border;
+    -fx-border-width: 1;
+    -fx-table-cell-border-color: -epubra-border;
+}
+
+.table-view .placeholder {
+    -fx-background-color: -epubra-bg;
+}
+
+.table-view .column-header-background,
+.table-view .column-header,
+.table-view .filler {
+    -fx-background-color: -epubra-toolbar-bg;
+    -fx-border-color: transparent transparent -epubra-border transparent;
+}
+
+.table-view .column-header .label {
+    -fx-text-fill: -epubra-title-fg;
+    -fx-alignment: CENTER_LEFT;
+}
+
+.table-view .table-row-cell {
+    -fx-background-color: -epubra-bg;
+    -fx-text-fill: -epubra-fg;
+}
+
+.table-view .table-row-cell:odd {
+    -fx-background-color: -epubra-panel-bg;
+}
+
+.table-view .table-row-cell:selected {
+    -fx-background-color: -epubra-selected-bg;
+    -fx-text-fill: -epubra-selected-fg;
+}
+
+.table-view .table-cell {
+    -fx-text-fill: -epubra-fg;
+}
+
+.table-view .table-row-cell:selected .table-cell {
+    -fx-text-fill: -epubra-selected-fg;
 }
 
 /* ---------------------------------------------------------------- 编辑区域 */
 
 .tab-pane .tab-header-area .tab-header-background {
-    -fx-background-color: #fbfbfb;
+    -fx-background-color: -epubra-toolbar-bg;
+}
+
+.tab-pane > .tab-content-area {
+    -fx-background-color: -epubra-bg;
 }
 
 .tab-pane .tab {
@@ -94,56 +353,133 @@
 }
 
 .tab-pane .tab:selected {
-    -fx-background-color: #ffffff;
-    -fx-border-color: #1a5fb4;
+    -fx-background-color: -epubra-bg;
+    -fx-border-color: -epubra-accent;
     -fx-border-width: 0 0 2 0;
 }
 
 .tab-pane .tab .tab-label {
-    -fx-text-fill: #333333;
+    -fx-text-fill: -epubra-fg;
 }
 
 .text-area {
-    -fx-background-color: #ffffff;
-    -fx-border-color: #e0e0e0;
+    -fx-background-color: -epubra-control-bg;
+    -fx-border-color: -epubra-border-input;
     -fx-border-width: 1;
-    -fx-text-fill: #1f1f1f;
+    -fx-text-fill: -epubra-control-fg;
 }
 
 .text-area .content {
-    -fx-background-color: #ffffff;
+    -fx-background-color: -epubra-control-bg;
 }
 
 .text-field {
-    -fx-background-color: #ffffff;
-    -fx-border-color: #d9d9d9;
+    -fx-background-color: -epubra-control-bg;
+    -fx-border-color: -epubra-border-input;
     -fx-border-width: 1;
     -fx-background-radius: 2;
     -fx-padding: 4 6 4 6;
+    -fx-text-fill: -epubra-control-fg;
 }
 
 .text-field:focused {
-    -fx-border-color: #1a5fb4;
-}
-
-.muted-label {
-    -fx-text-fill: #777777;
+    -fx-border-color: -epubra-accent;
 }
 
 .split-pane {
-    -fx-background-color: #ffffff;
+    -fx-background-color: -epubra-bg;
     -fx-padding: 0;
 }
 
 .split-pane .split-pane-divider {
-    -fx-background-color: #e8e8e8;
+    -fx-background-color: -epubra-border;
     -fx-padding: 0 1 0 1;
+}
+
+/* ---------------------------------------------------------------- 底部问题面板 */
+
+.bottom-panel {
+    -fx-background-color: -epubra-bg;
+    -fx-border-color: -epubra-border transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+}
+
+/* 面板里的表格已经压在 bottom-panel 的上边框下面，再描一圈会显得很脏 */
+.bottom-panel .table-view {
+    -fx-border-width: 0;
+}
+
+.panel-header {
+    -fx-background-color: -epubra-panel-header-bg;
+    -fx-border-color: transparent transparent -epubra-border transparent;
+    -fx-border-width: 0 0 1 0;
+    -fx-spacing: 10;
+}
+
+.panel-header .label {
+    -fx-font-size: 12px;
+}
+
+.panel-header-title {
+    -fx-font-size: 12px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -epubra-fg;
+}
+
+.problem-error-label {
+    -fx-font-size: 12px;
+    -fx-text-fill: -epubra-error-fg;
+}
+
+.problem-warning-label {
+    -fx-font-size: 12px;
+    -fx-text-fill: -epubra-warning-fg;
+}
+
+/* ---------------------------------------------------------------- 查找替换条 */
+
+.find-bar {
+    -fx-background-color: -epubra-toolbar-bg;
+    -fx-border-color: -epubra-border transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+}
+
+.find-bar .label {
+    -fx-text-fill: -epubra-find-fg;
+}
+
+.find-bar .check-box {
+    -fx-text-fill: -epubra-find-fg;
 }
 
 /* ---------------------------------------------------------------- 状态栏 */
 
 .status-bar {
-    -fx-background-color: #f5f5f5;
-    -fx-border-color: #e8e8e8 transparent transparent transparent;
+    -fx-background-color: -epubra-status-bg;
+    -fx-border-color: -epubra-border transparent transparent transparent;
     -fx-border-width: 1 0 0 0;
+}
+
+.status-bar .label {
+    -fx-font-size: 12px;
+}
+
+/* 右侧分区：错误 / 警告走强调色，其余走弱化色，中间用 1px 竖线隔开 */
+.status-item {
+    -fx-font-size: 12px;
+    -fx-text-fill: -epubra-muted-fg;
+}
+
+.status-error {
+    -fx-font-size: 12px;
+    -fx-text-fill: -epubra-error-fg;
+}
+
+.status-warning {
+    -fx-font-size: 12px;
+    -fx-text-fill: -epubra-warning-fg;
+}
+
+.status-divider {
+    -fx-background-color: -epubra-border-input;
 }

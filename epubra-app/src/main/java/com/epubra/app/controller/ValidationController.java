@@ -1,0 +1,225 @@
+package com.epubra.app.controller;
+
+import com.epubra.app.support.BookContext;
+import com.epubra.app.support.TextSearch;
+import com.epubra.app.support.ValidationTexts;
+import com.epubra.epublib.domain.Resource;
+import com.epubra.epublib.util.Hrefs;
+import com.epubra.epublib.validation.EpubValidator;
+import com.epubra.epublib.validation.ValidationIssue;
+import com.epubra.epublib.validation.ValidationReport;
+import javafx.fxml.FXML;
+import javafx.scene.control.Label;
+import javafx.scene.control.TabPane;
+import javafx.scene.control.TableRow;
+import javafx.scene.control.TableView;
+import javafx.scene.control.TextArea;
+import javafx.scene.control.Tooltip;
+import javafx.scene.input.MouseEvent;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.function.Consumer;
+
+/**
+ * 校验面板控制器——维护 {@code issueTable} / 3 个计数标签与定位跳转，
+ * 跑校验并把结果显示到面板上。
+ *
+ * <p>作为 {@code problems-panel.fxml} 的 {@code fx:controller} 由 FXML 实例化：面板内
+ * 的表格与标签经 {@code @FXML} 注入；编辑区节点、目录树 / 侧栏控制器引用与回调在父
+ * 控制器 {@code initialize()} 阶段通过 {@link #bind} 注入。本类不得定义 {@code initialize()}。
+ *
+ * <p>校验是只读操作：跑校验前先调 {@code commitPendingEdits} 把当前编辑同步回
+ * {@link com.epubra.epublib.domain.Book}，但<b>不</b>触发任何历史快照。
+ * 双击问题行可定位到正文：{@link #onRowActivated(ValidationIssueRow)}
+ * 切到内容页签、选中目录节点、并尽量把光标带到问题锚点。
+ */
+public class ValidationController {
+
+    @FXML
+    private TableView<ValidationIssueRow> issueTable;
+    @FXML
+    private Label problemErrorLabel;
+    @FXML
+    private Label problemWarningLabel;
+    @FXML
+    private Label problemSummaryLabel;
+
+    private BookContext ctx;
+    private EpubValidator validator;
+    private TabPane editorTabs;
+    private TextArea contentArea;
+    private TocController tocController;
+    private SidebarController sidebarController;
+    private Runnable commitPendingEdits;
+    private Consumer<String> setStatus;
+
+    /** FXML 加载后由父控制器注入运行时依赖；必须在任何 onAction 触发前完成。 */
+    public void bind(BookContext ctx, EpubValidator validator,
+                     TabPane editorTabs, TextArea contentArea,
+                     TocController tocController, SidebarController sidebarController,
+                     Runnable commitPendingEdits, Consumer<String> setStatus) {
+        this.ctx = ctx;
+        this.validator = validator;
+        this.editorTabs = editorTabs;
+        this.contentArea = contentArea;
+        this.tocController = tocController;
+        this.sidebarController = sidebarController;
+        this.commitPendingEdits = commitPendingEdits;
+        this.setStatus = setStatus;
+    }
+
+    /** 面板头「关闭」按钮：收起底部面板并还原活动栏选中态。 */
+    @FXML
+    public void onClosePanel() {
+        if (sidebarController != null) {
+            sidebarController.hideProblems();
+        }
+    }
+
+    /** 问题表格初始化：列宽自适应、悬浮提示显示规则编号与技术细节、双击触发定位。 */
+    public void setupTable() {
+        if (issueTable == null) {
+            return;
+        }
+        issueTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        issueTable.setRowFactory(table -> {
+            TableRow<ValidationIssueRow> row = new TableRow<>() {
+                @Override
+                protected void updateItem(ValidationIssueRow item, boolean empty) {
+                    super.updateItem(item, empty);
+                    setTooltip(item == null || empty ? null : new Tooltip(item.tooltipText()));
+                }
+            };
+            row.setOnMouseClicked((MouseEvent event) -> {
+                if (event.getClickCount() == 2 && !row.isEmpty()) {
+                    onRowActivated(row.getItem());
+                }
+            });
+            return row;
+        });
+    }
+
+    /** 跑一次校验，刷新问题面板。读操作：不打快照、不脏标记。 */
+    public void run() {
+        if (ctx.book() == null) {
+            return;
+        }
+        commitPendingEdits.run();
+        Path container = ctx.currentFile() != null && Files.isRegularFile(ctx.currentFile())
+                ? ctx.currentFile()
+                : null;
+        ValidationReport report;
+        try {
+            report = validator.validate(ctx.book(), container);
+        } catch (RuntimeException ex) {
+            // 主 controller 提供 setStatus，但异常对话框应在 MainController 弹出
+            // 校验本身已经包装了 RuntimeException；这里只记录到状态栏
+            setStatus.accept("校验失败：" + ex.getMessage());
+            return;
+        }
+        ctx.setLastReport(report);
+        issueTable.getItems().setAll(report.issues().stream().map(ValidationIssueRow::new).toList());
+        updateProblemHeader();
+        if (sidebarController != null) {
+            sidebarController.showBottomPanelOnly(true);
+        }
+        setStatus.accept(ValidationTexts.statusText(report, report.containerChecked() && ctx.dirty()));
+        // 广播完成事件，让其它关心"校验刚跑完"的子控制器订阅即可，不必经 MainController 中转
+        ctx.bus().publish(new com.epubra.app.support.AppEventBus.ValidationCompletedEvent(report));
+    }
+
+    /**
+     * 清空上一次的校验结果。
+     *
+     * <p>报告只对产生它的那一次校验有效：新建、打开与撤销 / 重做之后，书已经换了，
+     * 面板与状态栏若继续挂着旧数字就是误导。
+     */
+    public void clear() {
+        ctx.setLastReport(ValidationReport.EMPTY);
+        if (issueTable != null) {
+            issueTable.getItems().clear();
+        }
+        updateProblemHeader();
+    }
+
+    /** 刷新面板头的错误 / 警告计数、摘要。状态栏的汇总由 MainController 同步刷新。 */
+    public void updateProblemHeader() {
+        if (problemErrorLabel != null) {
+            problemErrorLabel.setText("错误 " + ctx.lastReport().errorCount());
+        }
+        if (problemWarningLabel != null) {
+            problemWarningLabel.setText("警告 " + ctx.lastReport().warningCount());
+        }
+        if (problemSummaryLabel != null) {
+            problemSummaryLabel.setText(problemHint());
+        }
+    }
+
+    /** 面板头右侧的一句说明，讲清这次结果覆盖了哪些规则。 */
+    private String problemHint() {
+        if (ctx.lastReport().isEmpty()) {
+            return "未发现问题";
+        }
+        return ctx.lastReport().containerChecked() ? "含容器级规则" : "仅内存校验，保存后可得容器级结果";
+    }
+
+    /** 双击问题行：切到内容页签、在目录树里选中对应章节，并尽量把光标带到出问题的位置。 */
+    public void onRowActivated(ValidationIssueRow row) {
+        if (row == null) {
+            return;
+        }
+        ValidationIssue issue = row.issue();
+        Resource target = resolveIssueResource(issue.resourceHref());
+        if (target == null) {
+            setStatus.accept("该问题属于整书级别，没有可定位的章节");
+            return;
+        }
+        editorTabs.getSelectionModel().selectFirst();
+        if (tocController != null && !tocController.selectResource(target)) {
+            setStatus.accept("已选中 " + target.fileName() + "（该资源不在目录中）");
+            return;
+        }
+        highlightIssueAnchor(row);
+    }
+
+    /** 问题里的 href 多数是容器内路径，少数是相对内容目录的写法，两种都试一遍。 */
+    private Resource resolveIssueResource(String href) {
+        if (href == null || href.isBlank()) {
+            return null;
+        }
+        Resource direct = ctx.book().resources().getByHref(href);
+        if (direct != null) {
+            return direct;
+        }
+        return ctx.book().resources().getByHref(Hrefs.resolve(ctx.book().contentDirectory(), href));
+    }
+
+    /** 在正文中选中出问题的位置：锚点 id 优先，其次引用原文串，再退化为文件名。 */
+    private void highlightIssueAnchor(ValidationIssueRow row) {
+        String anchor = row.anchor();
+        if (anchor.isEmpty() || contentArea.isDisabled()) {
+            contentArea.positionCaret(0);
+            return;
+        }
+        String text = contentArea.getText();
+        int index = row.anchorIsFragment() ? TextSearch.indexOfIdAttribute(text, anchor) : -1;
+        if (index < 0) {
+            index = TextSearch.indexOf(text, anchor, 0, true);
+        }
+        if (index < 0) {
+            int slash = anchor.lastIndexOf('/');
+            if (slash >= 0 && slash + 1 < anchor.length()) {
+                index = TextSearch.indexOf(text, anchor.substring(slash + 1), 0, true);
+            }
+        }
+        if (index < 0) {
+            contentArea.positionCaret(0);
+            setStatus.accept("已定位到章节，但正文中没找到该引用的位置");
+            return;
+        }
+        contentArea.requestFocus();
+        contentArea.selectRange(index, index + anchor.length());
+        setStatus.accept("已定位到问题所在位置");
+    }
+}

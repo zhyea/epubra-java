@@ -11,14 +11,17 @@ import java.io.IOException;
 
 /**
  * Epubra 应用入口。
+ *
+ * <p>由 {@link EpubraLauncher} 间接调用，避免以 {@code Application} 子类直接做 main-class
+ * 触发非模块化构建下的运行时组件校验失败。详见 {@code .workbuddy/memory/MEMORY.md} 硬约束段。
  */
-public class MainApp extends Application {
+public class EpubraApp extends Application {
 
     public static final String APP_NAME = "Epubra";
 
     @Override
     public void start(Stage stage) throws IOException {
-        FXMLLoader loader = new FXMLLoader(MainApp.class.getResource("/com/epubra/app/view/main-window.fxml"));
+        FXMLLoader loader = new FXMLLoader(EpubraApp.class.getResource("/com/epubra/app/view/main-window.fxml"));
         Parent root = loader.load();
 
         MainController controller = loader.getController();

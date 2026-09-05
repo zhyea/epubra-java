@@ -1,223 +1,351 @@
 package com.epubra.app.controller;
 
-import com.epubra.app.MainApp;
+import com.epubra.app.EpubraApp;
+import com.epubra.app.support.BookContext;
+import com.epubra.app.support.BookHistory;
+import com.epubra.app.support.PreviewHtml;
+import com.epubra.app.support.TextSearch;
+import com.epubra.app.support.Theme;
+import com.epubra.app.support.ThemeManager;
 import com.epubra.epublib.domain.Book;
-import com.epubra.epublib.domain.BookFactory;
-import com.epubra.epublib.domain.MediaTypes;
-import com.epubra.epublib.domain.Metadata;
 import com.epubra.epublib.domain.Resource;
-import com.epubra.epublib.domain.SpineReference;
-import com.epubra.epublib.domain.TOCReference;
 import com.epubra.epublib.io.EpubReader;
 import com.epubra.epublib.io.EpubWriter;
-import com.epubra.epublib.util.Hrefs;
+import com.epubra.epublib.validation.EpubValidator;
+import com.epubra.epublib.validation.ValidationIssue;
+import com.epubra.epublib.validation.ValidationReport;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.ObservableValue;
 import javafx.fxml.FXML;
+import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.RadioMenuItem;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TabPane;
-import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
-import javafx.scene.control.TextField;
-import javafx.scene.control.TreeCell;
-import javafx.scene.control.TreeItem;
-import javafx.scene.control.TreeView;
+import javafx.scene.control.TextInputDialog;
+import javafx.scene.control.ToggleButton;
+import javafx.scene.control.ToggleGroup;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyCodeCombination;
+import javafx.scene.input.KeyCombination;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
 import javafx.scene.web.WebView;
-import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 
 /**
  * 主窗口控制器：目录浏览、章节编辑、元数据维护与 EPUB 存取。
+ *
+ * <p>本轮重构（Task S3a）：把原本散落的 30+ 业务字段全部下沉到 {@link BookContext}，
+ * 本类保留纯 UI 与编排职责。后续 Sprint 将按职责进一步拆出 {@code UndoController}、
+ * {@code DocumentController} 等子控制器。
  */
 public class MainController {
 
-    @FXML
-    private TreeView<ChapterNode> tocTree;
     @FXML
     private TextArea contentArea;
     @FXML
     private WebView previewView;
     @FXML
     private TabPane editorTabs;
-    @FXML
-    private TableView<ResourceRow> resourceTable;
 
     @FXML
-    private TextField titleField;
+    private ToggleGroup activityGroup;
     @FXML
-    private TextField authorField;
+    private ToggleButton tocActivityButton;
     @FXML
-    private TextField languageField;
+    private ToggleButton resourceActivityButton;
     @FXML
-    private TextField publisherField;
+    private ToggleButton metadataActivityButton;
     @FXML
-    private Label identifierLabel;
+    private ToggleButton validationActivityButton;
+
+    // 侧边栏三个视图与底部面板：fx:include 根节点注入（类型即各子 FXML 的根元素类型）。
+    // 与之成对的子控制器字段（<fx:id>Controller 命名规则）在下方。
     @FXML
-    private TextArea descriptionArea;
+    private VBox tocView;
+    @FXML
+    private VBox resourceView;
+    @FXML
+    private ScrollPane metadataView;
+    @FXML
+    private VBox bottomPanel;
+    @FXML
+    private HBox findBar;
+
+    // fx:include 自动注入的子控制器：节点已由各自 FXML 绑定，
+    // ctx 与回调在本类 initialize() 阶段统一 bind。
+    @FXML
+    private TocController tocViewController;
+    @FXML
+    private ResourceController resourceViewController;
+    @FXML
+    private MetadataViewController metadataViewController;
+    @FXML
+    private FindController findBarController;
+    @FXML
+    private ValidationController bottomPanelController;
+
+    @FXML
+    private MenuItem problemsItem;
+
+    @FXML
+    private MenuItem undoItem;
+    @FXML
+    private MenuItem redoItem;
 
     @FXML
     private Label statusLabel;
     @FXML
-    private Label statsLabel;
+    private Label errorStatusLabel;
+    @FXML
+    private Label warningStatusLabel;
+    @FXML
+    private Label chapterStatusLabel;
+    @FXML
+    private Label wordStatusLabel;
+    @FXML
+    private Label themeStatusLabel;
+
+    @FXML
+    private RadioMenuItem themeLightItem;
+    @FXML
+    private RadioMenuItem themeDarkItem;
+    @FXML
+    private RadioMenuItem themeSepiaItem;
+
+    /** 跨控制器共享状态：原本散落的字段全部下沉到这里。 */
+    private final BookContext ctx = new BookContext();
 
     private final EpubReader reader = new EpubReader();
     private final EpubWriter writer = new EpubWriter();
+    private final EpubValidator validator = new EpubValidator();
+    private UndoController undoController;
+    private DocumentController documentController;
+    private SidebarController sidebarController;
 
-    private Stage stage;
-    private Book book;
-    private Path currentFile;
-    private ChapterNode currentNode;
-    private boolean dirty;
-    private boolean loading;
+    /** 当前主题。initialize 时取自持久化配置，切换后预览区与整个界面同步换色。 */
+    private Theme currentTheme = Theme.LIGHT;
 
     public void setStage(Stage stage) {
-        this.stage = stage;
+        ctx.setStage(stage);
     }
 
     @FXML
     public void initialize() {
-        tocTree.setShowRoot(false);
-        tocTree.setCellFactory(tree -> new TreeCell<>() {
-            @Override
-            protected void updateItem(ChapterNode item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : item.displayTitle());
-            }
-        });
-        tocTree.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, selected) -> {
-            if (!loading) {
-                showChapter(selected == null ? null : selected.getValue());
-            }
-        });
+        // 子控制器由 fx:include 实例化（先于本方法执行 @FXML 注入），这里统一注入
+        // BookContext 与回调。SidebarController 横跨活动栏 / 三个视图 / 底部面板多个
+        // FXML 文件，无法归属某个子 FXML，保持手动构造。
+        sidebarController = new SidebarController(
+                activityGroup,
+                tocActivityButton, resourceActivityButton,
+                metadataActivityButton, validationActivityButton,
+                tocView, resourceView, metadataView,
+                bottomPanel);
+
+        tocViewController.bind(ctx, this::beginChange, this::setStatus, this::warn);
+        tocViewController.wire();
+        tocViewController.setOnChapterSelected(this::showChapter);
+
+        sidebarController.setupDefault();
+        bindProblemsAccelerator();
+
+        bottomPanelController.bind(ctx, validator, editorTabs, contentArea,
+                tocViewController, sidebarController,
+                this::commitPendingEdits, this::setStatus);
+        bottomPanelController.setupTable();
+
+        metadataViewController.bind(ctx, this::recordBeforeChange, this::markDirty,
+                this::refreshAll, this::setStatus);
+
+        resourceViewController.bind(ctx, editorTabs, contentArea,
+                this::beginChange, this::markDirty,
+                this::refreshAll, this::refreshResources,
+                this::updateStatus, this::setStatus, this::warn,
+                this::confirmDiscardChanges, this::showError);
+
+        findBarController.bind(ctx, contentArea,
+                this::beginChange, this::markDirty,
+                this::reloadEditor, this::refreshPreview,
+                this::setStatus, this::confirmDiscardChanges);
+
         contentArea.textProperty().addListener((obs, oldValue, text) -> {
-            if (!loading) {
-                markDirty();
+            if (ctx.loading()) {
+                return;
             }
+            // 一段连续输入只在第一次击键时记录一次快照（此时 book 还是变更前的状态）
+            ensureUndoController();
+            undoController.onTextInput();
+            markDirty();
         });
 
-        newBook();
+        subscribeAppEvents();
+
+        currentTheme = ThemeManager.current();
+        selectThemeItem(currentTheme);
+        applyThemeWhenSceneReady();
+
+        ensureDocumentController();
+        documentController.newBook();
+    }
+
+    /**
+     * 集中订阅 {@link com.epubra.app.support.AppEventBus}，把"状态变了 → 调 xxx"的入口
+     * 全部从手动回调改为事件订阅。新增子控制器后只需追加订阅，不必改 MainController 主流程。
+     */
+    private void subscribeAppEvents() {
+        ctx.bus().subscribe(com.epubra.app.support.AppEventBus.BookLoadedEvent.class,
+                e -> refreshAll());
+        ctx.bus().subscribe(com.epubra.app.support.AppEventBus.BookRestoredEvent.class,
+                e -> refreshAll());
+        ctx.bus().subscribe(com.epubra.app.support.AppEventBus.BookSavedEvent.class,
+                e -> updateTitleAndHistory());
+        ctx.bus().subscribe(com.epubra.app.support.AppEventBus.BookDirtyChangedEvent.class,
+                e -> updateTitleAndHistory());
+    }
+
+    /** 集中更新标题栏与撤销菜单可用态；保存与脏标记均触发同一组 UI 重画。 */
+    private void updateTitleAndHistory() {
+        updateTitle();
+        updateHistoryControls();
     }
 
     // ------------------------------------------------------------------ 文件
 
     @FXML
     public void onNew() {
-        if (!confirmDiscardChanges()) {
-            return;
-        }
-        newBook();
-        setStatus("已新建空白书籍");
+        ensureDocumentController();
+        documentController.onNew();
     }
 
     @FXML
     public void onOpen() {
-        if (!confirmDiscardChanges()) {
-            return;
-        }
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle("打开 EPUB 文件");
-        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("EPUB 文件", "*.epub"));
-        File file = chooser.showOpenDialog(stage);
-        if (file == null) {
-            return;
-        }
-        try {
-            book = reader.read(file.toPath());
-            currentFile = file.toPath();
-            refreshAll();
-            setStatus("已打开 " + file.getName());
-        } catch (IOException e) {
-            showError("打开失败", "无法读取 " + file.getName(), e);
-        }
+        ensureDocumentController();
+        documentController.onOpen();
     }
 
     @FXML
     public void onSave() {
-        if (currentFile == null) {
-            onSaveAs();
-            return;
-        }
-        saveTo(currentFile);
+        ensureDocumentController();
+        documentController.onSave();
     }
 
     @FXML
     public void onSaveAs() {
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle("保存 EPUB 文件");
-        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("EPUB 文件", "*.epub"));
-        chooser.setInitialFileName(defaultFileName());
-        File file = chooser.showSaveDialog(stage);
-        if (file == null) {
-            return;
-        }
-        saveTo(file.toPath());
+        ensureDocumentController();
+        documentController.onSaveAs();
     }
 
     @FXML
     public void onExit() {
-        if (!confirmDiscardChanges()) {
-            return;
-        }
-        stage.close();
+        ensureDocumentController();
+        documentController.onExit(ctx.stage()::close);
     }
 
     @FXML
     public void onAbout() {
-        Alert alert = new Alert(Alert.AlertType.INFORMATION);
-        alert.setTitle("关于 " + MainApp.APP_NAME);
-        alert.setHeaderText(MainApp.APP_NAME + " - EPUB 编辑器");
-        alert.setContentText("JavaFX 前端 + 项目内自维护的 epublib 内核\n支持 EPUB 2/3 的读取、编辑与写出。");
-        alert.initOwner(stage);
-        alert.showAndWait();
+        ensureDocumentController();
+        documentController.onAbout();
+    }
+
+    private void ensureDocumentController() {
+        if (documentController == null) {
+            documentController = new DocumentController(ctx,
+                    this::setStatus,
+                    this::confirmDiscardChanges,
+                    DocumentController.defaultDialogs(ctx.stage()),
+                    this::reportError);
+        }
+    }
+
+    /** 错误信息直接打到状态栏。复杂场景会让 DocumentController 触发 Alert，这里保持简洁。 */
+    private void reportError(String message) {
+        setStatus(message);
+    }
+
+    // ------------------------------------------------------------------ 撤销 / 重做
+
+    @FXML
+    public void onUndo() {
+        ensureUndoController();
+        undoController.undo();
+    }
+
+    @FXML
+    public void onRedo() {
+        ensureUndoController();
+        undoController.redo();
+    }
+
+    /**
+     * 记录一次变更「之前」的状态，并结束当前的输入编辑步。
+     *
+     * <p>必须在真正修改 {@link Book} 之前调用：它会先把正文与元数据写回，再拍快照，
+     * 之后本次操作引起的界面文本变更不再重复计入历史。
+     */
+    private void beginChange() {
+        ensureUndoController();
+        undoController.beginChange();
+    }
+
+    /**
+     * 记录一次「界面文本即将写回书籍之前」的状态。
+     *
+     * <p>{@link #beginChange()} 的顺序是先写回、再快照，适用于「先改结构」的操作；
+     * 元数据这类「界面文本本身就是变更内容」的操作必须反过来，否则快照里已经是新值。
+     */
+    private void recordBeforeChange() {
+        ensureUndoController();
+        undoController.recordBeforeChange();
+    }
+
+    private void commitPendingEdits() {
+        ensureUndoController();
+        undoController.commitPendingEdits();
+    }
+
+    private void ensureUndoController() {
+        if (undoController == null) {
+            undoController = new UndoController(ctx, this::setStatus, this::clearValidationResults);
+            undoController.installFlushCallbacks(this::flushCurrentChapter, this::flushMetadata);
+        }
     }
 
     // ------------------------------------------------------------------ 章节
 
     @FXML
     public void onAddChapter() {
-        flushCurrentChapter();
-        String title = "第 " + (book.spine().size() + 1) + " 章";
-        Resource chapter = book.addChapter(title, null);
-        markDirty();
-        refreshAll();
-        selectResource(chapter);
-        setStatus("已添加章节：" + title);
+        tocViewController.onAddChapter();
     }
 
     @FXML
     public void onDeleteChapter() {
-        ChapterNode node = currentNode;
-        if (node == null || node.resource() == null) {
-            return;
-        }
-        Resource target = node.resource();
-        book.resources().removeByHref(target.href());
-        book.spine().removeResourceId(target.id());
-        removeTocReference(book.toc().roots(), target);
-
-        currentNode = null;
-        markDirty();
-        refreshAll();
-        setStatus("已删除章节：" + node.displayTitle());
+        tocViewController.onDeleteChapter();
     }
 
     @FXML
     public void onMoveUp() {
-        moveChapter(-1);
+        tocViewController.onMoveUp();
     }
 
     @FXML
     public void onMoveDown() {
-        moveChapter(1);
+        tocViewController.onMoveDown();
     }
+
+    @FXML
+    public void onRenameChapter() {
+        tocViewController.onRenameChapter();
+    }
+
+
 
     @FXML
     public void onRefreshPreview() {
@@ -226,298 +354,275 @@ public class MainController {
         setStatus("预览已刷新");
     }
 
+    // ------------------------------------------------------------------ 主题
+
     @FXML
-    public void onApplyMetadata() {
-        flushMetadata();
-        markDirty();
-        refreshAll();
-        setStatus("元数据已更新");
+    public void onThemeLight() {
+        switchTheme(Theme.LIGHT);
     }
+
+    @FXML
+    public void onThemeDark() {
+        switchTheme(Theme.DARK);
+    }
+
+    @FXML
+    public void onThemeSepia() {
+        switchTheme(Theme.SEPIA);
+    }
+
+    /** 切换主题：落盘偏好、换根节点样式类，并让预览区跟着换配色。 */
+    private void switchTheme(Theme theme) {
+        if (theme == currentTheme) {
+            return;
+        }
+        currentTheme = theme;
+        ThemeManager.save(theme);
+        ThemeManager.apply(statusLabel.getScene(), theme);
+        refreshPreview();
+        if (themeStatusLabel != null) {
+            themeStatusLabel.setText(theme.displayName());
+        }
+        setStatus("已切换到" + theme.displayName() + "主题");
+    }
+
+    /**
+     * 在 initialize 阶段先把主题记下来，等 Scene 挂上再真正应用。
+     *
+     * <p>FXML 加载时 Scene 尚未创建，此时拿不到根节点，只能借 statusLabel 的
+     * sceneProperty 做一次性回调。
+     */
+    private void applyThemeWhenSceneReady() {
+        Scene scene = statusLabel.getScene();
+        if (scene != null) {
+            ThemeManager.apply(scene, currentTheme);
+            return;
+        }
+        statusLabel.sceneProperty().addListener(new ChangeListener<>() {
+            @Override
+            public void changed(ObservableValue<? extends Scene> observable, Scene oldScene, Scene newScene) {
+                if (newScene == null) {
+                    return;
+                }
+                statusLabel.sceneProperty().removeListener(this);
+                ThemeManager.apply(newScene, currentTheme);
+                refreshPreview();
+            }
+        });
+    }
+
+    /** 让单选菜单项的选中态与当前主题一致；setSelected 不触发 onAction，不会递归。 */
+    private void selectThemeItem(Theme theme) {
+        RadioMenuItem target = switch (theme) {
+            case DARK -> themeDarkItem;
+            case SEPIA -> themeSepiaItem;
+            case LIGHT -> themeLightItem;
+        };
+        // FXML 里万一漏了某个菜单项，宁可只是不高亮，也不要让整个界面起不来
+        if (target != null) {
+            target.setSelected(true);
+        }
+        if (themeStatusLabel != null) {
+            themeStatusLabel.setText(theme.displayName());
+        }
+    }
+
+    // ------------------------------------------------------------------ 活动栏与侧边栏
+
+/**
+ * 给「问题面板」菜单项挂上 Ctrl+` 快捷键。
+ *
+ * <p>放在 controller 而不是 FXML：{@code KeyCombination} 对反引号的解析在不同实现下并不可靠，
+ * 直接用 {@link KeyCode#BACK_QUOTE} 构造最稳。
+ */
+private void bindProblemsAccelerator() {
+    if (problemsItem != null) {
+        problemsItem.setAccelerator(
+                new KeyCodeCombination(KeyCode.BACK_QUOTE, KeyCombination.CONTROL_DOWN));
+    }
+}
+
+    @FXML
+    public void onShowTocView() {
+        sidebarController.showTocView();
+    }
+
+    @FXML
+    public void onShowResourceView() {
+        sidebarController.showResourceView();
+    }
+
+    @FXML
+    public void onShowMetadataView() {
+        sidebarController.showMetadataView();
+    }
+
+    /**
+     * 活动栏「校验」按钮：选中时展开底部面板并立即校验，取消选中时收起面板、
+     * 把活动栏交还给上一个侧边视图（避免活动栏出现「一个都没选中」的空档）。
+     *
+     * <p>侧边栏本身不切换——校验结果在底部面板，目录 / 资源 / 元数据保持用户离开时的样子。
+     */
+    @FXML
+    public void onShowProblems() {
+        if (validationActivityButton.isSelected()) {
+            sidebarController.showProblems(bottomPanelController::run);
+            return;
+        }
+        sidebarController.hideProblems();
+    }
+
+    /**
+     * 「视图 → 问题面板」：面板与活动栏按钮一起切换，快捷键 Ctrl+`。
+     * <p>保持原入口：底部面板可见性、按钮选中与立即校验这些是同一个编排序列，
+     * 与 {@link #onShowProblems} 不同的是这里按钮选中由 sidebar 内部同步。
+     */
+    @FXML
+    public void onToggleProblems() {
+        if (bottomPanel.isVisible()) {
+            sidebarController.hideProblems();
+            return;
+        }
+        sidebarController.showProblems(bottomPanelController::run);
+    }
+
+    /** 底部面板头上的关闭按钮。 */
+    @FXML
+    public void onHideProblems() {
+        sidebarController.hideProblems();
+    }
+
+    // 校验全部委托给 ValidationController：MainController 只保留入口与回调钩子。
+
+    /**
+     * 清空校验结果——{@link UndoController} 在撤销/重做、打开、新建时需要回调它。
+     */
+    private void clearValidationResults() {
+        bottomPanelController.clear();
+    }
+
+    // ------------------------------------------------------------------ 元数据
+
+    // ------------------------------------------------------------------ 校验
+
+    /**
+     * 跑一次校验并刷新问题面板。
+     *
+     * <p>校验是只读操作：只调 {@link #commitPendingEdits()} 把屏幕上的文本同步回 {@link Book}，
+     * <b>不</b>调 {@link #beginChange()} / {@link #markDirty()}，因此不会在撤销栈里留下记录，
+     * 也不会把「只是想看看有多少问题」变成一次未保存修改。
+     *
+     * <p>有真实磁盘文件走 {@code validate(Book, Path)}（含容器级规则），否则降级为纯内存校验。
+     */
+    @FXML
+    public void onRunValidation() {
+        bottomPanelController.run();
+    }
+
+    // 校验全部委托给 {@link ValidationController}：MainController 只保留入口与回调钩子。
+
+    // 元数据面板的全部逻辑（表单读写 / 应用修改 / 撤销快照前的写回）已迁至
+    // MetadataViewController，由 metadata-view.fxml 直接绑定；本类只在
+    // refreshAll / UndoController 的 flush 回调里调它的 loadIntoFields / flush。
+
+    // ------------------------------------------------------------------ 查找 / 替换
+
+    @FXML
+    public void onShowFind() {
+        findBarController.showBar();
+    }
+
+    @FXML
+    public void onCloseFind() {
+        findBarController.closeBar();
+    }
+
+    @FXML
+    public void onFindNext() {
+        findBarController.findNext();
+    }
+
+    @FXML
+    public void onFindPrevious() {
+        findBarController.findPrevious();
+    }
+
+    @FXML
+    public void onReplaceOne() {
+        findBarController.replaceOne();
+    }
+
+    @FXML
+    public void onReplaceAll() {
+        findBarController.replaceAll();
+    }
+
+    // 查找与替换的全部实现已迁出到 FindController；MainController 至此只保留 1 行委托入口。
+
 
     // ------------------------------------------------------------------ 资源
 
     @FXML
     public void onImportResources() {
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle("导入资源");
-        chooser.getExtensionFilters().addAll(
-                new FileChooser.ExtensionFilter("图片 / 样式 / 字体",
-                        "*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.svg",
-                        "*.css", "*.ttf", "*.otf", "*.woff", "*.woff2"),
-                new FileChooser.ExtensionFilter("所有文件", "*.*"));
-        List<File> files = chooser.showOpenMultipleDialog(stage);
-        if (files == null || files.isEmpty()) {
-            return;
-        }
-        int imported = 0;
-        for (File file : files) {
-            try {
-                book.addResource(file.toPath());
-                imported++;
-            } catch (IOException e) {
-                showError("导入失败", "无法读取 " + file.getName(), e);
-            }
-        }
-        markDirty();
-        refreshResources();
-        updateStatus();
-        setStatus("已导入 " + imported + " 个资源");
+        resourceViewController.importResources();
     }
 
     @FXML
     public void onExportResource() {
-        ResourceRow row = selectedResourceRow();
-        if (row == null) {
-            warn("请先在资源列表中选择一项");
-            return;
-        }
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle("导出资源");
-        chooser.setInitialFileName(row.getName());
-        File file = chooser.showSaveDialog(stage);
-        if (file == null) {
-            return;
-        }
-        try {
-            Files.write(file.toPath(), row.getResource().data());
-            setStatus("已导出到 " + file.getName());
-        } catch (IOException e) {
-            showError("导出失败", "无法写入 " + file.getAbsolutePath(), e);
-        }
+        resourceViewController.exportSelected();
     }
 
     @FXML
     public void onDeleteResource() {
-        ResourceRow row = selectedResourceRow();
-        if (row == null) {
-            warn("请先在资源列表中选择一项");
-            return;
-        }
-        Resource resource = row.getResource();
-        String message = "确定删除资源「" + row.getName() + "」？";
-        if (isReferencedByChapters(resource)) {
-            message += "\n\n注意：正文中存在对它的引用，删除后相关图片或样式将无法显示。";
-        }
-        if (!confirm("删除资源", message)) {
-            return;
-        }
-        book.removeResource(resource);
-        markDirty();
-        refreshAll();
-        setStatus("已删除资源：" + row.getName());
+        resourceViewController.deleteSelected();
     }
 
     @FXML
     public void onSetCover() {
-        ResourceRow row = selectedResourceRow();
-        if (row == null) {
-            warn("请先在资源列表中选择一张图片");
-            return;
-        }
-        if (!row.isImage()) {
-            warn("封面必须是图片资源（PNG / JPEG / GIF / WebP / SVG）");
-            return;
-        }
-        book.setCover(row.getResource());
-        markDirty();
-        refreshResources();
-        setStatus("已设为封面：" + row.getName());
+        resourceViewController.setCoverFromSelected();
     }
 
     @FXML
     public void onInsertImage() {
-        ResourceRow row = selectedResourceRow();
-        if (row == null) {
-            warn("请先在资源列表中选择一张图片");
-            return;
-        }
-        if (!row.isImage()) {
-            warn("只能向正文插入图片资源");
-            return;
-        }
-        if (currentNode == null || currentNode.resource() == null) {
-            warn("请先在左侧目录中选择要插入图片的章节");
-            return;
-        }
-        Resource image = row.getResource();
-        String chapterDir = Hrefs.parentDirectory(currentNode.resource().href());
-        String relative = Hrefs.relativize(chapterDir, image.href());
-        String tag = String.format("<img src=\"%s\" alt=\"%s\"/>", relative, row.getName());
-        contentArea.insertText(contentArea.getAnchor(), tag);
-        editorTabs.getSelectionModel().selectFirst();
-        markDirty();
-        setStatus("已在正文中插入：" + row.getName());
+        resourceViewController.insertSelectedImageIntoChapter();
     }
 
     @FXML
     public void onCleanupResources() {
-        List<Resource> orphans = book.unreferencedResources();
-        if (orphans.isEmpty()) {
-            setStatus("没有未被引用的资源");
-            return;
-        }
-        String names = orphans.stream()
-                .limit(12)
-                .map(Resource::fileName)
-                .reduce((a, b) -> a + "、" + b)
-                .orElse("");
-        if (orphans.size() > 12) {
-            names += " 等";
-        }
-        if (!confirm("清理未引用资源", "以下 " + orphans.size() + " 个资源未被引用：\n\n" + names + "\n\n确定删除？")) {
-            return;
-        }
-        orphans.forEach(book::removeResource);
-        markDirty();
-        refreshAll();
-        setStatus("已清理 " + orphans.size() + " 个未引用资源");
+        resourceViewController.cleanupUnused();
     }
 
-    /** 刷新资源列表；nav 与 ncx 由写出流程自动维护，不展示给用户。 */
+    /** 刷新资源列表；nav 与 ncx 由写出流程自动维护，不展示给用户。委托 ResourceController。 */
     private void refreshResources() {
-        Resource nav = book.navResource();
-        List<ResourceRow> rows = new ArrayList<>();
-        for (Resource resource : book.resources().all()) {
-            if (resource == nav || resource.isNavDocument() || MediaTypes.NCX.equals(resource.mediaType())) {
-                continue;
-            }
-            rows.add(new ResourceRow(resource));
-        }
-        resourceTable.getItems().setAll(rows);
+        resourceViewController.refresh();
     }
 
-    private ResourceRow selectedResourceRow() {
-        return resourceTable.getSelectionModel().getSelectedItem();
-    }
-
-    private boolean isReferencedByChapters(Resource resource) {
-        String fileName = resource.fileName();
-        if (fileName.isEmpty()) {
-            return false;
-        }
-        for (Resource chapter : book.spineResources()) {
-            if (chapter != resource && chapter.asString().contains(fileName)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // ------------------------------------------------------------------ 内部逻辑
-
-    private void newBook() {
-        book = BookFactory.createEmpty("新书籍");
-        currentFile = null;
-        currentNode = null;
-        refreshAll();
-    }
-
-    private void saveTo(Path target) {
-        flushCurrentChapter();
-        flushMetadata();
-        try {
-            writer.write(book, target);
-            currentFile = target;
-            book.setSource(target);
-            dirty = false;
-            updateStatus();
-            setStatus("已保存到 " + target.getFileName());
-        } catch (IOException e) {
-            showError("保存失败", "无法写入 " + target, e);
-        }
-    }
+    // 目录树交互已迁出到 TocController，MainController 仅保留 showChapter 用于「章节被选中」回调。
 
     private void refreshAll() {
-        loading = true;
+        ctx.invalidateWordCounts();
+        ctx.setLoading(true);
         try {
-            titleField.setText(book.metadata().firstTitle());
-            authorField.setText(book.metadata().creatorsInline());
-            languageField.setText(nullSafe(book.metadata().language()));
-            publisherField.setText(nullSafe(book.metadata().publisher()));
-            descriptionArea.setText(nullSafe(book.metadata().description()));
-            Metadata.Identifier identifier = book.metadata().primaryIdentifier();
-            identifierLabel.setText(identifier == null ? "—（保存时自动生成）" : identifier.raw());
+            metadataViewController.loadIntoFields(ctx.book().metadata());
         } finally {
-            loading = false;
+            ctx.setLoading(false);
         }
         refreshToc();
         refreshResources();
         updateStatus();
     }
 
+    /** 目录树刷新转发；null 防护保留——bind 之前不会有刷新请求，但保持防御式。 */
     private void refreshToc() {
-        TreeItem<ChapterNode> toSelect;
-        loading = true;
-        try {
-            TreeItem<ChapterNode> root = new TreeItem<>(new ChapterNode("目录", null, null));
-            for (TOCReference reference : book.toc().roots()) {
-                root.getChildren().add(buildTreeItem(reference));
-            }
-            root.setExpanded(true);
-            ChapterNode previous = currentNode;
-            tocTree.setRoot(root);
-
-            toSelect = previous == null || previous.resource() == null
-                    ? null : findByResource(root, previous.resource());
-            if (toSelect == null && !root.getChildren().isEmpty()) {
-                toSelect = root.getChildren().get(0);
-            }
-        } finally {
-            loading = false;
-        }
-        // 选中必须在 loading 结束之后进行，否则会被选择监听器上的 loading 守卫忽略
-        if (toSelect != null) {
-            tocTree.getSelectionModel().select(toSelect);
-            if (currentNode == null) {
-                showChapter(toSelect.getValue());
-            }
-        } else {
-            showChapter(null);
-        }
-    }
-
-    private TreeItem<ChapterNode> buildTreeItem(TOCReference reference) {
-        Resource resource = resolveResource(reference);
-        TreeItem<ChapterNode> item = new TreeItem<>(new ChapterNode(reference.title(), resource, reference));
-        for (TOCReference child : reference.children()) {
-            item.getChildren().add(buildTreeItem(child));
-        }
-        item.setExpanded(true);
-        return item;
-    }
-
-    private Resource resolveResource(TOCReference reference) {
-        return book.resources().getByHref(Hrefs.resolve(book.contentDirectory(), reference.resourceHref()));
-    }
-
-    private TreeItem<ChapterNode> findByResource(TreeItem<ChapterNode> parent, Resource resource) {
-        for (TreeItem<ChapterNode> child : parent.getChildren()) {
-            if (resource.equals(child.getValue().resource())) {
-                return child;
-            }
-            TreeItem<ChapterNode> nested = findByResource(child, resource);
-            if (nested != null) {
-                return nested;
-            }
-        }
-        return null;
-    }
-
-    private void selectResource(Resource resource) {
-        TreeItem<ChapterNode> root = tocTree.getRoot();
-        if (root == null) {
-            return;
-        }
-        TreeItem<ChapterNode> item = findByResource(root, resource);
-        if (item != null) {
-            tocTree.getSelectionModel().select(item);
+        if (tocViewController != null) {
+            tocViewController.refresh();
         }
     }
 
     private void showChapter(ChapterNode node) {
         flushCurrentChapter();
-        currentNode = node;
-        loading = true;
+        ctx.setCurrentNode(node);
+        ctx.setLoading(true);
         try {
             if (node == null || node.resource() == null) {
                 contentArea.clear();
@@ -528,102 +633,58 @@ public class MainController {
                 contentArea.positionCaret(0);
             }
         } finally {
-            loading = false;
+            ctx.setLoading(false);
         }
         refreshPreview();
         updateStatus();
     }
 
-    private void refreshPreview() {
-        if (currentNode == null || currentNode.resource() == null) {
-            previewView.getEngine().loadContent("<html><body></body></html>");
+    /** 把当前章节资源的内容重新读回编辑器；用于内容被程序化修改后同步界面。 */
+    private void reloadEditor() {
+        ChapterNode current = ctx.currentNode();
+        if (current == null || current.resource() == null || contentArea.isDisabled()) {
             return;
         }
-        previewView.getEngine().loadContent(currentNode.resource().asString(), "application/xhtml+xml");
+        ctx.setLoading(true);
+        try {
+            contentArea.setText(current.resource().asString());
+            contentArea.positionCaret(0);
+        } finally {
+            ctx.setLoading(false);
+        }
+    }
+
+    private void refreshPreview() {
+        ChapterNode current = ctx.currentNode();
+        if (current == null || current.resource() == null) {
+            previewView.getEngine().loadContent(PreviewHtml.emptyDocument(currentTheme));
+            return;
+        }
+        // 预览区是 WebView，吃不到 -epubra-* 变量，改为往 XHTML 里注入一段内联主题样式
+        previewView.getEngine().loadContent(
+                PreviewHtml.withTheme(current.resource().asString(), currentTheme),
+                "application/xhtml+xml");
     }
 
     /** 把编辑器中的内容写回当前章节资源。 */
     private void flushCurrentChapter() {
-        if (currentNode == null || currentNode.resource() == null) {
+        ChapterNode current = ctx.currentNode();
+        if (current == null || current.resource() == null) {
             return;
         }
-        currentNode.resource().setString(contentArea.getText());
+        current.resource().setString(contentArea.getText());
+        ctx.invalidateWordCounts();
     }
 
+    /** 撤销快照回放前把元数据面板的当前值写回书籍；实现已迁 MetadataViewController。 */
     private void flushMetadata() {
-        Metadata metadata = book.metadata();
-        metadata.setFirstTitle(titleField.getText());
-        metadata.setCreatorsInline(authorField.getText());
-        metadata.setLanguage(languageField.getText());
-        metadata.setPublisher(publisherField.getText());
-        metadata.setDescription(descriptionArea.getText());
-    }
-
-    private void removeTocReference(List<TOCReference> nodes, Resource target) {
-        List<TOCReference> matched = new ArrayList<>();
-        for (TOCReference node : nodes) {
-            Resource resolved = resolveResource(node);
-            if (target.equals(resolved)) {
-                matched.add(node);
-            } else {
-                removeTocReference(node.children(), target);
-            }
-        }
-        nodes.removeAll(matched);
-    }
-
-    private void moveChapter(int delta) {
-        ChapterNode node = currentNode;
-        if (node == null || node.resource() == null) {
-            return;
-        }
-        List<SpineReference> references = new ArrayList<>(book.spine().references());
-        int index = -1;
-        for (int i = 0; i < references.size(); i++) {
-            if (references.get(i).resourceId().equals(node.resource().id())) {
-                index = i;
-                break;
-            }
-        }
-        int target = index + delta;
-        if (index < 0 || target < 0 || target >= references.size()) {
-            return;
-        }
-        // 记录交换前的邻居，用于同步目录顺序
-        String neighborId = references.get(target).resourceId();
-        Collections.swap(references, index, target);
-        book.spine().clear();
-        references.forEach(book.spine()::add);
-
-        // 目录与阅读顺序保持一致：仅调整顶层节点
-        List<TOCReference> roots = book.toc().roots();
-        int from = -1;
-        int to = -1;
-        for (int i = 0; i < roots.size(); i++) {
-            Resource resolved = resolveResource(roots.get(i));
-            if (resolved == null) {
-                continue;
-            }
-            if (node.resource().equals(resolved)) {
-                from = i;
-            } else if (neighborId.equals(resolved.id())) {
-                to = i;
-            }
-        }
-        if (from >= 0 && to >= 0) {
-            Collections.swap(roots, from, to);
-        }
-
-        markDirty();
-        refreshAll();
-        selectResource(node.resource());
-        setStatus(delta < 0 ? "章节已上移" : "章节已下移");
+        metadataViewController.flush();
     }
 
     // ------------------------------------------------------------------ 状态
 
     private boolean confirmDiscardChanges() {
-        if (!dirty) {
+        if (!ctx.dirty()) {
             return true;
         }
         return confirm("未保存的修改", "当前书籍有未保存的修改。\n继续操作将丢弃这些修改，是否继续？");
@@ -634,7 +695,7 @@ public class MainController {
         alert.setTitle(title);
         alert.setHeaderText(null);
         alert.setContentText(message);
-        alert.initOwner(stage);
+        alert.initOwner(ctx.stage());
         return alert.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK;
     }
 
@@ -643,12 +704,12 @@ public class MainController {
         alert.setTitle("提示");
         alert.setHeaderText(null);
         alert.setContentText(message);
-        alert.initOwner(stage);
+        alert.initOwner(ctx.stage());
         alert.showAndWait();
     }
 
     private void markDirty() {
-        dirty = true;
+        ctx.setDirty(true);
         updateStatus();
     }
 
@@ -657,23 +718,60 @@ public class MainController {
     }
 
     private void updateStatus() {
-        statsLabel.setText("章节 " + book.spineResources().size()
-                + " · 资源 " + book.resources().size()
-                + " · " + (currentFile == null ? "未保存" : currentFile.getFileName().toString()));
+        chapterStatusLabel.setText("章节 " + ctx.book().spineResources().size());
+        wordStatusLabel.setText("字数 " + wordCount());
+        updateIssueCounters();
+        updateHistoryControls();
         updateTitle();
     }
 
-    private void updateTitle() {
-        if (stage == null) {
-            return;
+    /** 状态栏的错误 / 警告计数，取自最近一次校验结果。 */
+    private void updateIssueCounters() {
+        if (errorStatusLabel != null) {
+            errorStatusLabel.setText("错误 " + ctx.lastReport().errorCount());
         }
-        String name = currentFile == null ? "新书籍" : currentFile.getFileName().toString();
-        stage.setTitle(MainApp.APP_NAME + " - " + name + (dirty ? " *" : ""));
+        if (warningStatusLabel != null) {
+            warningStatusLabel.setText("警告 " + ctx.lastReport().warningCount());
+        }
     }
 
-    private String defaultFileName() {
-        String title = book.metadata().firstTitle().isBlank() ? "新书籍" : book.metadata().firstTitle();
-        return title.replaceAll("[\\\\/:*?\"<>|]", "_") + ".epub";
+    /**
+     * 全书正文字数：各章节 XHTML 剥离标签后的非空白字符数之和。
+     *
+     * <p>状态栏在每次击键后都会刷新，因此逐章统计的结果按资源缓存起来，只有当前正在编辑的
+     * 那一章实时统计（编辑器里尚未写回的输入也要计入）。缓存由 {@link BookContext#invalidateWordCounts()}
+     * 在内容被程序化改写或换书时整体失效。
+     */
+    private int wordCount() {
+        Resource current = ctx.currentNode() == null ? null : ctx.currentNode().resource();
+        int total = 0;
+        for (Resource chapter : ctx.book().spineResources()) {
+            if (chapter == current && !contentArea.isDisabled()) {
+                total += TextSearch.plainTextLength(contentArea.getText());
+                continue;
+            }
+            total += ctx.wordCounts().computeIfAbsent(chapter, resource -> TextSearch.plainTextLength(resource.asString()));
+        }
+        return total;
+    }
+
+    private void updateHistoryControls() {
+        boolean canUndo = ctx.history().canUndo();
+        boolean canRedo = ctx.history().canRedo();
+        if (undoItem != null) {
+            undoItem.setDisable(!canUndo);
+        }
+        if (redoItem != null) {
+            redoItem.setDisable(!canRedo);
+        }
+    }
+
+    private void updateTitle() {
+        if (ctx.stage() == null) {
+            return;
+        }
+        String name = ctx.currentFile() == null ? "新书籍" : ctx.currentFile().getFileName().toString();
+        ctx.stage().setTitle(EpubraApp.APP_NAME + " - " + name + (ctx.dirty() ? " *" : ""));
     }
 
     private void showError(String title, String message, Exception e) {
@@ -681,7 +779,7 @@ public class MainController {
         alert.setTitle(title);
         alert.setHeaderText(message);
         alert.setContentText(e.getMessage());
-        alert.initOwner(stage);
+        alert.initOwner(ctx.stage());
         alert.showAndWait();
     }
 

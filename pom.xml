@@ -2,152 +2,139 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
-  <modelVersion>4.0.0</modelVersion>
 
-  <groupId>com.epubra</groupId>
-  <artifactId>epubra</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
-  <packaging>jar</packaging>
+    <modelVersion>4.0.0</modelVersion>
 
-  <name>Epubra</name>
-  <description>EPUB 电子书维护工具（JavaFX 桌面应用）</description>
+    <groupId>com.epubra</groupId>
+    <artifactId>epubra-parent</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
 
-  <properties>
-    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-    <maven.compiler.release>25</maven.compiler.release>
+    <name>Epubra :: parent</name>
+    <description>EPUB 文件维护工具（JavaFX 桌面端）— 多模块聚合构建</description>
 
-    <javafx.version>24.0.1</javafx.version>
-    <epublib.version>3.1</epublib.version>
-    <slf4j.version>2.0.16</slf4j.version>
-    <junit.version>5.11.4</junit.version>
+    <modules>
+        <module>epubra-epublib</module>
+        <module>epubra-app</module>
+    </modules>
 
-    <main.class>com.epubra.app.Main</main.class>
-  </properties>
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
-  <dependencies>
-    <!-- ===== JavaFX ===== -->
-    <dependency>
-      <groupId>org.openjfx</groupId>
-      <artifactId>javafx-controls</artifactId>
-      <version>${javafx.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.openjfx</groupId>
-      <artifactId>javafx-fxml</artifactId>
-      <version>${javafx.version}</version>
-    </dependency>
+        <maven.compiler.release>25</maven.compiler.release>
 
-    <!-- ===== EPUB 内核 ===== -->
-    <dependency>
-      <groupId>com.positiondev.epublib</groupId>
-      <artifactId>epublib-core</artifactId>
-      <version>${epublib.version}</version>
-      <exclusions>
-        <!-- epublib 传递的 slf4j 1.x 与本项目 2.x 不兼容，统一由下方显式声明 -->
-        <exclusion>
-          <groupId>org.slf4j</groupId>
-          <artifactId>slf4j-api</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.slf4j</groupId>
-          <artifactId>slf4j-simple</artifactId>
-        </exclusion>
-      </exclusions>
-    </dependency>
+        <javafx.version>24.0.1</javafx.version>
+        <!-- 平台 classifier，由下方 os profile 覆盖；Windows 为默认值 -->
+        <javafx.platform>win</javafx.platform>
 
-    <!-- ===== 日志 ===== -->
-    <dependency>
-      <groupId>org.slf4j</groupId>
-      <artifactId>slf4j-api</artifactId>
-      <version>${slf4j.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.slf4j</groupId>
-      <artifactId>slf4j-simple</artifactId>
-      <version>${slf4j.version}</version>
-    </dependency>
+        <junit.version>5.12.0</junit.version>
+    </properties>
 
-    <!-- ===== 测试 ===== -->
-    <dependency>
-      <groupId>org.junit.jupiter</groupId>
-      <artifactId>junit-jupiter</artifactId>
-      <version>${junit.version}</version>
-      <scope>test</scope>
-    </dependency>
-  </dependencies>
+    <dependencyManagement>
+        <dependencies>
+            <!-- 内部模块 -->
+            <dependency>
+                <groupId>com.epubra</groupId>
+                <artifactId>epubra-epublib</artifactId>
+                <version>${project.version}</version>
+            </dependency>
 
-  <build>
-    <plugins>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-compiler-plugin</artifactId>
-        <version>3.13.0</version>
-        <configuration>
-          <release>${maven.compiler.release}</release>
-          <encoding>UTF-8</encoding>
-        </configuration>
-      </plugin>
+            <!-- JavaFX：统一在父 POM 锁定版本与平台 classifier，子模块只写 groupId/artifactId -->
+            <dependency>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-base</artifactId>
+                <version>${javafx.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-graphics</artifactId>
+                <version>${javafx.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-controls</artifactId>
+                <version>${javafx.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-fxml</artifactId>
+                <version>${javafx.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-media</artifactId>
+                <version>${javafx.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-web</artifactId>
+                <version>${javafx.version}</version>
+            </dependency>
 
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-surefire-plugin</artifactId>
-        <version>3.5.2</version>
-        <configuration>
-          <!-- 消除 Windows 下 surefire booter 的 Class-Path 绝对路径检查提示 -->
-          <argLine>-Djdk.net.URLClassPath.disableClassPathURLCheck=true</argLine>
-        </configuration>
-      </plugin>
+            <!-- 测试 -->
+            <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter</artifactId>
+                <version>${junit.version}</version>
+                <scope>test</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
-      <!--
-        运行时依赖路径由 build-classpath 算出后注入 exec-maven-plugin。
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.13.0</version>
+                    <configuration>
+                        <release>${maven.compiler.release}</release>
+                        <encoding>${project.build.sourceEncoding}</encoding>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.5.3</version>
+                    <configuration>
+                        <argLine>-Dfile.encoding=UTF-8</argLine>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.openjfx</groupId>
+                    <artifactId>javafx-maven-plugin</artifactId>
+                    <version>0.0.8</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
 
-        关于运行方式的取舍（已实测）：
-        1. 不使用 org.openjfx:javafx-maven-plugin —— 它在遇到无法推导模块描述符的
-           JAR（kxml2、xmlpull，epublib 的必需依赖）时会直接丢弃，导致界面能启动、
-           但读写 EPUB 时抛 NoClassDefFoundError；其 includePathExceptionsInClasspath
-           开关与 MODULEPATH / CLASSPATH 两种模式实测均无效。
-        2. 当前采用"全部依赖走 classpath"：JavaFX 从 classpath 运行需要主类不是
-           Application 子类，因此入口拆成 Main（普通类）+ App（Application 子类）。
-           实测 JavaFX 24.0.1 在 JDK 25 上以此方式可正常加载 FXML 与控制器。
-        3. 打包发布阶段若需要 jlink / jpackage，再改为模块化（module-info.java），
-           届时 JavaFX 走模块路径、epublib 等以自动模块引入。
-      -->
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-dependency-plugin</artifactId>
-        <version>3.8.1</version>
-        <executions>
-          <execution>
-            <id>resolve-runtime-classpath</id>
-            <phase>process-classes</phase>
-            <goals>
-              <goal>build-classpath</goal>
-            </goals>
-            <configuration>
-              <includeScope>runtime</includeScope>
-              <outputProperty>epubra.runtime.classpath</outputProperty>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
+    <profiles>
+        <profile>
+            <id>platform-mac</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                </os>
+            </activation>
+            <properties>
+                <javafx.platform>mac</javafx.platform>
+            </properties>
+        </profile>
+        <profile>
+            <id>platform-linux</id>
+            <activation>
+                <os>
+                    <family>unix</family>
+                    <name>linux</name>
+                </os>
+            </activation>
+            <properties>
+                <javafx.platform>linux</javafx.platform>
+            </properties>
+        </profile>
+    </profiles>
 
-      <!-- 运行：mvn process-classes exec:exec ；冒烟自检：EPUBRA_SMOKE=true mvn process-classes exec:exec -->
-      <plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>exec-maven-plugin</artifactId>
-        <version>3.5.0</version>
-        <configuration>
-          <executable>${java.home}/bin/java</executable>
-          <arguments>
-            <!-- JavaFX 24 在 JDK 25 上加载 native 库需要放开 native access，否则会有受限方法警告 -->
-            <argument>--enable-native-access=ALL-UNNAMED</argument>
-            <argument>-cp</argument>
-            <argument>${project.build.directory}/classes;${epubra.runtime.classpath}</argument>
-            <argument>${main.class}</argument>
-          </arguments>
-        </configuration>
-      </plugin>
-    </plugins>
-  </build>
 </project>

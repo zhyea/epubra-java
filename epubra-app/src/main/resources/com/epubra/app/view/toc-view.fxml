@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TreeView?>
+<?import javafx.scene.layout.VBox?>
+
+<!--
+  目录侧边视图：由 main-window.fxml 以 <fx:include fx:id="tocView"/> 引入，
+  控制器实例注入父控制器的 tocViewController 字段。
+-->
+<VBox xmlns="http://javafx.com/javafx/24" xmlns:fx="http://javafx.com/fxml"
+      styleClass="side-view" spacing="6.0"
+      maxWidth="Infinity" maxHeight="Infinity"
+      fx:controller="com.epubra.app.controller.TocController">
+    <padding>
+        <Insets top="8.0" right="8.0" bottom="8.0" left="8.0"/>
+    </padding>
+    <Label text="目录" styleClass="panel-title"/>
+    <TreeView fx:id="tocTree" VBox.vgrow="ALWAYS"/>
+</VBox>

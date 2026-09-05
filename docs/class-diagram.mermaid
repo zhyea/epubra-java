@@ -1,0 +1,280 @@
+classDiagram
+    direction LR
+
+    class Severity {
+        <<enum>>
+        ERROR
+        WARNING
+        +label() String
+    }
+
+    class IssueGroup {
+        <<enum>>
+        CONTAINER
+        OPF
+        SPINE
+        NAVIGATION
+        REFERENCE
+        METADATA
+        +label() String
+    }
+
+    class IssueKind {
+        <<enum>>
+        MIMETYPE_MISSING
+        MIMETYPE_NOT_FIRST
+        MIMETYPE_NOT_STORED
+        MIMETYPE_CONTENT_INVALID
+        CONTAINER_XML_MISSING
+        CONTAINER_ROOTFILE_INVALID
+        CONTAINER_ROOTFILE_MISSING
+        OPF_ENTRY_MISSING
+        CONTAINER_UNREADABLE
+        OPF_PATH_INVALID
+        MANIFEST_EMPTY
+        MANIFEST_ID_BLANK
+        MANIFEST_HREF_BLANK
+        MANIFEST_MEDIA_TYPE_BLANK
+        MANIFEST_MEDIA_TYPE_MISMATCH
+        MANIFEST_ITEM_EMPTY_DATA
+        MANIFEST_ITEM_NOT_IN_ZIP
+        OPF_DUPLICATE_ID
+        OPF_DUPLICATE_HREF
+        OPF_VERSION_INVALID
+        SPINE_EMPTY
+        SPINE_IDREF_UNRESOLVED
+        SPINE_IDREF_DUPLICATE
+        SPINE_TOC_ID_UNRESOLVED
+        SPINE_TOC_NOT_NCX
+        SPINE_NON_CONTENT_DOCUMENT
+        MANIFEST_DOC_NOT_IN_SPINE
+        SPINE_ALL_NON_LINEAR
+        SPINE_ORDER_VS_TOC
+        TOC_EMPTY
+        TOC_TARGET_MISSING
+        TOC_TARGET_NOT_IN_SPINE
+        TOC_FRAGMENT_MISSING
+        TOC_TITLE_BLANK
+        NAV_MISSING
+        NAV_MULTIPLE
+        NAV_NOT_XHTML
+        NAV_EMPTY
+        NAV_PARSE_FAILED
+        NAV_TARGET_MISSING
+        NAV_VS_TOC_INCONSISTENT
+        NCX_MISSING
+        NCX_NOT_REFERENCED
+        NCX_PARSE_FAILED
+        NCX_TARGET_MISSING
+        NCX_VS_TOC_INCONSISTENT
+        COVER_ID_UNRESOLVED
+        COVER_NOT_IMAGE
+        XHTML_NOT_WELL_FORMED
+        REFERENCE_TARGET_MISSING
+        REFERENCE_TARGET_OUTSIDE
+        FRAGMENT_MISSING
+        RESOURCE_ORPHAN
+        METADATA_TITLE_MISSING
+        METADATA_IDENTIFIER_MISSING
+        METADATA_LANGUAGE_MISSING
+        METADATA_MODIFIED_MISSING
+        +code() String
+        +group() IssueGroup
+        +severity() Severity
+        +template() String
+    }
+
+    class ValidationIssue {
+        <<record>>
+        +IssueKind kind
+        +Severity severity
+        +String message
+        +String resourceHref
+        +String detail
+        +ValidationIssue(IssueKind kind, String message)
+        +ValidationIssue(IssueKind kind, String message, String resourceHref)
+        +ValidationIssue(IssueKind kind, Severity severity, String message, String resourceHref, String detail)
+        +location() String
+    }
+
+    class ValidationReport {
+        +ValidationReport EMPTY
+        -List~ValidationIssue~ issues
+        -boolean containerChecked
+        +issues() List~ValidationIssue~
+        +errors() List~ValidationIssue~
+        +warnings() List~ValidationIssue~
+        +errorCount() int
+        +warningCount() int
+        +isEmpty() boolean
+        +containerChecked() boolean
+        +summary() String
+    }
+
+    class ContainerFacts {
+        <<record>>
+        +Path file
+        +Set~String~ entryNames
+        +String firstEntryName
+        +boolean mimetypePresent
+        +boolean mimetypeStored
+        +String mimetypeContent
+        +boolean containerPresent
+        +String rootfileFullPath
+        +RawOpf opf
+        +of(Path file) ContainerFacts
+        +hasEntry(String name) boolean
+        +readFirstEntryName(Path file) String
+    }
+
+    class RawOpf {
+        <<record>>
+        +boolean present
+        +boolean parsed
+        +String version
+        +String uniqueIdentifierId
+        +List~ManifestItem~ items
+    }
+
+    class ManifestItem {
+        <<record>>
+        +String id
+        +String href
+        +String mediaType
+    }
+
+    class ContainerRules {
+        <<static>>
+        +check(ContainerFacts facts, Book book) List~ValidationIssue~
+        -checkMimetype(ContainerFacts facts, List~ValidationIssue~ sink) void
+        -checkContainerXml(ContainerFacts facts, List~ValidationIssue~ sink) void
+        -checkRawOpf(ContainerFacts facts, Book book, List~ValidationIssue~ sink) void
+        -checkManifestEntriesInZip(ContainerFacts facts, Book book, List~ValidationIssue~ sink) void
+    }
+
+    class StructureRules {
+        <<static>>
+        +check(Book book) List~ValidationIssue~
+        -checkOpfBasics(Book book, List~ValidationIssue~ sink) void
+        -checkSpine(Book book, List~ValidationIssue~ sink) void
+        -checkToc(Book book, List~ValidationIssue~ sink) void
+        -checkNav(Book book, List~ValidationIssue~ sink) void
+        -checkNcx(Book book, List~ValidationIssue~ sink) void
+        -checkCover(Book book, List~ValidationIssue~ sink) void
+        -checkMetadata(Book book, List~ValidationIssue~ sink) void
+    }
+
+    class ReferenceRules {
+        <<static>>
+        +check(Book book) List~ValidationIssue~
+        -checkWellFormed(Book book, List~ValidationIssue~ sink) void
+        -checkReferences(Book book, List~ValidationIssue~ sink) void
+        -checkOrphans(Book book, List~ValidationIssue~ sink) void
+    }
+
+    class EpubValidator {
+        +validate(Book book) ValidationReport
+        +validate(Book book, Path containerFile) ValidationReport
+        -merge(List~ValidationIssue~ parts, boolean containerChecked) ValidationReport
+    }
+
+    class ResourceReferences {
+        <<static>>
+        +extract(Resource resource) Extraction
+        +resolveTarget(String baseDir, String rawTarget) String
+        +isExternal(String rawTarget) boolean
+        +percentDecode(String text) String
+        +urlReferences(String cssText) List~String~
+        +fragmentIds(Resource resource) Set~String~
+    }
+
+    class Reference {
+        <<record>>
+        +String sourceHref
+        +String context
+        +String rawTarget
+    }
+
+    class Extraction {
+        <<record>>
+        +List~Reference~ references
+        +boolean wellFormed
+    }
+
+    class ValidationTexts {
+        <<static>>
+        +severityLabel(Severity severity) String
+        +groupLabel(IssueGroup group) String
+        +summary(ValidationReport report) String
+        +statusText(ValidationReport report, boolean containerStale) String
+        +filter(List~ValidationIssue~ issues, String keyword, boolean onlyErrors) List~ValidationIssue~
+    }
+
+    class ValidationIssueRow {
+        -ValidationIssue issue
+        +getSeverity() String
+        +getSeverityKey() String
+        +getCategory() String
+        +getMessage() String
+        +getLocation() String
+        +getIssue() ValidationIssue
+    }
+
+    class MainController {
+        -EpubValidator validator
+        -ValidationReport lastReport
+        -TableView~ValidationIssueRow~ validationTable
+        -Label validationSummaryLabel
+        -TextField validationFilterField
+        -CheckBox validationErrorsOnlyCheck
+        +onValidate() void
+        +onLocateIssue() void
+        -showValidationReport(ValidationReport report) void
+        -applyValidationFilter() void
+        -locateIssue(ValidationIssue issue) void
+        -selectResourceRow(Resource resource) void
+    }
+
+    class Book {
+        +resources() Resources
+        +spine() Spine
+        +toc() TableOfContents
+        +metadata() Metadata
+        +version() EpubVersion
+        +opfPath() String
+        +contentDirectory() String
+        +coverResourceId() String
+        +coverResource() Optional~Resource~
+        +navResource() Resource
+        +spineResources() List~Resource~
+        +unreferencedResources() List~Resource~
+    }
+
+    IssueKind --> IssueGroup : group
+    IssueKind --> Severity : default severity
+    ValidationIssue --> IssueKind : kind
+    ValidationIssue --> Severity : severity
+    ValidationReport *-- ValidationIssue : 已排序且不可变
+    ContainerFacts *-- RawOpf : opf
+    RawOpf *-- ManifestItem : items
+    EpubValidator ..> ContainerFacts : of()
+    EpubValidator ..> ContainerRules : check()
+    EpubValidator ..> StructureRules : check()
+    EpubValidator ..> ReferenceRules : check()
+    EpubValidator ..> ValidationReport : 产出
+    ContainerRules ..> ValidationIssue : 产出
+    StructureRules ..> ValidationIssue : 产出
+    ReferenceRules ..> ValidationIssue : 产出
+    ContainerRules ..> Book : 只读
+    StructureRules ..> Book : 只读
+    ReferenceRules ..> Book : 只读
+    ReferenceRules ..> ResourceReferences : extract()
+    ResourceReferences ..> Extraction : 产出
+    Extraction o-- Reference : references
+    Book ..> ResourceReferences : unreferencedResources 复用
+    MainController --> EpubValidator : 持有
+    MainController --> ValidationReport : 持有 lastReport
+    MainController --> ValidationIssueRow : 表格行
+    MainController ..> ValidationTexts : 文案与过滤
+    ValidationIssueRow --> ValidationIssue : 包装
+    ValidationTexts ..> ValidationReport : 读取统计

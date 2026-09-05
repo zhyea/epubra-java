@@ -1,0 +1,66 @@
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant MC as MainController
+    participant VT as ValidationTexts
+    participant EV as EpubValidator
+    participant CF as ContainerFacts
+    participant CR as ContainerRules
+    participant SR as StructureRules
+    participant RR as ReferenceRules
+    participant RRS as ResourceReferences
+    participant RPT as ValidationReport
+    participant TV as validationTable
+
+    U->>MC: 点击工具栏「结构校验」/ 工具菜单 / F7
+    MC->>MC: commitPendingEdits()（flushCurrentChapter + flushMetadata）
+    Note over MC: 只读操作：不调用 beginChange()、不 markDirty()，不入撤销栈
+
+    alt currentFile != null 且 Files.isRegularFile(currentFile)
+        MC->>EV: validate(book, currentFile)
+        EV->>CF: ContainerFacts.of(file)
+        alt 读取成功
+            CF-->>EV: facts（条目名 / 物理首条目 / mimetype / container.xml / 原始 OPF）
+            EV->>CR: check(facts, book)
+            CR-->>EV: A01~A09 + B08~B11 问题
+        else IOException
+            CF-->>EV: 抛出 IOException
+            EV->>EV: 记 A09 CONTAINER_UNREADABLE，facts = null
+        end
+    else 未保存 / 文件不存在
+        MC->>EV: validate(book)
+        Note over EV: facts = null，跳过全部容器级规则
+    end
+
+    EV->>SR: check(book)
+    SR-->>EV: B01~B07 + C 组 + D 组 + F 组问题
+    EV->>RR: check(book)
+    loop 每个 XHTML / SVG / CSS 资源
+        RR->>RRS: extract(resource)
+        RRS-->>RR: Extraction(references, wellFormed)
+    end
+    RR->>RR: resolveTarget + 三连回退查 Resources
+    RR-->>EV: E01~E05 问题
+
+    EV->>RPT: new ValidationReport(合并全部问题)
+    RPT->>RPT: 排序：级别 → 分组 → 资源路径 → 规则号 → 文案
+    RPT-->>EV: report
+    EV-->>MC: report
+
+    MC->>VT: summary(report) / statusText(report, containerStale)
+    VT-->>MC: "3 个错误 · 5 个警告"
+    MC->>TV: setItems(report.issues() -> ValidationIssueRow)
+    MC->>MC: editorTabs 切到「校验结果」Tab + setStatus(...)
+    MC-->>U: 展示问题列表
+
+    U->>TV: 双击某一行
+    TV->>MC: onLocateIssue()
+    MC->>MC: locateIssue(issue)
+    alt issue.resourceHref() 指向正文资源
+        MC->>MC: selectResource(resource) + editorTabs.selectFirst()（内容 Tab）
+    else 指向图片 / CSS / 字体等
+        MC->>MC: selectResourceRow(resource)（在资源表选中）
+    else 整书级 / 容器级问题
+        MC->>MC: setStatus("该问题无法定位到具体资源")
+    end
+    MC-->>U: 焦点跳到出问题的章节或资源

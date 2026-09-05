@@ -2,8 +2,10 @@ package com.epubra.epublib.io;
 
 import com.epubra.epublib.domain.Book;
 import com.epubra.epublib.domain.ChapterTemplates;
+import com.epubra.epublib.domain.MediaTypes;
 import com.epubra.epublib.domain.Metadata;
 import com.epubra.epublib.domain.Resource;
+import com.epubra.epublib.domain.SpineReference;
 import com.epubra.epublib.domain.TOCReference;
 import com.epubra.epublib.util.Hrefs;
 
@@ -44,10 +46,22 @@ public class EpubWriter {
         }
     }
 
+    /**
+     * 写出到输出流。
+     *
+     * <p>ZIP 的中央目录在 {@link ZipOutputStream#close()} 时才写入，仅 flush 得到的是不完整归档。
+     * 因此：调用方传入 {@link ZipOutputStream} 时由调用方自行关闭；
+     * 传入普通流时，本方法负责关闭它内部创建的 ZIP 流，保证返回的字节是完整 EPUB。
+     */
     public void write(Book book, OutputStream out) throws IOException {
-        ZipOutputStream zip = out instanceof ZipOutputStream zos ? zos : new ZipOutputStream(out, StandardCharsets.UTF_8);
-        writeTo(book, zip);
-        zip.flush();
+        if (out instanceof ZipOutputStream zip) {
+            writeTo(book, zip);
+            zip.flush();
+            return;
+        }
+        try (ZipOutputStream zip = new ZipOutputStream(out, StandardCharsets.UTF_8)) {
+            writeTo(book, zip);
+        }
     }
 
     private void writeTo(Book book, ZipOutputStream zip) throws IOException {
@@ -55,13 +69,17 @@ public class EpubWriter {
 
         Resource nav = ensureNav(book);
         Resource ncx = ensureNcx(book);
+        // nav / NCX 是由目录派生的生成物：内容必须同步回资源，否则内存模型里的导航文档会停留在
+        // 上一次生成（或干脆是空的），与写出结果分叉，校验时表现为「导航文档无法解析」这类误报
+        nav.setString(generateNav(book));
+        ncx.setString(generateNcx(book));
 
         writeMimetype(zip);
         writeEntry(zip, "META-INF/container.xml", containerXml(book).getBytes(StandardCharsets.UTF_8));
 
         writeEntry(zip, book.opfPath(), generateOpf(book, nav, ncx).getBytes(StandardCharsets.UTF_8));
-        writeEntry(zip, nav.href(), generateNav(book).getBytes(StandardCharsets.UTF_8));
-        writeEntry(zip, ncx.href(), generateNcx(book).getBytes(StandardCharsets.UTF_8));
+        writeEntry(zip, nav.href(), nav.data());
+        writeEntry(zip, ncx.href(), ncx.data());
 
         for (Resource resource : book.resources().all()) {
             if (resource == nav || resource == ncx) {
@@ -107,8 +125,7 @@ public class EpubWriter {
             return existing;
         }
         String href = book.resources().uniqueHref(book.contentDirectory() + "nav.xhtml");
-        Resource nav = new Resource(book.resources().uniqueId("nav"), href,
-                com.epubra.epublib.domain.MediaTypes.XHTML);
+        Resource nav = new Resource(book.resources().uniqueId("nav"), href, MediaTypes.XHTML);
         nav.setProperties("nav");
         book.resources().add(nav);
         return nav;
@@ -122,7 +139,7 @@ public class EpubWriter {
         }
         Resource ncx = new Resource(book.resources().uniqueId("ncx"),
                 book.resources().uniqueHref(book.contentDirectory() + "toc.ncx"),
-                com.epubra.epublib.domain.MediaTypes.NCX);
+                MediaTypes.NCX);
         book.resources().add(ncx);
         book.spine().setTocResourceId(ncx.id());
         return ncx;
@@ -196,7 +213,7 @@ public class EpubWriter {
         sb.append("  </manifest>\n");
 
         sb.append("  <spine toc=\"%s\">\n".formatted(escapeAttr(ncx.id())));
-        for (com.epubra.epublib.domain.SpineReference reference : book.spine().references()) {
+        for (SpineReference reference : book.spine().references()) {
             String linear = reference.linear() ? "" : " linear=\"no\"";
             sb.append("    <itemref idref=\"%s\"%s/>\n".formatted(escapeAttr(reference.resourceId()), linear));
         }

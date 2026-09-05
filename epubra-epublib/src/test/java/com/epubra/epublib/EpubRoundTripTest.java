@@ -11,6 +11,8 @@ import com.epubra.epublib.io.EpubWriter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -223,5 +225,23 @@ class EpubRoundTripTest {
         assertEquals(1, again.spineResources().size());
         assertNull(again.resources().getByHref(second.href()));
         assertFalse(again.spineResources().get(0).asString().contains("第二章"));
+    }
+
+    @Test
+    void 写出到普通输出流应得到完整归档() throws IOException {
+        // ZIP 的中央目录在 close 时才写入：write(Book, OutputStream) 必须自行收尾，
+        // 否则下游（如撤销快照）拿到的是不完整的字节流，读回时会失败
+        Book book = BookFactory.createEmpty("内存写出");
+        book.addChapter("第二章", ChapterTemplates.empty("第二章"));
+
+        byte[] data;
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            writer.write(book, out);
+            data = out.toByteArray();
+        }
+
+        Book reloaded = reader.read(new ByteArrayInputStream(data));
+        assertEquals("内存写出", reloaded.metadata().firstTitle());
+        assertEquals(2, reloaded.spineResources().size());
     }
 }

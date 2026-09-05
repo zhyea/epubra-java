@@ -32,6 +32,12 @@
             <groupId>org.openjfx</groupId>
             <artifactId>javafx-web</artifactId>
         </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -40,9 +46,9 @@
                 <groupId>org.openjfx</groupId>
                 <artifactId>javafx-maven-plugin</artifactId>
                 <configuration>
-                    <!-- 走 Launcher 而非 MainApp：非模块化构建下以 Application 子类为主类会
+                    <!-- 走 Launcher 而非 EpubraApp：非模块化构建下以 Application 子类为主类会
                          被 JVM 的运行时组件校验拦下，改由引导类启动后两种运行方式都成立 -->
-                    <mainClass>com.epubra.app.Launcher</mainClass>
+                    <mainClass>com.epubra.app.EpubraLauncher</mainClass>
                 </configuration>
             </plugin>
         </plugins>
@@ -127,7 +133,7 @@
                                         <argument>--main-jar</argument>
                                         <argument>${project.build.finalName}.jar</argument>
                                         <argument>--main-class</argument>
-                                        <argument>com.epubra.app.Launcher</argument>
+                                        <argument>com.epubra.app.EpubraLauncher</argument>
                                     </arguments>
                                 </configuration>
                             </execution>

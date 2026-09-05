@@ -11,12 +11,12 @@ package com.epubra.app;
  * <p>经由本类（非 Application 子类）间接调用即可绕开该校验，使同一份构建产物
  * 既能被 {@code javafx:run} 运行，也能被打包成可双击的桌面应用。
  */
-public final class Launcher {
+public final class EpubraLauncher {
 
-    private Launcher() {
+    private EpubraLauncher() {
     }
 
     public static void main(String[] args) {
-        MainApp.main(args);
+        EpubraApp.main(args);
     }
 }
