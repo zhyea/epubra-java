@@ -81,6 +81,11 @@ public final class AutosaveConfig {
     }
 
     private static Preferences preferences() {
-        return Preferences.userRoot().node("/Epubra/AutosaveConfig");
+        Preferences prefs = Preferences.userRoot().node("/Epubra/AutosaveConfig");
+        // 一次性把旧节点 /com/epubra/app/support/AutosaveConfig 的所有键搬到新节点,再删旧节点
+        PreferencesMigrator.migrate(
+                Preferences.userRoot().node("/com/epubra/app/support/AutosaveConfig"),
+                prefs);
+        return prefs;
     }
 }

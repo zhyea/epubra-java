@@ -1,6 +1,7 @@
 package com.epubra.app.controller;
 
 import com.epubra.app.EpubraApp;
+import com.epubra.app.support.AppPaths;
 import com.epubra.app.support.Autosave;
 import com.epubra.app.support.BookContext;
 import com.epubra.app.support.BookHistory;
@@ -164,6 +165,12 @@ public class MainController {
 
     @FXML
     public void initialize() {
+        // WebView 缓存目录必须显式指定,否则 JavaFX native 会按 main class FQCN
+        // 派生一个 ~/.Epubra/.com.epubra.app.EpubraApp/webview/ 子目录;
+        // 公开 API setUserDataDirectory 覆盖默认行为,锁定到 AppPaths.webviewCacheDir()。
+        // 必须在任何 loadContent/load 之前调用(否则 native 已创建默认目录,改不动了)。
+        previewView.getEngine().setUserDataDirectory(AppPaths.webviewCacheDir().toFile());
+
         // 子控制器由 fx:include 实例化（先于本方法执行 @FXML 注入），这里统一注入
         // BookContext 与回调。SidebarController 横跨活动栏 / 三个视图 / 底部面板多个
         // FXML 文件，无法归属某个子 FXML，保持手动构造。
