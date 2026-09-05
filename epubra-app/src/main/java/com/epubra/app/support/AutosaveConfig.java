@@ -42,7 +42,7 @@ public final class AutosaveConfig {
         return debounceSeconds;
     }
 
-    /** 自定义暂存目录；为 null 时调用方走默认 {@code <user.dir>/epubra-autosave}。 */
+    /** 自定义暂存目录；为 null 时调用方走 {@link AppPaths#autosaveDir()}。 */
     public String dirOverride() {
         return dirOverride;
     }
@@ -81,6 +81,6 @@ public final class AutosaveConfig {
     }
 
     private static Preferences preferences() {
-        return Preferences.userNodeForPackage(AutosaveConfig.class);
+        return Preferences.userRoot().node("/Epubra/AutosaveConfig");
     }
 }

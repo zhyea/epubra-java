@@ -156,7 +156,7 @@ class RecentProjectsStoreTest {
     void survivesRoundTripThroughPreferences() {
         RecentProjectsStore.addWorkspace("D:/Round-trip");
         // 直接重新打开 Preferences 节点应能读到
-        Preferences p = Preferences.userNodeForPackage(RecentProjectsStore.class);
+        Preferences p = Preferences.userRoot().node("/Epubra/RecentProjectsStore");
         String raw = p.get("recentWorkspaces", "");
         assertTrue(raw.contains("D:/Round-trip"));
     }

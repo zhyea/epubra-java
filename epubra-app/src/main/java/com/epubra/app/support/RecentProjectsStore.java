@@ -158,6 +158,6 @@ public final class RecentProjectsStore {
     }
 
     private static Preferences preferences() {
-        return Preferences.userNodeForPackage(RecentProjectsStore.class);
+        return Preferences.userRoot().node("/Epubra/RecentProjectsStore");
     }
 }

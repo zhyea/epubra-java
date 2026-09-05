@@ -78,6 +78,6 @@ public final class ThemeManager {
     }
 
     private static Preferences preferences() {
-        return Preferences.userNodeForPackage(ThemeManager.class);
+        return Preferences.userRoot().node("/Epubra/ThemeManager");
     }
 }

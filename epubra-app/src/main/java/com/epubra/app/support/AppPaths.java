@@ -3,6 +3,9 @@ package com.epubra.app.support;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
 /**
@@ -28,6 +31,12 @@ import java.util.stream.Stream;
  * {@code ~/epubra-autosave}。{@link #migrateLegacyIfAny()} 会在首次调用
  * {@link #userDataDir()} 时把旧目录下的文件一次性搬到新位置，然后删除空目录。
  * 找不到旧目录或新位置已有同名文件时静默跳过——不做覆盖，迁移是「尽力而为」。
+ *
+ * <h2>幂等与重入</h2>
+ * <p>{@link #redirectUserHome()} 用 {@link AtomicBoolean} 标记已完成的重定向，
+ * 多次调用结果一致；{@link #userDataDir()} 等路径方法优先读
+ * {@code epubra.userDataDir} 系统属性，避免在已被重定向的 {@code user.home} 上
+ * 二次拼接产生 {@code ~/.Epubra/.Epubra/autosave} 这种嵌套。
  */
 public final class AppPaths {
 
@@ -43,73 +52,96 @@ public final class AppPaths {
     /** 旧版本使用的全局 autosave 目录名（已弃用，迁移用）。 */
     public static final String LEGACY_AUTOSAVE_NAME = "epubra-autosave";
 
+    /** 重定向状态标记：{@link #redirectUserHome()} 完成后置 true，避免重复改写 user.home。 */
+    private static final AtomicBoolean REDIRECTED = new AtomicBoolean(false);
+
+    /** 重定向后的目标路径属性名，供 {@link #userDataDir()} 等方法优先读取。 */
+    private static final String REDIRECTED_PATH_PROPERTY = "epubra.userDataDir";
+
     private static final System.Logger LOG = System.getLogger(AppPaths.class.getName());
 
     private AppPaths() {
     }
 
     /**
-     * 用户数据根目录：{@code <user.home>/.Epubra/}。目录不存在则懒创建。
+     * 用户数据根目录：{@code <user.home>/.Epubra/}。
      *
-     * <p>本方法只读 {@code user.home} 系统属性——{@link EpubraLauncher} 在调用本类
-     * 任何路径方法之前会先 {@link #redirectUserHome()} 把 {@code user.home} 重写为
-     * {@code ~/.Epubra/} 的父目录之外的某个稳定值，再由本方法把它拼回
-     * {@code ~/.Epubra/}。因此重定向时序必须在 launcher 启动最早阶段完成。
-     *
-     * @return 路径始终以 {@code .Epubra} 结尾；可能不存在（{@link #ensureDirectory(Path)} 失败时）
+     * <p>优先级：
+     * <ol>
+     *   <li>{@link #redirectUserHome()} 已执行 → 直接返回其写入的 {@code epubra.userDataDir}</li>
+     *   <li>否则基于当前 {@code user.home} 派生</li>
+     * </ol>
      */
     public static Path userDataDir() {
-        return resolve(APP_DIR_NAME);
+        String explicit = System.getProperty(REDIRECTED_PATH_PROPERTY);
+        if (explicit != null && !explicit.isBlank()) {
+            return Path.of(explicit);
+        }
+        String home = System.getProperty("user.home", ".");
+        if (home.isBlank()) {
+            home = ".";
+        }
+        return Path.of(home, APP_DIR_NAME);
     }
 
-    /** 草稿目录：{@code <user.home>/.Epubra/autosave/}。懒创建。 */
+    /** 草稿目录：{@code <user.home>/.Epubra/autosave/}。 */
     public static Path autosaveDir() {
-        return resolve(APP_DIR_NAME, AUTOSAVE_SUBDIR);
+        return userDataDir().resolve(AUTOSAVE_SUBDIR);
     }
 
     /**
      * WebView 缓存目录：{@code <user.home>/.Epubra/webview/}。
      *
      * <p>实际由 JavaFX native 在第一次 WebView 加载时根据当前 {@code user.home} 派生，
-     * 本方法预先创建目录保证 launcher 重定向后 native 能直接写入，而不会因
-     * 上层目录缺失失败。
+     * 本方法返回的路径供 launcher 用于预创建。
      */
     public static Path webviewCacheDir() {
-        return resolve(APP_DIR_NAME, WEBVIEW_SUBDIR);
+        return userDataDir().resolve(WEBVIEW_SUBDIR);
+    }
+
+    /**
+     * 测试 hook：清掉 {@link #REDIRECTED} 标记与派生属性，使后续断言可以重新走
+     * "user.home 未被重定向"分支。仅供单元测试调用，生产代码不应触碰。
+     */
+    static void resetForTesting() {
+        synchronized (AppPaths.class) {
+            REDIRECTED.set(false);
+            System.clearProperty(REDIRECTED_PATH_PROPERTY);
+        }
     }
 
     /**
      * 把当前进程 {@code user.home} 改写为 {@code <原 user.home>/.Epubra/}，
      * 让 JavaFX WebView 等读 {@code user.home} 的 native 组件把缓存一并落进来。
      *
-     * <p>副作用：调用后 {@code System.getProperty("user.home")} 返回新路径；
-     * 调用前应当已经先取过一次原值（避免被自己的写入覆盖）。本方法会同时预创建
-     * {@link #userDataDir()}、{@link #autosaveDir()}、{@link #webviewCacheDir()}。
-     *
-     * <p>幂等：连续多次调用结果一致。
+     * <p>幂等：连续多次调用结果一致；并发安全靠 {@link AtomicBoolean}。
      *
      * @return 重写后的 user.home 路径
      */
     public static Path redirectUserHome() {
-        String current = System.getProperty("user.home");
-        if (current == null || current.isBlank()) {
-            current = ".";
+        if (REDIRECTED.get()) {
+            return userDataDir();
         }
-        Path currentPath = Path.of(current);
-        // 若 user.home 已经被重定向过（值为 ~/.Epubra 本身），不要在它上面再叠一层
-        if (currentPath.getFileName() != null
-                && APP_DIR_NAME.equals(currentPath.getFileName().toString())) {
-            ensureDirectory(currentPath);
-            ensureDirectory(currentPath.resolve(AUTOSAVE_SUBDIR));
-            ensureDirectory(currentPath.resolve(WEBVIEW_SUBDIR));
-            return currentPath;
+        synchronized (AppPaths.class) {
+            if (REDIRECTED.get()) {
+                return userDataDir();
+            }
+            String current = System.getProperty("user.home");
+            if (current == null || current.isBlank()) {
+                current = ".";
+            }
+            Path target = Path.of(current, APP_DIR_NAME);
+            ensureDirectory(target);
+            ensureDirectory(target.resolve(AUTOSAVE_SUBDIR));
+            ensureDirectory(target.resolve(WEBVIEW_SUBDIR));
+            String absolute = target.toAbsolutePath().toString();
+            // 把目标路径写到独立属性,userDataDir() 优先用它,避免二次拼接
+            System.setProperty(REDIRECTED_PATH_PROPERTY, absolute);
+            // 同时改写 user.home,让 JavaFX WebView native 缓存跟随
+            System.setProperty("user.home", absolute);
+            REDIRECTED.set(true);
+            return target;
         }
-        Path target = currentPath.resolve(APP_DIR_NAME);
-        ensureDirectory(target);
-        ensureDirectory(target.resolve(AUTOSAVE_SUBDIR));
-        ensureDirectory(target.resolve(WEBVIEW_SUBDIR));
-        System.setProperty("user.home", target.toAbsolutePath().toString());
-        return target;
     }
 
     /**
@@ -118,12 +150,10 @@ public final class AppPaths {
      * <p>旧路径按出现顺序尝试：
      * <ol>
      *   <li>{@code <user.dir>/epubra-autosave}</li>
-     *   <li>{@code <旧 user.home>/epubra-autosave}（即重定向前记录的 user.home）</li>
+     *   <li>{@code <env USERPROFILE 或 HOME>/epubra-autosave}</li>
      * </ol>
      *
      * <p>搬运完成后删除空目录；非空则保留留待用户手动清理。冲突文件跳过不覆盖。
-     *
-     * <p>应当从 {@link #userDataDir()} 第一次被调用时触发，避免每次 autosave 都跑。
      */
     public static void migrateLegacyIfAny() {
         Path dest = autosaveDir();
@@ -132,7 +162,10 @@ public final class AppPaths {
                 continue;
             }
             try (Stream<Path> stream = Files.list(legacy)) {
-                stream.forEach(src -> moveIfAbsent(src, dest.resolve(src.getFileName())));
+                // 只搬 .draft 文件:旧目录里若还有别的东西(用户手动放的)保留不动
+                stream
+                        .filter(p -> p.getFileName().toString().endsWith(Autosave.DRAFT_SUFFIX))
+                        .forEach(src -> moveIfAbsent(src, dest.resolve(src.getFileName())));
             } catch (IOException e) {
                 LOG.log(System.Logger.Level.WARNING,
                         "Legacy autosave scan failed: " + legacy + " (" + e.getMessage() + ")", e);
@@ -143,15 +176,6 @@ public final class AppPaths {
     }
 
     // ---- internals ----
-
-    private static Path resolve(String first, String... rest) {
-        Path base = Path.of(System.getProperty("user.home", "."), first);
-        Path result = base;
-        for (String segment : rest) {
-            result = result.resolve(segment);
-        }
-        return result;
-    }
 
     private static void ensureDirectory(Path dir) {
         if (dir == null) {
@@ -165,13 +189,13 @@ public final class AppPaths {
         }
     }
 
-    private static java.util.List<Path> legacyCandidates() {
-        java.util.List<Path> list = new java.util.ArrayList<>(2);
+    private static List<Path> legacyCandidates() {
+        List<Path> list = new ArrayList<>(2);
         String userDir = System.getProperty("user.dir");
         if (userDir != null && !userDir.isBlank()) {
             list.add(Path.of(userDir, LEGACY_AUTOSAVE_NAME));
         }
-        // 旧 user.home 通过环境变量 USERPROFILE / HOME 兜底；这两个在 Java 层 read-only
+        // 旧 user.home 通过环境变量 USERPROFILE / HOME 兜底
         String envHome = System.getenv("USERPROFILE");
         if (envHome == null || envHome.isBlank()) {
             envHome = System.getenv("HOME");
@@ -185,7 +209,6 @@ public final class AppPaths {
     private static void moveIfAbsent(Path src, Path dest) {
         try {
             if (Files.exists(dest)) {
-                // 已存在则跳过，避免覆盖用户可能手动放进去的文件
                 return;
             }
             Files.move(src, dest);
@@ -199,7 +222,7 @@ public final class AppPaths {
     private static void removeIfEmpty(Path dir) {
         try (Stream<Path> stream = Files.list(dir)) {
             if (stream.findAny().isPresent()) {
-                return; // 还有别的文件，留给用户清理
+                return;
             }
         } catch (IOException e) {
             return;

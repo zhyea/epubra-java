@@ -181,29 +181,30 @@ public final class BookContext {
      * <p>优先级：
      * <ol>
      *   <li>{@link AutosaveConfig#dirOverride()} 非空 → 用其值</li>
-     *   <li>否则用默认 {@code <user.dir>/epubra-autosave}</li>
+     *   <li>否则用 {@link AppPaths#autosaveDir()}（默认 {@code <user.home>/.Epubra/autosave}，
+     *       {@link com.epubra.app.EpubraLauncher} 启动时已把 {@code user.home} 重定向到 {@code ~/.Epubra/}）</li>
      * </ol>
      *
-     * <p>目录不存在时懒创建。创建失败回退到 {@code user.home} 下的同名目录，再失败
-     * 则用系统临时目录。永不抛异常——自动暂存是"尽力而为"的保护机制，不应让主流程崩溃。
+     * <p>目录不存在时懒创建。创建失败回退到 {@link AppPaths#autosaveDir()} 同名目录下的临时副本，
+     * 再失败则用系统临时目录。永不抛异常——自动暂存是"尽力而为"的保护机制，不应让主流程崩溃。
      */
     public Path autosaveDir() {
         AutosaveConfig cfg = autosaveConfig();
         String override = cfg == null ? null : cfg.dirOverride();
         Path base = (override == null || override.isBlank())
-                ? Path.of(System.getProperty("user.dir", "."), "epubra-autosave")
+                ? AppPaths.autosaveDir()
                 : Path.of(override);
         try {
             Files.createDirectories(base);
             return base;
         } catch (IOException first) {
-            // fallback 1：user.home
+            // fallback：~/.Epubra/autosave 副本（同名加 .tmp 后缀），再失败走系统临时目录
             try {
-                Path fallback = Path.of(System.getProperty("user.home", "."), "epubra-autosave");
+                Path fallback = Path.of(System.getProperty("java.io.tmpdir", "."),
+                        AppPaths.AUTOSAVE_SUBDIR);
                 Files.createDirectories(fallback);
                 return fallback;
             } catch (IOException second) {
-                // fallback 2：系统临时目录
                 Path tmp = Path.of(System.getProperty("java.io.tmpdir", "."), "epubra-autosave");
                 try {
                     Files.createDirectories(tmp);

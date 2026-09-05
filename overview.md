@@ -1,58 +1,78 @@
 # Epubra 项目交付概览
 
-## 当前轮：IDEA 风格项目模型 + 欢迎页（Sprint 9，2026-09-05）
+## 当前轮：用户数据目录统一到 ~/.Epubra/（Sprint 10，2026-09-05 晚）
 
-用户指令：「参考 jetbrains idea，每本 epub 书可以视为一个项目，创建 epub 项目前需要选择工作空间」；通过 AskUserQuestion 锁定范围：**新建 + 欢迎页**（不汽车化 autosave dir、不做完整 IDEA 化）。
+用户指令：「放在 用户目录下的 临时数据目录最好 不使用 com.epubra.app.EpubraApp 这样的目录， 改为使用简单直接的 .Epubra」。
+
+### 现象
+
+JavaFX 24 WebView 在 Windows 上以 main class FQCN 派生 native 缓存目录，实测为：
+
+```
+C:\Users\robin\.com.epubra.app.EpubraApp\webview\.lock
+C:\Users\robin\.com.epubra.app.EpubraApp\webview\localstorage\
+```
+
+丑且长，与 IDEA / VSCode / Git 等工具的「`.工具名/`」命名风格不一致。
 
 ### 交付内容
 
-**1. 项目目录模型**（IDEA 风）
-- `<workspace>/<name>/<name>.epub + .epubra/project.json` Maven-like 标准布局
-- 所有路径推导由 `support/ProjectLayout` 集中维护（含 marker JSON 读写）
-- 项目标记字段：`formatVersion=1` / `name` / `createdAt` / `lastOpenedAt` / `bookFile`
+**1. AppPaths 工具类**（`com.epubra.app.support.AppPaths`）
+- `userDataDir()` / `autosaveDir()` / `webviewCacheDir()`：统一路径入口
+- `redirectUserHome()`：把 `user.home` 改写到 `~/.Epubra/`，让 JavaFX native 缓存跟随
+- `migrateLegacyIfAny()`：一次性把旧 `<user.dir>/epubra-autosave` 与 `~/epubra-autosave` 下的 `.draft` 搬到新位置
+- `resetForTesting()`：单元测试 hook
 
-**2. 最近列表持久化**
-- `support/RecentProjectsStore`：Preferences 持久化最近 workspaces + 最近 projects
-- 上限 10 条；dedup + move-to-front；缺省 ASCII Unit Separator (`\u001F`) 序列化
+**2. EpubraLauncher 启动时序调整**
+- `AppPaths.redirectUserHome()` 必须**先于** `PlatformLogging.quietJavaFx()`
+- 重写 user.home 后，所有 native 缓存（webview、openjfx）父目录自动归到 `~/.Epubra/`
 
-**3. 新建项目对话框**
-- `NewProjectDialog`（静态包装）+ `NewProjectDialogController` + `NewProjectResult` record
-- 实时校验：workspace 必须是已存在目录、project name 不能含 FS 非法字符、目标不能重名
-- OK 按钮实时 enable；title 留空回退为 project name
+**3. BookContext.autosaveDir 改造**
+- 默认 `<user.dir>/epubra-autosave` → `AppPaths.autosaveDir()`（= `~/.Epubra/autosave`）
+- fallback 路径同步：`java.io.tmpdir` 下同名子目录
 
-**4. 欢迎页**
-- `WelcomePageController` + `welcome-page.fxml`
-- 单列居中布局：标题 + 3 主操作（新建/打开/退出）+ 最近项目 / 最近工作空间 两段
-- 订阅 `BookLoadedEvent` 自动隐藏（新建/打开/自动暂存恢复都触发）
-- 最近列表按 `.epub` / 目录分类展示，点击解析为可打开目标
-
-**5. MainController 集成**
-- `<center>` 包 `<StackPane>`，welcome-page 作为末位 child（Z 序最高）
-- 启动时不再调用 `newBook()`——ctx.book() 在欢迎页阶段为 null
-- 6 处 null-book guard 集中在控制器入口方法
-- 新加 `onOpenRecent(Path)` + `resolveOpenTarget` 处理工作空间→.epub 解析
+**4. Preferences 命名空间迁移**
+- `ThemeManager` / `RecentProjectsStore` / `AutosaveConfig`：`userNodeForPackage(Xxx.class)` → `userRoot().node("/Epubra/Xxx")`
+- Windows 注册表键从 `com\epubra\app\support\Xxx` → `Epubra\Xxx`
+- macOS / Linux 同理迁移
 
 ### 三道门禁（真实结果）
 
 | 门禁 | 命令 | 结果 |
 | --- | --- | --- |
-| 编译+测试 | `mvn -B clean test` | **BUILD SUCCESS**，epublib 56 + app 149 = **205 / 205 全绿**（+26） |
-| 安装 | `mvn -B clean install` | BUILD SUCCESS（两个 jar 进本地仓库）|
-| 启动 | `timeout 25 mvn -B javafx:run` | Exit 143（timeout 杀前台 GUI = 进程存活），**零** LoadException / NullPointer / ClassNotFound |
+| 编译+测试 | `mvn -B clean test` | **BUILD SUCCESS**，epublib 56 + app 163 = **219 / 219 全绿**（+14） |
+| 安装 | `mvn -B install -DskipTests` | BUILD SUCCESS |
+| 启动 | `timeout 25 mvn -B javafx:run` | Exit 143（timeout 杀前台 GUI = 进程存活） |
+
+启动后实测 `~/.Epubra/` 内容：
+
+```
+~/.Epubra/
+├── autosave/                                  ← AppPaths.autosaveDir()
+├── webview/                                   ← AppPaths.webviewCacheDir()（预创建）
+├── .com.epubra.app.EpubraApp/webview/         ← JavaFX WebView native 缓存（子目录名是 JavaFX 硬编码）
+└── .openjfx/cache/24.0.1+4/amd64/             ← openjfx native 资源缓存
+```
+
+老位置 `~/.com.epubra.app.EpubraApp/` 删除后重启不再创建 ✓
 
 ### 关键实现要点
 
-- **`ProjectLayout.inferProjectDir(Path)` 用 while 循环一路上溯**——marker 文件（位于 `.epubra/`）作为输入时，单层 `getParent()` 会落到 `.epubra/` 误判为项目目录；改为「直到首个含 marker 的祖先」
-- **`DocumentController.newProject` 原子语义**——失败时绝不写 recents；UI 层包 try-catch 转 errorReporter
-- **`promptRecoveryIfAny()` 也广播 `BookLoadedEvent`**——恢复草稿后欢迎页会自动收起，否则会留下「草稿载入但欢迎页还盖在上面」
-- **null-book 容忍集中在 controller 入口方法**（`refreshAll()` 一次性 guard → 下游 `refreshToc` / `refreshResources` 自然安全）
-- **`fx:include` 双字段注入**——主 FXML 同时声明 `welcomePage`（StackPane 根节点）与 `welcomePageController`（子控制器），按命名规则 `<fx:id>Controller`
+- **`AtomicBoolean` + `epubra.userDataDir` 派生属性双重防嵌套**：redirect 后 user.home 已是 `~/.Epubra/`，旧版 `Path.of(user.home, ".Epubra")` 会得到 `~/.Epubra/.Epubra/autosave`；新版优先读 `epubra.userDataDir` 属性
+- **`migrateLegacyIfAny()` 只搬 `.draft` 文件**：保护用户在旧目录里手动放的其他文件（实现层 filter，不动非 .draft）
+- **冲突跳过不覆盖**：旧目录有同名文件时 `moveIfAbsent` 静默返回，绝不覆盖用户数据
+- **测试隔离**：`resetForTesting()` + `@AfterEach` 清 `epubra.userDataDir` 系统属性，避免 JVM 级状态跨测试污染
+
+### 遗留 / 已知限制
+
+- **`~/.Epubra/.com.epubra.app.EpubraApp/webview/` 子目录名无法消除**——这是 JavaFX 24 native 基于 launcher 标识的硬编码派生，父目录已正确，但子目录名需等 OpenJFX 上游提供公开 system property 或改 launcher 标识策略才能根治
+- **Preferences 旧键迁移未做**——本次未加「旧 `com\epubra\app\support\Xxx` 键值 → 新 `Epubra\Xxx` 键值」的一次性 copy；首次启动后主题会回退到 light，最近项目列表为空。如需保留旧偏好，加一层 `preferences().get(legacyKey, default)` 回退即可
 
 ### Follow-up
 
-- 用户偏好决定后再考虑：是否加「关闭项目」按钮回欢迎页
-- 跑一遍手动 UI 流程：在工作空间下创建项目 → 编辑 → 保存 → 重启 → 从「最近项目」打开 → 验证 Atomic 语义与 lastOpenedAt 更新
-- `drafts/` 目录（ProjectLayout 注释里提到）目前是占位，未与项目级自动暂存联动——后续若要把项目级草稿从全局 `epubra-autosave` 迁到 `<workspace>/<name>/.epubra/drafts/` 再做
+- 是否需要 Preferences 旧键迁移（保留主题 / 最近项目跨版本升级）
+- 启动器启动日志是否还需要补充「`user.home` redirected to」调试输出
+- OpenJFX upstream 跟踪 WebView 缓存目录命名是否提供公开 system property
 
 ### Git 状态
 
