@@ -46,9 +46,23 @@
                 <groupId>org.openjfx</groupId>
                 <artifactId>javafx-maven-plugin</artifactId>
                 <configuration>
-                    <!-- 走 Launcher 而非 EpubraApp：非模块化构建下以 Application 子类为主类会
+                    <!-- 走 EpubraLauncher 而非 EpubraApp：非模块化构建下以 Application 子类为主类会
                          被 JVM 的运行时组件校验拦下，改由引导类启动后两种运行方式都成立 -->
                     <mainClass>com.epubra.app.EpubraLauncher</mainClass>
+                    <!--
+                      JDK 22+ 收紧了 native 访问与 sun.misc.Unsafe，启动时会产生告警：
+                        · System::load（glass NativeLibLoader）与 WebPage native 绑定
+                          → 需要 enable-native-access
+                        · Marlin 的 sun.misc.Unsafe::allocateMemory（terminally deprecated）
+                          → 需要 sun-misc-unsafe-memory-access=allow
+                      javafx:run 走 module-path，JavaFX 是具名模块，这里必须列具名模块名；
+                      写成 ALL-UNNAMED 反而会多出 "Unknown module" 告警。
+                      （打包产物走 classpath，见 dist profile 的 java-options，那里用 ALL-UNNAMED。）
+                    -->
+                    <options>
+                        <option>--enable-native-access=javafx.graphics,javafx.web</option>
+                        <option>--sun-misc-unsafe-memory-access=allow</option>
+                    </options>
                 </configuration>
             </plugin>
         </plugins>
@@ -134,6 +148,15 @@
                                         <argument>${project.build.finalName}.jar</argument>
                                         <argument>--main-class</argument>
                                         <argument>com.epubra.app.EpubraLauncher</argument>
+                                        <!--
+                                          打包产物里 JavaFX 走 classpath（无 module-info），
+                                          因此 native 访问要对 unnamed module 开放；与 javafx:run
+                                          的具名模块写法不同，混写会触发 "Unknown module" 告警。
+                                        -->
+                                        <argument>--java-options</argument>
+                                        <argument>--enable-native-access=ALL-UNNAMED</argument>
+                                        <argument>--java-options</argument>
+                                        <argument>--sun-misc-unsafe-memory-access=allow</argument>
                                     </arguments>
                                 </configuration>
                             </execution>

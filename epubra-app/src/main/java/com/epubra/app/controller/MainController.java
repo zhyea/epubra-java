@@ -149,6 +149,7 @@ public class MainController {
                 metadataActivityButton, validationActivityButton,
                 tocView, resourceView, metadataView,
                 bottomPanel);
+        sidebarController.setupActivityBarInteraction();
 
         tocViewController.bind(ctx, this::beginChange, this::setStatus, this::warn);
         tocViewController.wire();
@@ -442,19 +443,36 @@ private void bindProblemsAccelerator() {
     }
 }
 
+    /**
+     * 处理活动栏「目录 / 资源 / 元数据」三类侧边栏切换。
+     *
+     * <p>复用了 {@link SidebarController#isCollapsingClick} 快照来判断「再点同一按钮」——
+     * JavaFX 的 {@code ToggleGroup} 不允许已选中的按钮因再次点击而取消选中，仅靠
+     * {@code onAction} 里读 {@code isSelected()} 无法区分首次点击与重复点击，
+     * 而 {@code onMousePressed} 在 toggle 逻辑之前触发,按下瞬间的快照能可靠地反映用户意图。
+     */
+    private void toggleSideView(ToggleButton button, Runnable show) {
+        if (sidebarController.isCollapsingClick(button)) {
+            sidebarController.hideAllSideViews();
+            button.setSelected(false);
+            return;
+        }
+        show.run();
+    }
+
     @FXML
     public void onShowTocView() {
-        sidebarController.showTocView();
+        toggleSideView(tocActivityButton, () -> sidebarController.showTocView());
     }
 
     @FXML
     public void onShowResourceView() {
-        sidebarController.showResourceView();
+        toggleSideView(resourceActivityButton, () -> sidebarController.showResourceView());
     }
 
     @FXML
     public void onShowMetadataView() {
-        sidebarController.showMetadataView();
+        toggleSideView(metadataActivityButton, () -> sidebarController.showMetadataView());
     }
 
     /**

@@ -103,6 +103,17 @@ cd epubra-app && ~/.workbuddy/bin/mvn javafx:run
 1. 入口为 `EpubraLauncher`（普通类）→ 间接调用 `EpubraApp.main()`。原因是本项目为非模块化构建（无 `module-info.java`），JavaFX 只出现在 classpath；此时若以 `Application` 子类直接作为 main-class，JVM 会在启动阶段做 JavaFX 运行时组件校验并失败，命令行 `java -cp` 与 jpackage 打包产物都无法启动。经由引导类绕开校验后，同一份产物既能被 `javafx:run` 运行，也能被打包成可双击的桌面应用。
 2. `epubra-app` 依赖 `epubra-epublib`，后者已在本地仓库时可直接运行；修改内核后需重新 `mvn install` 才会被前端用到。
 3. JavaFX 不能打成 fat jar —— native 库（glass / prism 的 dll）必须在真实文件系统上，shade 后反而加载不到。因此 `dist` profile 采用「应用 jar + 依赖目录」交给 `jpackage` 组装。
+4. **启动告警处理**：JDK 22+ 收紧了 native 访问与 `sun.misc.Unsafe`，启动时会有两类告警。
+   - `Unsupported JavaFX configuration: classes were loaded from 'unnamed module'` —— 非模块化运行的必然结果，由 `PlatformLogging` 在启动早期用 JUL Handler Filter 精准拦截（只拦这一条，JavaFX 其它告警照常输出）。
+   - `System::load`（glass NativeLibLoader）与 `sun.misc.Unsafe::allocateMemory`（Marlin）—— 属 JVM 层，需启动时传参：
+
+     | 运行方式 | 需要的 VM options |
+     | --- | --- |
+     | `mvn javafx:run` | 已配在 `epubra-app/pom.xml` 的 `options` 里，无需手动加 |
+     | `mvn package -Pdist` 产物 | 已配在 jpackage 的 `--java-options` 里，无需手动加 |
+     | IDE 直接 Run / `java -cp` | `--enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow` |
+
+     > 两种运行方式的模块形态不同：`javafx:run` 走 module-path（JavaFX 是**具名模块**，须写 `javafx.graphics,javafx.web`），而 `java -cp` 与打包产物走 classpath（须写 `ALL-UNNAMED`）。混写会额外产生 `Unknown module` 告警。
 
 ## 当前能力
 

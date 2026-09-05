@@ -38,6 +38,23 @@ public class SidebarController {
     /** 切换到「校验」之前选中的侧栏按钮，用于校验按钮取消时一键还原。 */
     private ToggleButton lastSideButton;
 
+    /**
+     * 4 个活动栏按钮的「按下时刻」selected 快照。
+     *
+     * <p>JavaFX 对 {@code ToggleButton} 在 {@code ToggleGroup} 内的处理与 {@code RadioButton}
+     * 等价——点击已选中的按钮不会真的把 {@code selected} 翻成 {@code false}（{@code ToggleGroup}
+     * 不会让已选中按钮失去选中），但 {@code onAction} 仍会触发。这意味着仅靠
+     * {@code onAction} 里读 {@code button.isSelected()} 无法区分"首次点击"与"再点同一按钮"。
+     *
+     * <p>{@code onMousePressed} 在 JavaFX 的 toggle 逻辑执行之前触发，于此处读取的
+     * {@code isSelected()} 就是按下那一瞬的原始状态；在 {@code onAction} 里读这两个字段
+     * 即可稳定判断「再点同一按钮」。
+     */
+    private boolean tocPressedSelected;
+    private boolean resourcePressedSelected;
+    private boolean metadataPressedSelected;
+    private boolean validationPressedSelected;
+
     public SidebarController(ToggleGroup activityGroup,
                              ToggleButton tocButton, ToggleButton resourceButton,
                              ToggleButton metadataButton, ToggleButton validationButton,
@@ -58,6 +75,46 @@ public class SidebarController {
     public void setupDefault() {
         showSideView(tocView);
         // activityGroup 由 FXML 绑定 4 个按钮，无需手动管理
+    }
+
+    /**
+     * 给 4 个活动栏按钮挂上 {@code onMousePressed}，按下时把 {@code isSelected()} 快照存好，
+     * 给「再点同一按钮收起侧栏」用。{@link MainController#initialize()} 阶段调用一次即可。
+     *
+     * <p>必须在 4 个 {@link ToggleButton} 注入完成后调用——{@code MainController}
+     * 把构造器参数传过来时按钮已经就绪。
+     */
+    public void setupActivityBarInteraction() {
+        if (tocButton != null) {
+            tocButton.setOnMousePressed(e -> tocPressedSelected = tocButton.isSelected());
+        }
+        if (resourceButton != null) {
+            resourceButton.setOnMousePressed(e -> resourcePressedSelected = resourceButton.isSelected());
+        }
+        if (metadataButton != null) {
+            metadataButton.setOnMousePressed(e -> metadataPressedSelected = metadataButton.isSelected());
+        }
+        if (validationButton != null) {
+            validationButton.setOnMousePressed(
+                    e -> validationPressedSelected = validationButton.isSelected());
+        }
+    }
+
+    /**
+     * 用户点击该按钮时它处于 selected 状态——视作「再点同一按钮」语义。
+     * 校验按钮不在侧栏收起语义内，总是返回 {@code false}。
+     */
+    public boolean isCollapsingClick(ToggleButton button) {
+        if (button == tocButton) {
+            return tocPressedSelected;
+        }
+        if (button == resourceButton) {
+            return resourcePressedSelected;
+        }
+        if (button == metadataButton) {
+            return metadataPressedSelected;
+        }
+        return false;
     }
 
     public void showTocView() {
@@ -115,12 +172,40 @@ public class SidebarController {
         setVisibleManaged(metadataView, view == metadataView);
     }
 
-    /** 活动栏从「校验」回到上一个侧边视图；按钮 setSelected 不会触发 onAction，无需防递归。 */
+    /**
+     * 收起所有侧边栏视图：与 {@link #hideProblems()} 不同，本方法只触动侧边栏，不影响底部面板
+     * 与活动栏按钮选中态（按钮的取消由调用方负责）。
+     *
+     * <p>典型场景：用户点击已选中的侧栏按钮，希望像 VSCode 那样把整个侧栏折起来。
+     * 调用方在调完本方法后，把对应按钮 {@code setSelected(false)} 即可让活动栏也跟着无选中。
+     */
+    public void hideAllSideViews() {
+        activeSideView = null;
+        setVisibleManaged(tocView, false);
+        setVisibleManaged(resourceView, false);
+        setVisibleManaged(metadataView, false);
+        // 注意：保留 lastSideButton，供后续 hideProblems → restoreSideActivity 还原侧栏按钮
+    }
+
+    /** 任一侧栏视图是否处于可见状态——供「再点同一按钮收起」语义判断。 */
+    public boolean isSidebarVisible() {
+        return activeSideView != null;
+    }
+
+    /**
+     * 活动栏从「校验」回到上一个侧边视图；按钮 setSelected 不会触发 onAction，无需防递归。
+     *
+     * <p>只有侧栏<b>当前仍在显示</b>对应视图（{@code activeSideView != null}）时，才把
+     * 上次记录的侧栏按钮设回 {@code selected}。若用户已经手动把侧栏折叠
+     * （{@code hideAllSideViews()} 把 {@code activeSideView} 置 {@code null} 但
+     * 保留 {@code lastSideButton}），则不要重新激活按钮，否则会出现「按钮高亮但侧栏空」
+     * 的视觉割裂。
+     */
     private void restoreSideActivity() {
         if (validationButton != null) {
             validationButton.setSelected(false);
         }
-        if (lastSideButton != null) {
+        if (lastSideButton != null && activeSideView != null) {
             lastSideButton.setSelected(true);
         }
     }
