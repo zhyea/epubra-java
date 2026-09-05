@@ -1,6 +1,7 @@
 package com.epubra.app.controller;
 
 import com.epubra.app.EpubraApp;
+import com.epubra.app.support.Autosave;
 import com.epubra.app.support.BookContext;
 import com.epubra.app.support.BookHistory;
 import com.epubra.app.support.PreviewHtml;
@@ -14,6 +15,7 @@ import com.epubra.epublib.io.EpubWriter;
 import com.epubra.epublib.validation.EpubValidator;
 import com.epubra.epublib.validation.ValidationIssue;
 import com.epubra.epublib.validation.ValidationReport;
+import javafx.animation.PauseTransition;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 import javafx.fxml.FXML;
@@ -37,8 +39,11 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
+import javafx.util.Duration;
 
+import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Optional;
 
 /**
  * 主窗口控制器：目录浏览、章节编辑、元数据维护与 EPUB 存取。
@@ -113,6 +118,8 @@ public class MainController {
     private Label wordStatusLabel;
     @FXML
     private Label themeStatusLabel;
+    @FXML
+    private Label autosaveStatusLabel;
 
     @FXML
     private RadioMenuItem themeLightItem;
@@ -130,6 +137,15 @@ public class MainController {
     private UndoController undoController;
     private DocumentController documentController;
     private SidebarController sidebarController;
+
+    /**
+     * 自动暂存的「停顿 N 秒后落盘」节流器。每次内容变更时调 {@link PauseTransition#playFromStart()}
+     * 重置计时；计时器到点才真正写盘——避免每按一个键都 IO。
+     *
+     * <p>由 {@code ctx.autosaveConfig().debounceSeconds()} 驱动；外部禁用开关
+     * {@code ctx.autosaveConfig().enabled() == false} 时干脆不挂监听（见 {@link #wireAutosave}）。
+     */
+    private PauseTransition autosaveDebounce;
 
     /** 当前主题。initialize 时取自持久化配置，切换后预览区与整个界面同步换色。 */
     private Theme currentTheme = Theme.LIGHT;
@@ -193,7 +209,12 @@ public class MainController {
         selectThemeItem(currentTheme);
         applyThemeWhenSceneReady();
 
+        wireAutosave();
+
         ensureDocumentController();
+        // 启动恢复扫描：必须在 newBook() 之前判断——否则新建的空书会覆盖 ctx，
+        // findRecoverable(ctx) 看到的 currentFile 就是新建后的 null，找不到任何东西。
+        promptRecoveryIfAny();
         documentController.newBook();
     }
 
@@ -425,6 +446,145 @@ public class MainController {
         }
         if (themeStatusLabel != null) {
             themeStatusLabel.setText(theme.displayName());
+        }
+    }
+
+    // ------------------------------------------------------------------ 自动暂存
+
+    /**
+     * 装配自动暂存的「停顿 N 秒后写盘」节流器。
+     *
+     * <p>逻辑：
+     * <ul>
+     *   <li>用户每次改动（{@link #markDirty}）都调 {@code playFromStart()} 重置计时；</li>
+     *   <li>计时器到点才调 {@link Autosave#flushNow(BookContext)} 写盘。</li>
+     * </ul>
+     *
+     * <p>若 {@link com.epubra.app.support.AutosaveConfig#enabled} 为 false 则完全跳过装配——
+     * Preferences 持久化的「自动暂存开关」是用户的最高优先级。
+     *
+     * <p>状态栏标签走 {@code autosaveStatusLabel}：保存中显示「保存中…」，落盘后回到「自动暂存」。
+     * CSS 类切换由 {@code markAutosaveSaving()} / {@code markAutosaveIdle()} 负责。
+     */
+    private void wireAutosave() {
+        if (!ctx.autosaveConfig().enabled()) {
+            markAutosaveDisabled();
+            return;
+        }
+        autosaveDebounce = new PauseTransition(
+                Duration.seconds(ctx.autosaveConfig().debounceSeconds()));
+        autosaveDebounce.setOnFinished(event -> {
+            Autosave.flushNow(ctx);
+            markAutosaveIdle();
+            updateAutosaveLabel();
+        });
+        markAutosaveIdle();
+        updateAutosaveLabel();
+    }
+
+    /** 标记为"已禁用"——配置文件说不存就不存，避免给用户错误预期。 */
+    private void markAutosaveDisabled() {
+        if (autosaveStatusLabel == null) {
+            return;
+        }
+        autosaveStatusLabel.setText("自动暂存 关");
+        autosaveStatusLabel.getStyleClass().removeAll("status-autosave-saving");
+        if (!autosaveStatusLabel.getStyleClass().contains("status-autosave-off")) {
+            autosaveStatusLabel.getStyleClass().add("status-autosave-off");
+        }
+    }
+
+    /** 用户刚改了东西——重启节流计时，UI 先翻到"保存中"状态。 */
+    private void markAutosaveSaving() {
+        if (autosaveStatusLabel == null) {
+            return;
+        }
+        autosaveStatusLabel.getStyleClass().removeAll("status-autosave-off");
+        if (!autosaveStatusLabel.getStyleClass().contains("status-autosave-saving")) {
+            autosaveStatusLabel.getStyleClass().add("status-autosave-saving");
+        }
+    }
+
+    /** 节流到点 → 刚写完盘 → 落回"空闲"样式。 */
+    private void markAutosaveIdle() {
+        if (autosaveStatusLabel == null) {
+            return;
+        }
+        autosaveStatusLabel.getStyleClass().removeAll("status-autosave-saving", "status-autosave-off");
+    }
+
+    /** 把"自动暂存 开 / 关 + 间隔 N 秒"展示到状态栏标签上。 */
+    private void updateAutosaveLabel() {
+        if (autosaveStatusLabel == null) {
+            return;
+        }
+        if (!ctx.autosaveConfig().enabled()) {
+            markAutosaveDisabled();
+            return;
+        }
+        autosaveStatusLabel.setText("自动暂存 " + ctx.autosaveConfig().debounceSeconds() + "s");
+    }
+
+    /**
+     * 启动时扫描可恢复的草稿：发现就弹 Alert，让用户选恢复还是丢弃。
+     *
+     * <p>必须放在 {@code newBook()} 之前调用——{@code newBook} 会重置 ctx.book() 和
+     * {@code ctx.currentFile()}，{@link Autosave#findRecoverable} 会因此看不到旧文件的草稿。
+     */
+    private void promptRecoveryIfAny() {
+        Optional<Path> draft = Autosave.findRecoverable(ctx);
+        if (draft.isEmpty()) {
+            return;
+        }
+        Path file = draft.get();
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle("发现未保存的草稿");
+        alert.setHeaderText("检测到上次未保存的修改");
+        alert.setContentText("文件：" + file.getFileName() + "\n是否恢复该草稿？");
+        if (ctx.stage() != null) {
+            alert.initOwner(ctx.stage());
+        }
+        ButtonType restoreBtn = new ButtonType("恢复草稿");
+        ButtonType discardBtn = new ButtonType("丢弃");
+        alert.getButtonTypes().setAll(restoreBtn, discardBtn);
+        Optional<ButtonType> choice = alert.showAndWait();
+        if (choice.isEmpty() || choice.get() == discardBtn) {
+            // 丢弃：删除草稿文件，让后续 newBook() 拿干净的初始状态
+            try {
+                java.nio.file.Files.deleteIfExists(file);
+            } catch (IOException e) {
+                System.getLogger(MainController.class.getName())
+                        .log(System.Logger.Level.WARNING,
+                                "Failed to discard draft: " + e.getMessage(), e);
+            }
+            return;
+        }
+        // 恢复：把草稿读回 ctx；标记 dirty 让用户感知到内容已恢复但未保存。
+        try {
+            Book restored = Autosave.readDraft(file);
+            ctx.setBook(restored);
+            // 草稿名若是 "untitled.draft" → 没有对应的主文件路径；否则从草稿路径推断。
+            String draftName = file.getFileName().toString();
+            if (!Autosave.UNTITLED_DRAFT_NAME.equals(draftName)) {
+                // 草稿文件名约定：<main-stem>.draft → 主文件 = <main-stem>.epub
+                String stem = draftName.substring(0, draftName.length() - Autosave.DRAFT_SUFFIX.length());
+                Path inferredMain = file.getParent().resolve(stem + ".epub");
+                if (java.nio.file.Files.exists(inferredMain)) {
+                    ctx.setCurrentFile(inferredMain);
+                    ctx.book().setSource(inferredMain);
+                } else {
+                    ctx.setCurrentFile(null);
+                }
+            } else {
+                ctx.setCurrentFile(null);
+            }
+            ctx.setCurrentNode(null);
+            ctx.setDirty(true);
+            ctx.history().reset();
+            ctx.setEditCaptured(false);
+            setStatus("已从草稿恢复：" + file.getFileName());
+        } catch (IOException e) {
+            warn("草稿恢复失败：" + e.getMessage());
         }
     }
 
@@ -728,6 +888,11 @@ private void bindProblemsAccelerator() {
 
     private void markDirty() {
         ctx.setDirty(true);
+        // 内容 / 元数据改动都触发自动暂存节流；loading 期间的内容回填不算真实改动，跳过。
+        if (!ctx.loading() && autosaveDebounce != null) {
+            autosaveDebounce.playFromStart();
+            markAutosaveSaving();
+        }
         updateStatus();
     }
 

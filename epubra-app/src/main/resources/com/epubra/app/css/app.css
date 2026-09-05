@@ -483,3 +483,14 @@
 .status-divider {
     -fx-background-color: -epubra-border-input;
 }
+
+/* 自动暂存：默认走 status-item（弱化色），保存中切到主题色强调，关掉时显示中性灰 */
+.status-autosave-saving {
+    -fx-text-fill: -epubra-accent;
+    -fx-font-weight: bold;
+}
+
+.status-autosave-off {
+    -fx-text-fill: -epubra-muted-fg;
+    -fx-opacity: 0.7;
+}

@@ -1,6 +1,7 @@
 package com.epubra.app.controller;
 
 import com.epubra.app.EpubraApp;
+import com.epubra.app.support.Autosave;
 import com.epubra.app.support.BookContext;
 import com.epubra.epublib.domain.Book;
 import com.epubra.epublib.io.EpubReader;
@@ -63,6 +64,9 @@ public class DocumentController {
         if (!discarder.confirmDiscard()) {
             return;
         }
+        // 用户明确选了"丢弃当前未保存修改"——把对应的草稿文件一起删掉，
+        // 避免下次启动时被误当作可恢复内容弹出来。
+        Autosave.discardFor(ctx);
         newBook();
     }
 
@@ -70,6 +74,8 @@ public class DocumentController {
         if (!discarder.confirmDiscard()) {
             return;
         }
+        // 同 onNew：用户主动放弃当前 in-memory 内容时，一并清理其草稿
+        Autosave.discardFor(ctx);
         File file = dialogs.showOpenDialog();
         if (file == null) {
             return;

@@ -6,6 +6,8 @@ import com.epubra.epublib.domain.Resource;
 import com.epubra.epublib.validation.ValidationReport;
 import javafx.stage.Stage;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.IdentityHashMap;
 import java.util.Map;
@@ -58,6 +60,9 @@ public final class BookContext {
 
     // ---- 阶段 ----
     private Stage stage;
+
+    // ---- 自动暂存配置（autosave.enabled / autosave.debounceSeconds / autosave.dir）----
+    private AutosaveConfig autosaveConfig;
 
     // ---- 事件总线 ----
     private final AppEventBus bus = new AppEventBus();
@@ -155,6 +160,58 @@ public final class BookContext {
 
     public void setStage(Stage stage) {
         this.stage = stage;
+    }
+
+    // ---- 自动暂存 ----
+
+    public AutosaveConfig autosaveConfig() {
+        if (autosaveConfig == null) {
+            autosaveConfig = AutosaveConfig.read();
+        }
+        return autosaveConfig;
+    }
+
+    public void setAutosaveConfig(AutosaveConfig autosaveConfig) {
+        this.autosaveConfig = autosaveConfig;
+    }
+
+    /**
+     * 自动暂存目录：未保存的新书的草稿落盘位置。
+     *
+     * <p>优先级：
+     * <ol>
+     *   <li>{@link AutosaveConfig#dirOverride()} 非空 → 用其值</li>
+     *   <li>否则用默认 {@code <user.dir>/epubra-autosave}</li>
+     * </ol>
+     *
+     * <p>目录不存在时懒创建。创建失败回退到 {@code user.home} 下的同名目录，再失败
+     * 则用系统临时目录。永不抛异常——自动暂存是"尽力而为"的保护机制，不应让主流程崩溃。
+     */
+    public Path autosaveDir() {
+        AutosaveConfig cfg = autosaveConfig();
+        String override = cfg == null ? null : cfg.dirOverride();
+        Path base = (override == null || override.isBlank())
+                ? Path.of(System.getProperty("user.dir", "."), "epubra-autosave")
+                : Path.of(override);
+        try {
+            Files.createDirectories(base);
+            return base;
+        } catch (IOException first) {
+            // fallback 1：user.home
+            try {
+                Path fallback = Path.of(System.getProperty("user.home", "."), "epubra-autosave");
+                Files.createDirectories(fallback);
+                return fallback;
+            } catch (IOException second) {
+                // fallback 2：系统临时目录
+                Path tmp = Path.of(System.getProperty("java.io.tmpdir", "."), "epubra-autosave");
+                try {
+                    Files.createDirectories(tmp);
+                } catch (IOException ignored) {
+                }
+                return tmp;
+            }
+        }
     }
 
     // ---- 事件总线 ----

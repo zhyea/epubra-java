@@ -229,6 +229,9 @@
             <Region styleClass="status-divider" minWidth="1.0" prefWidth="1.0" maxWidth="1.0"
                     minHeight="13.0" prefHeight="13.0" maxHeight="13.0"/>
             <Label fx:id="themeStatusLabel" styleClass="status-item"/>
+            <Region styleClass="status-divider" minWidth="1.0" prefWidth="1.0" maxWidth="1.0"
+                    minHeight="13.0" prefHeight="13.0" maxHeight="13.0"/>
+            <Label fx:id="autosaveStatusLabel" styleClass="status-item"/>
         </HBox>
     </bottom>
 </BorderPane>
