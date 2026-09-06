@@ -16,12 +16,18 @@
   初始状态 visible="true" —— 用户首启看到的就是这一屏。
   父控制器 MainController 在 BookLoadedEvent 触发时调 hide() 让出编辑面板。
 
+  ⚠ hide() 必须作用于本根节点（fx:id="welcomeRoot"），不能只藏内层 welcomePane VBox：
+  JavaFX 的鼠标命中测试（picking）只认 visible 的节点——根 StackPane 若保持 visible，
+  它的透明区域仍会拦截整个编辑区的点击（表现为"打开书后所有按钮无效"）。
+  这正是 2026-09-06 修复的严重回归。
+
   设计取舍：
     * 单列居中，最大宽度 480px——避免在 4K 屏上按钮被拉得过长
     * 主操作 [新建项目] 用 welcome-primary-button 样式（中性蓝），[打开 EPUB…] 走普通扁平
     * 最近列表用 VBox + Button，Button 自带 tooltip 显示完整路径——少一个专有 ListView 控件
 -->
 <StackPane xmlns="http://javafx.com/javafx/24" xmlns:fx="http://javafx.com/fxml"
+           fx:id="welcomeRoot"
            styleClass="welcome-page" prefWidth="600.0" prefHeight="500.0"
            fx:controller="com.epubra.app.controller.WelcomePageController">
     <!-- 居中主体 -->
@@ -43,10 +49,12 @@
         <VBox alignment="CENTER" spacing="8.0" fillWidth="true">
             <Button fx:id="newProjectBtn" text="新建项目…" styleClass="welcome-primary-button"
                     onAction="#onNewProjectAction" maxWidth="320.0" prefWidth="320.0"/>
-            <Button fx:id="openFileBtn" text="打开 EPUB 文件…" styleClass="welcome-secondary-button"
+            <Button fx:id="openFileBtn" text="打开 EPUB…" styleClass="welcome-secondary-button"
                     onAction="#onOpenFileAction" maxWidth="320.0" prefWidth="320.0"/>
             <Button fx:id="exitBtn" text="退出" styleClass="welcome-secondary-button"
                     onAction="#onExitAction" maxWidth="320.0" prefWidth="320.0"/>
+            <Label text="新建项目 = EPUB + 项目目录；打开 EPUB = 单个 .epub 文件"
+                   styleClass="welcome-note" wrapText="true" textAlignment="CENTER"/>
         </VBox>
 
         <!-- 最近列表区：双方都空时显示提示；任一非空则显示整段 -->

@@ -1,11 +1,13 @@
 package com.epubra.app.controller;
 
 import com.epubra.app.support.BookContext;
+import com.epubra.app.support.CoverOps;
 import com.epubra.app.support.ResourceOps;
 import com.epubra.epublib.domain.MediaTypes;
 import com.epubra.epublib.domain.Resource;
 import com.epubra.epublib.util.Hrefs;
 import javafx.fxml.FXML;
+import javafx.scene.control.Button;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
@@ -28,12 +30,15 @@ import java.util.function.Consumer;
  * {@code initialize()} 阶段通过 {@link #bind} 注入。本类不得定义 {@code initialize()}。
  *
  * <p>{@link ResourceOps} 提供纯逻辑（是否被引用、HTML 标签拼接等），本类负责把它们包装
- * 成可观察的 UI 行为。
+ * 成可观察的 UI 行为。封面相关状态判定走 {@link CoverOps}，「设为封面 / 取消封面」
+ * 按钮文本随选中行 {@link ResourceRow#isCover()} 自动切换。
  */
 public class ResourceController {
 
     @FXML
     private TableView<ResourceRow> resourceTable;
+    @FXML
+    private Button setCoverButton;
 
     private BookContext ctx;
     private TabPane editorTabs;
@@ -42,6 +47,7 @@ public class ResourceController {
     private Runnable markDirty;
     private Runnable refreshAll;
     private Runnable refreshResources;
+    private Runnable refreshCoverCard;
     private Runnable updateStatus;
     private Consumer<String> setStatus;
     private Consumer<String> warn;
@@ -52,6 +58,7 @@ public class ResourceController {
     public void bind(BookContext ctx, TabPane editorTabs, TextArea contentArea,
                      Runnable beginChange, Runnable markDirty,
                      Runnable refreshAll, Runnable refreshResources,
+                     Runnable refreshCoverCard,
                      Runnable updateStatus, Consumer<String> setStatus,
                      Consumer<String> warn, BooleanSupplier confirm,
                      ErrorReporter showError) {
@@ -62,11 +69,40 @@ public class ResourceController {
         this.markDirty = markDirty;
         this.refreshAll = refreshAll;
         this.refreshResources = refreshResources;
+        this.refreshCoverCard = refreshCoverCard;
         this.updateStatus = updateStatus;
         this.setStatus = setStatus;
         this.warn = warn;
         this.confirm = confirm;
         this.showError = showError;
+        wireCoverButtonRefresh();
+    }
+
+    /**
+     * 选中行变化时刷新「设为封面 / 取消封面」按钮文本：选中行已是封面 → 切到「取消封面」，
+     * 否则保留「设为封面」。
+     *
+     * <p>不挂横向监听「书换了封面」（由 refresh() 顺带刷新）——书中任何 setCover 调用
+     * 最终都会调 {@code refreshAll} / {@code refreshResources}，本表被整体重建，
+     * 下一轮取行就会拿到正确的徽章与按钮文本。
+     */
+    private void wireCoverButtonRefresh() {
+        if (resourceTable == null || setCoverButton == null) {
+            return;
+        }
+        resourceTable.getSelectionModel().selectedItemProperty().addListener(
+                (obs, oldRow, newRow) -> refreshCoverButtonText(newRow));
+    }
+
+    private void refreshCoverButtonText(ResourceRow row) {
+        if (setCoverButton == null) {
+            return;
+        }
+        if (row != null && row.isCover()) {
+            setCoverButton.setText("取消封面");
+        } else {
+            setCoverButton.setText("设为封面");
+        }
     }
 
     /** 资源列表初始化/重渲染：nav/NCX 资源不展示，由 {@link BookContext} 的 Epub 写出流程维护。 */
@@ -76,13 +112,17 @@ public class ResourceController {
         }
         Resource nav = ctx.book().navResource();
         List<ResourceRow> rows = new ArrayList<>();
+        String currentCoverId = ctx.book().coverResourceId();
         for (Resource resource : ctx.book().resources().all()) {
             if (resource == nav || resource.isNavDocument() || MediaTypes.NCX.equals(resource.mediaType())) {
                 continue;
             }
-            rows.add(new ResourceRow(resource));
+            ResourceRow row = new ResourceRow(resource);
+            row.markCoverBadgeFor(currentCoverId);
+            rows.add(row);
         }
         resourceTable.getItems().setAll(rows);
+        refreshCoverButtonText(resourceTable.getSelectionModel().getSelectedItem());
     }
 
     public void importResources() {
@@ -155,21 +195,36 @@ public class ResourceController {
         setStatus.accept("已删除资源：" + row.getName());
     }
 
+    /**
+     * 「设为封面 / 取消封面」按钮点击：根据当前按钮文本分支——选中的行已是封面则清除，
+     * 否则设为封面。
+     *
+     * <p>对未选中行、非图片行做防御：不允许把非图资源设为封面。
+     */
     public void setCoverFromSelected() {
         ResourceRow row = selectedRow();
         if (row == null) {
             warn.accept("请先在资源列表中选择一张图片");
             return;
         }
-        if (!row.isImage()) {
+        boolean cancelling = row.isCover();
+        if (!cancelling && !CoverOps.pick(ctx.book(), row.getResource())) {
             warn.accept("封面必须是图片资源（PNG / JPEG / GIF / WebP / SVG）");
             return;
         }
         beginChange.run();
-        ctx.book().setCover(row.getResource());
+        if (cancelling) {
+            CoverOps.clear(ctx.book());
+            setStatus.accept("已移除封面");
+        } else {
+            CoverOps.set(ctx.book(), row.getResource());
+            setStatus.accept("已设为封面：" + row.getName());
+        }
         markDirty.run();
         refreshResources.run();
-        setStatus.accept("已设为封面：" + row.getName());
+        if (refreshCoverCard != null) {
+            refreshCoverCard.run();
+        }
     }
 
     public void insertSelectedImageIntoChapter() {

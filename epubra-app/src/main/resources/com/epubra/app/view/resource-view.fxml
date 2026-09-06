@@ -24,6 +24,11 @@
     <Label text="资源" styleClass="panel-title"/>
     <TableView fx:id="resourceTable" VBox.vgrow="ALWAYS">
         <columns>
+            <TableColumn text="封面" prefWidth="32" sortable="false">
+                <cellValueFactory>
+                    <PropertyValueFactory property="coverBadge"/>
+                </cellValueFactory>
+            </TableColumn>
             <TableColumn text="名称" prefWidth="146" sortable="false">
                 <cellValueFactory>
                     <PropertyValueFactory property="name"/>
@@ -47,7 +52,7 @@
         <Button text="删除" styleClass="flat-button" onAction="#deleteSelected"/>
     </HBox>
     <HBox spacing="4.0">
-        <Button text="设为封面" styleClass="flat-button" onAction="#setCoverFromSelected"/>
+        <Button fx:id="setCoverButton" text="设为封面" styleClass="flat-button" onAction="#setCoverFromSelected"/>
         <Button text="插入图片" styleClass="flat-button" onAction="#insertSelectedImageIntoChapter"/>
         <Button text="清理未引用" styleClass="flat-button" onAction="#cleanupUnused"/>
     </HBox>

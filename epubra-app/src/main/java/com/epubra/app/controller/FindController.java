@@ -10,6 +10,8 @@ import javafx.scene.control.IndexRange;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.Pane;
 
 import java.util.LinkedHashMap;
@@ -64,6 +66,23 @@ public class FindController {
         this.refreshPreview = refreshPreview;
         this.setStatus = setStatus;
         this.confirmDiscardChanges = confirmDiscardChanges;
+        // Esc 关闭查找栏：VSCode / Rider 通用约定。
+        //
+        // filter 必须挂在 findBar（Pane）而不是各个输入框上——JavaFX 的 event filter 走捕获
+        // 阶段，父节点能拦截整棵子树的按键事件；挂在 findField 上则只有它自己是事件目标时才
+        // 触发，「区分大小写 / 全书范围」复选框和 5 个按钮获得焦点时按 Esc 就不会关闭。
+        // （setOnKeyPressed 是冒泡语义，子节点消费掉的事件传不到父节点，同样不适用于此。）
+        if (findBar != null) {
+            findBar.addEventFilter(KeyEvent.KEY_PRESSED, this::handleEscape);
+        }
+    }
+
+    /** 按 Esc → 关闭查找栏并把焦点还给正文编辑器；非 Esc 直接放过。 */
+    private void handleEscape(KeyEvent event) {
+        if (event.getCode() == KeyCode.ESCAPE) {
+            closeBar();
+            event.consume();
+        }
     }
 
     public void showBar() {

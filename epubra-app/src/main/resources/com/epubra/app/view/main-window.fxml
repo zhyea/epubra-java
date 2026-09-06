@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.Menu?>
 <?import javafx.scene.control.MenuBar?>
@@ -46,11 +47,11 @@
             <menus>
                 <Menu text="文件">
                     <items>
-                        <MenuItem text="新建" onAction="#onNew"/>
-                        <MenuItem text="打开…" onAction="#onOpen"/>
+                        <MenuItem text="新建" onAction="#onNew" accelerator="Ctrl+N"/>
+                        <MenuItem text="打开…" onAction="#onOpen" accelerator="Ctrl+O"/>
                         <SeparatorMenuItem/>
-                        <MenuItem text="保存" onAction="#onSave"/>
-                        <MenuItem text="另存为…" onAction="#onSaveAs"/>
+                        <MenuItem text="保存" onAction="#onSave" accelerator="Ctrl+S"/>
+                        <MenuItem text="另存为…" onAction="#onSaveAs" accelerator="Ctrl+Shift+S"/>
                         <SeparatorMenuItem/>
                         <MenuItem text="退出" onAction="#onExit"/>
                     </items>
@@ -61,12 +62,14 @@
                         <MenuItem fx:id="redoItem" text="重做" onAction="#onRedo" accelerator="Ctrl+Shift+Z"/>
                         <SeparatorMenuItem/>
                         <MenuItem text="查找替换…" onAction="#onShowFind" accelerator="Ctrl+F"/>
-                        <MenuItem text="重命名章节…" onAction="#onRenameChapter" accelerator="F2"/>
                     </items>
                 </Menu>
-                <Menu text="开始">
+                <!-- 原「开始」。章节是结构操作而非格式化操作，放「开始」不符合常规心智；
+                     「重命名章节…」也从「编辑」归并过来，让章节相关操作集中一处。 -->
+                <Menu text="章节">
                     <items>
                         <MenuItem text="添加章节" onAction="#onAddChapter"/>
+                        <MenuItem text="重命名章节…" onAction="#onRenameChapter" accelerator="F2"/>
                         <MenuItem text="删除章节" onAction="#onDeleteChapter"/>
                         <SeparatorMenuItem/>
                         <MenuItem text="上移" onAction="#onMoveUp"/>
@@ -77,8 +80,6 @@
                     <items>
                         <MenuItem text="导入资源…" onAction="#onImportResources"/>
                         <MenuItem text="插入图片" onAction="#onInsertImage"/>
-                        <SeparatorMenuItem/>
-                        <MenuItem text="清理未引用资源" onAction="#onCleanupResources"/>
                     </items>
                 </Menu>
                 <Menu text="视图">
@@ -87,7 +88,7 @@
                         <SeparatorMenuItem/>
                         <!-- 快捷键 Ctrl+` 在控制器里绑定：FXML 的 accelerator 字符串解析反引号不可靠 -->
                         <MenuItem fx:id="problemsItem" text="问题面板" onAction="#onToggleProblems"/>
-                        <MenuItem text="运行校验" onAction="#onRunValidation"/>
+                        <MenuItem fx:id="splitPreviewItem" text="并排预览" onAction="#onToggleSplitPreview"/>
                         <SeparatorMenuItem/>
                         <RadioMenuItem fx:id="themeLightItem" text="浅色" onAction="#onThemeLight"
                                        selected="true">
@@ -99,6 +100,14 @@
                                        toggleGroup="$themeGroup"/>
                         <RadioMenuItem fx:id="themeSepiaItem" text="护眼米黄" onAction="#onThemeSepia"
                                        toggleGroup="$themeGroup"/>
+                    </items>
+                </Menu>
+                <!-- 「清理未引用资源」不是插入动作，「运行校验」是工具性操作而非视图开关，
+                     两者从原「插入」「视图」里分出来单独立项。 -->
+                <Menu text="工具">
+                    <items>
+                        <MenuItem text="运行校验" onAction="#onRunValidation"/>
+                        <MenuItem text="清理未引用资源" onAction="#onCleanupResources"/>
                     </items>
                 </Menu>
                 <Menu text="帮助">
@@ -117,7 +126,7 @@
             </padding>
 
             <ToggleButton fx:id="tocActivityButton" styleClass="activity-button" selected="true"
-                          contentDisplay="GRAPHIC_ONLY" focusTraversable="false" mnemonicParsing="false"
+                          contentDisplay="GRAPHIC_ONLY"
                           onAction="#onShowTocView">
                 <toggleGroup>
                     <ToggleGroup fx:id="activityGroup"/>
@@ -133,7 +142,7 @@
             </ToggleButton>
 
             <ToggleButton fx:id="resourceActivityButton" styleClass="activity-button"
-                          contentDisplay="GRAPHIC_ONLY" focusTraversable="false" mnemonicParsing="false"
+                          contentDisplay="GRAPHIC_ONLY"
                           toggleGroup="$activityGroup" onAction="#onShowResourceView">
                 <graphic>
                     <!-- 文件夹 -->
@@ -146,7 +155,7 @@
             </ToggleButton>
 
             <ToggleButton fx:id="metadataActivityButton" styleClass="activity-button"
-                          contentDisplay="GRAPHIC_ONLY" focusTraversable="false" mnemonicParsing="false"
+                          contentDisplay="GRAPHIC_ONLY"
                           toggleGroup="$activityGroup" onAction="#onShowMetadataView">
                 <graphic>
                     <!-- 信息圆 -->
@@ -159,7 +168,7 @@
             </ToggleButton>
 
             <ToggleButton fx:id="validationActivityButton" styleClass="activity-button"
-                          contentDisplay="GRAPHIC_ONLY" focusTraversable="false" mnemonicParsing="false"
+                          contentDisplay="GRAPHIC_ONLY"
                           toggleGroup="$activityGroup" onAction="#onShowProblems">
                 <graphic>
                     <!-- 对勾圆 -->
@@ -178,7 +187,7 @@
             <children>
                 <!-- 常规编辑面板：无项目时也保留，但被 welcome-page 覆盖 -->
                 <VBox>
-                    <SplitPane dividerPositions="0.26" VBox.vgrow="ALWAYS">
+                    <SplitPane dividerPositions="0.22" VBox.vgrow="ALWAYS">
                         <items>
                             <!-- 侧边栏：三个视图叠放，按活动栏切换 visible + managed -->
                             <StackPane styleClass="side-panel">
@@ -189,18 +198,46 @@
                                 </children>
                             </StackPane>
 
-                            <!-- 编辑区：内容 / 预览 + 底部问题面板 -->
+                            <!-- 编辑区：内容 / 预览 + 底部问题面板。
+
+                     两种呈现模式共用 contentArea 与 previewView 两个节点：
+                       标签模式（默认）— 分别挂在 editorTabs 的两个 Tab 上
+                       并排模式        — 一起挂进 splitPreviewPane 左右分栏
+                     切换时把节点在两个父容器之间搬运——一个 Node 只能有一个 parent。 -->
                             <VBox maxWidth="Infinity" maxHeight="Infinity">
-                                <TabPane fx:id="editorTabs" tabClosingPolicy="UNAVAILABLE" VBox.vgrow="ALWAYS">
-                                    <tabs>
-                                        <Tab text="内容">
-                                            <TextArea fx:id="contentArea" promptText="选择左侧章节后，在此编辑 XHTML 内容"/>
-                                        </Tab>
-                                        <Tab text="预览">
-                                            <WebView fx:id="previewView"/>
-                                        </Tab>
-                                    </tabs>
-                                </TabPane>
+                                <!-- 编辑辅助工具条：把常用 XHTML 片段做成一键插入，降低手写标签的门槛。
+                                     这里刻意不做所见即所得——JavaFX 的 HTMLEditor 产出 HTML 而非 XHTML
+                                     （标签不闭合、属性不带引号、&lt;br&gt; 而非 &lt;br/&gt;），
+                                     直接替换正文编辑器会让产出的 EPUB 校验失败。 -->
+                                <HBox styleClass="editor-toolbar" spacing="4.0" alignment="CENTER_LEFT">
+                                    <padding>
+                                        <Insets top="4.0" right="8.0" bottom="4.0" left="8.0"/>
+                                    </padding>
+                                    <Button text="段落" styleClass="flat-button" onAction="#onInsertParagraph"/>
+                                    <Button text="标题" styleClass="flat-button" onAction="#onInsertHeading"/>
+                                    <Button text="加粗" styleClass="flat-button" onAction="#onInsertBold"/>
+                                    <Button text="斜体" styleClass="flat-button" onAction="#onInsertItalic"/>
+                                    <Button text="列表" styleClass="flat-button" onAction="#onInsertList"/>
+                                    <!-- 图片走菜单「插入」同一个入口（从已导入资源里选），
+                                         不在这里另插一个裸 img 标签，避免两种不一致的行为 -->
+                                    <Button text="图片" styleClass="flat-button" onAction="#onInsertImage"/>
+                                </HBox>
+
+                                <StackPane VBox.vgrow="ALWAYS">
+                                    <TabPane fx:id="editorTabs" tabClosingPolicy="UNAVAILABLE">
+                                        <tabs>
+                                            <Tab text="内容">
+                                                <TextArea fx:id="contentArea"
+                                                          promptText="选择左侧章节后，在此编辑 XHTML 内容"/>
+                                            </Tab>
+                                            <Tab text="预览">
+                                                <WebView fx:id="previewView"/>
+                                            </Tab>
+                                        </tabs>
+                                    </TabPane>
+                                    <SplitPane fx:id="splitPreviewPane" visible="false" managed="false"
+                                               dividerPositions="0.5"/>
+                                </StackPane>
 
                                 <fx:include fx:id="bottomPanel" source="problems-panel.fxml"/>
                             </VBox>
@@ -224,16 +261,22 @@
             </padding>
             <Label fx:id="statusLabel" text="就绪" HBox.hgrow="ALWAYS"/>
 
+            <!-- 右侧分区：错误 / 警告走强调色，其余走弱化色，中间用 1px 竖线隔开。
+                 计数为 0 时错误 / 警告标签及其后那条竖线一并隐藏——只清标签会留下孤立竖线。 -->
             <Label fx:id="errorStatusLabel" styleClass="status-error"/>
-            <Region styleClass="status-divider" minWidth="1.0" prefWidth="1.0" maxWidth="1.0"
-                    minHeight="13.0" prefHeight="13.0" maxHeight="13.0"/>
+            <Region fx:id="errorStatusDivider" styleClass="status-divider" minWidth="1.0" prefWidth="1.0"
+                    maxWidth="1.0" minHeight="13.0" prefHeight="13.0" maxHeight="13.0"/>
             <Label fx:id="warningStatusLabel" styleClass="status-warning"/>
-            <Region styleClass="status-divider" minWidth="1.0" prefWidth="1.0" maxWidth="1.0"
-                    minHeight="13.0" prefHeight="13.0" maxHeight="13.0"/>
+            <Region fx:id="warningStatusDivider" styleClass="status-divider" minWidth="1.0" prefWidth="1.0"
+                    maxWidth="1.0" minHeight="13.0" prefHeight="13.0" maxHeight="13.0"/>
             <Label fx:id="chapterStatusLabel" styleClass="status-item"/>
             <Region styleClass="status-divider" minWidth="1.0" prefWidth="1.0" maxWidth="1.0"
                     minHeight="13.0" prefHeight="13.0" maxHeight="13.0"/>
             <Label fx:id="wordStatusLabel" styleClass="status-item"/>
+            <Region styleClass="status-divider" minWidth="1.0" prefWidth="1.0" maxWidth="1.0"
+                    minHeight="13.0" prefHeight="13.0" maxHeight="13.0"/>
+            <!-- 当前章节字数：全书总数之外再给一个局部刻度，便于按章控制篇幅 -->
+            <Label fx:id="chapterWordStatusLabel" styleClass="status-item"/>
             <Region styleClass="status-divider" minWidth="1.0" prefWidth="1.0" maxWidth="1.0"
                     minHeight="13.0" prefHeight="13.0" maxHeight="13.0"/>
             <Label fx:id="themeStatusLabel" styleClass="status-item"/>

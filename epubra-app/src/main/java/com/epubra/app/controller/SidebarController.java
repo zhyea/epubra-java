@@ -1,8 +1,10 @@
 package com.epubra.app.controller;
 
+import javafx.animation.FadeTransition;
 import javafx.scene.Node;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.control.ToggleGroup;
+import javafx.util.Duration;
 
 /**
  * 侧边栏与活动栏交互控制器。
@@ -170,6 +172,22 @@ public class SidebarController {
         setVisibleManaged(tocView, view == tocView);
         setVisibleManaged(resourceView, view == resourceView);
         setVisibleManaged(metadataView, view == metadataView);
+        // 首次显示时 fade in 150ms——后续切换因 opacity 已 1 自然跳过，避免重复动画的闪烁感
+        fadeInIfNeeded(view);
+    }
+
+    /**
+     * 仅对当前 opacity 接近 0 的视图做 fade in。已经显示过的视图跳过动画，让连续切换的体感
+     * 像「切换」而不是「每次都闪一下」。
+     */
+    private void fadeInIfNeeded(Node view) {
+        if (view == null || view.getOpacity() >= 0.99) {
+            return;
+        }
+        FadeTransition ft = new FadeTransition(Duration.millis(150), view);
+        ft.setFromValue(view.getOpacity());
+        ft.setToValue(1.0);
+        ft.play();
     }
 
     /**
@@ -184,7 +202,17 @@ public class SidebarController {
         setVisibleManaged(tocView, false);
         setVisibleManaged(resourceView, false);
         setVisibleManaged(metadataView, false);
+        // 把三个视图的 opacity 归 0——下次 showSideView 触发 fadeInIfNeeded 时能正常淡入
+        resetOpacity(tocView);
+        resetOpacity(resourceView);
+        resetOpacity(metadataView);
         // 注意：保留 lastSideButton，供后续 hideProblems → restoreSideActivity 还原侧栏按钮
+    }
+
+    private static void resetOpacity(Node view) {
+        if (view != null) {
+            view.setOpacity(0);
+        }
     }
 
     /** 任一侧栏视图是否处于可见状态——供「再点同一按钮收起」语义判断。 */

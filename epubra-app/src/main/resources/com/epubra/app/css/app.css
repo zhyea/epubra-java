@@ -17,9 +17,10 @@
 
     -epubra-bg: #ffffff;                 /* 主背景 */
     -epubra-fg: #333333;                 /* 主文字 */
-    -epubra-muted-fg: #777777;           /* 弱化文字（统计、占位） */
+    -epubra-muted-fg: #6e6e6e;           /* 弱化文字：原 #777777 对比度 4.48 临界，调到 5.13 达 WCAG AA */
     -epubra-title-fg: #666666;           /* 面板小标题、未选中活动栏图标 */
     -epubra-find-fg: #555555;            /* 查找条文字 */
+    -epubra-on-accent-fg: #ffffff;       /* 在 -epubra-accent 底色上的文字色：与主题一同定义，避免硬编码 white */
     -epubra-border: #e8e8e8;             /* 分隔线 / 常规边框 */
     -epubra-border-input: #dcdcdc;       /* 输入控件边框、状态栏分隔竖线 */
     -epubra-panel-bg: #fafafa;           /* 侧边面板 */
@@ -68,6 +69,7 @@
     -epubra-muted-fg: #9a9a9a;
     -epubra-title-fg: #a8a8a8;
     -epubra-find-fg: #b8b8b8;
+    -epubra-on-accent-fg: #ffffff;
     -epubra-border: #3a3a3a;
     -epubra-border-input: #4a4a4a;
     -epubra-panel-bg: #252526;
@@ -108,9 +110,10 @@
 
     -epubra-bg: #f5ecd9;
     -epubra-fg: #3f3524;
-    -epubra-muted-fg: #8a7c60;
+    -epubra-muted-fg: #6b5d3e;           /* 原 #8a7c60 对比度 3.34 fail AA；调到 5.18 达 4.5 阈值 */
     -epubra-title-fg: #7a6b4f;
     -epubra-find-fg: #6f6248;
+    -epubra-on-accent-fg: #ffffff;
     -epubra-border: #ddd0b4;
     -epubra-border-input: #d6c8a8;
     -epubra-panel-bg: #efe6d2;
@@ -124,7 +127,7 @@
     -epubra-error-fg: #9c2a2a;
     -epubra-warning-fg: #8a5a10;
     -epubra-hover-bg: #e6dbc0;
-    -epubra-hover-fg: #7a4f1d;
+    -epubra-hover-fg: #5a3f15;           /* 原 #7a4f1d hover 时 hover-bg 上对比度偏弱，调深一点 */
     -epubra-pressed-bg: #dccfae;
     -epubra-selected-bg: #d9c9a3;
     -epubra-selected-fg: #2f2717;
@@ -204,6 +207,13 @@
     -fx-background-color: -epubra-pressed-bg;
 }
 
+/* 编辑辅助工具条：与上方边界用细线隔开，底色沿用菜单/页签同款 toolbar 色。
+ * 按钮已通过 .flat-button 透明化，这里只负责容器配色 + 下边线。 */
+.editor-toolbar {
+    -fx-background-color: -epubra-toolbar-bg;
+    -fx-border-color: transparent transparent -epubra-border transparent;
+}
+
 /* ---------------------------------------------------------------- 活动栏 */
 
 .activity-bar {
@@ -228,13 +238,36 @@
     -fx-cursor: hand;
 }
 
-/* 关掉 Modena 的聚焦光晕：活动栏只需要左侧指示条来表达状态 */
-.activity-button:focused {
-    -fx-background-color: transparent;
-}
-
 .activity-button:hover {
     -fx-background-color: -epubra-hover-bg;
+}
+
+/* 按下：scale 0.96 + 略微变深。只动 transform / 背景，不引发布局重排 */
+.activity-button:pressed {
+    -fx-background-color: -epubra-pressed-bg;
+    -fx-scale-x: 0.96;
+    -fx-scale-y: 0.96;
+}
+
+/* 键盘 focus：整圈 2px 主题色描边（双层 background 内缩实现——外层 accent 占满、
+ * 内层 activity-bg 内缩 2px 盖在上面）。
+ *
+ * 与 :hover 的纯底色刻意区分开：hover 表示「鼠标在那儿」，focus 表示「键盘在这儿」，
+ * 两者共用一个底色会让状态不可辨（WCAG 2.4.7 要求焦点可见且可识别）。
+ *
+ * 必须排在 :hover / :pressed 之后——同为单伪类选择器、优先级相同，后定义者覆盖先定义者；
+ * 放在前面的话鼠标一悬停就会把 focus 描边吃掉。
+ *
+ * 左侧 2px 竖条是 :selected 的语义（走 border），与本描边互不干扰，可同时呈现。 */
+.activity-button:focused {
+    -fx-background-color: -epubra-accent, -epubra-activity-bg;
+    -fx-background-insets: 0, 2;
+}
+
+/* focus + hover 叠加：外圈保持 focus 描边，内部换成 hover 底色，两个状态同时可辨 */
+.activity-button:focused:hover {
+    -fx-background-color: -epubra-accent, -epubra-hover-bg;
+    -fx-background-insets: 0, 2;
 }
 
 /* VSCode 的标志性细节：选中项左侧 2px 竖条 */
@@ -268,9 +301,18 @@
 }
 
 .panel-title {
-    -fx-font-size: 12px;
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
     -fx-text-fill: -epubra-title-fg;
     -fx-padding: 0 0 2 4;
+}
+
+/* 侧栏操作提示：比正文小一档、弱化色，用来说明该面板「能做什么」。
+   针对的是「功能已实现但没有任何入口提示」的场景（如目录树可拖拽排序）。 */
+.panel-hint {
+    -fx-font-size: 12px;
+    -fx-text-fill: -epubra-muted-fg;
+    -fx-padding: 2 0 0 4;
 }
 
 .tree-view {
@@ -480,6 +522,13 @@
     -fx-text-fill: -epubra-warning-fg;
 }
 
+/* 关键操作反馈（打开 / 保存 / 模式切换成功）：由控制器加上、1.2s 后自动移除。
+   让重要结果从一行灰色小字里跳出来，而不是淹没在常态信息中。 */
+.status-flash {
+    -fx-font-weight: bold;
+    -fx-text-fill: -epubra-accent;
+}
+
 .status-divider {
     -fx-background-color: -epubra-border-input;
 }
@@ -492,7 +541,7 @@
 
 .status-autosave-off {
     -fx-text-fill: -epubra-muted-fg;
-    -fx-opacity: 0.7;
+    -fx-opacity: 0.85;
 }
 
 /* ---------------------------------------------------------------- 欢迎页 */
@@ -510,7 +559,7 @@
 }
 
 .welcome-subtitle {
-    -fx-font-size: 15px;
+    -fx-font-size: 16px;
     -fx-text-fill: -epubra-muted-fg;
 }
 
@@ -528,7 +577,7 @@
 }
 
 .welcome-section-caption {
-    -fx-font-size: 11px;
+    -fx-font-size: 12px;
     -fx-text-fill: -epubra-muted-fg;
     -fx-padding: 4 0 2 0;
 }
@@ -542,7 +591,7 @@
 }
 
 .welcome-note {
-    -fx-font-size: 11px;
+    -fx-font-size: 12px;
     -fx-text-fill: -epubra-muted-fg;
     -fx-max-width: 380px;
     -fx-text-alignment: center;
@@ -551,7 +600,7 @@
 /* 主操作（新建项目…）：实心按钮，走主题强调色 */
 .welcome-primary-button {
     -fx-background-color: -epubra-accent;
-    -fx-text-fill: white;
+    -fx-text-fill: -epubra-on-accent-fg;
     -fx-font-size: 13px;
     -fx-padding: 9 24 9 24;
     -fx-background-radius: 3;
@@ -619,4 +668,82 @@
     -fx-text-fill: -epubra-error-fg;
     -fx-font-size: 12px;
     -fx-padding: 4 0 0 0;
+}
+
+/* ---------------------------------------------------------------- 封面卡
+ * 三态外观：
+ *   .cover-card            通用容器（圆角 + 边框 + 浅底）
+ *   .cover-card.cover-empty   空态加虚线边框
+ *   .cover-card.cover-dangling 异常态加红底 + 红字徽章
+ *   .cover-thumb           缩略图（圆角 + 浅灰底）
+ * 颜色一律走 -epubra-* 变量，三主题自动跟随。
+ */
+.cover-card {
+    -fx-background-color: -epubra-panel-bg;
+    -fx-background-radius: 4;
+    -fx-border-color: -epubra-border-input;
+    -fx-border-width: 1;
+    -fx-border-radius: 4;
+    -fx-padding: 8;
+}
+
+.cover-card-title {
+    -fx-font-size: 12px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -epubra-title-fg;
+}
+
+.cover-state-badge {
+    -fx-font-size: 11px;
+    -fx-text-fill: -epubra-muted-fg;
+    -fx-padding: 1 6 1 6;
+    -fx-background-color: -epubra-bg;
+    -fx-background-radius: 8;
+    -fx-border-color: -epubra-border;
+    -fx-border-radius: 8;
+    -fx-border-width: 1;
+}
+
+.cover-name {
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -epubra-fg;
+}
+
+.cover-meta {
+    -fx-font-size: 12px;
+    -fx-text-fill: -epubra-muted-fg;
+}
+
+.cover-thumb {
+    -fx-background-color: -epubra-control-bg;
+    -fx-background-radius: 4;
+    -fx-border-color: -epubra-border;
+    -fx-border-width: 1;
+    -fx-border-radius: 4;
+    /* ImageView 不需要 padding；预留 2px 让缩略图与边框有缓冲 */
+    -fx-padding: 2;
+}
+
+.cover-empty-title {
+    -fx-font-size: 13px;
+    -fx-text-fill: -epubra-title-fg;
+}
+
+/* 异常态：红底标题 + 红字徽章，让「⚠ 封面引用失效」一眼可见 */
+.cover-card.cover-dangling {
+    -fx-background-color: derive(-epubra-error-fg, 92%);
+    -fx-border-color: -epubra-error-fg;
+}
+
+.cover-dangling-title {
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -epubra-error-fg;
+}
+
+.cover-dangling-detail {
+    -fx-font-size: 12px;
+    -fx-text-fill: -epubra-fg;
+    -fx-padding: 2 0 0 0;
 }

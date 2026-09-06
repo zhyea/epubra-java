@@ -24,27 +24,34 @@ import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.IndexRange;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.RadioMenuItem;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.SplitPane;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextInputDialog;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.control.ToggleGroup;
+import javafx.scene.input.Dragboard;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
+import javafx.scene.input.TransferMode;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -62,6 +69,9 @@ public class MainController {
     private WebView previewView;
     @FXML
     private TabPane editorTabs;
+    /** 并排预览容器：与 editorTabs 互斥显示，二者共用 contentArea / previewView 两个节点。 */
+    @FXML
+    private SplitPane splitPreviewPane;
 
     @FXML
     private ToggleGroup activityGroup;
@@ -109,6 +119,8 @@ public class MainController {
 
     @FXML
     private MenuItem problemsItem;
+    @FXML
+    private MenuItem splitPreviewItem;
 
     @FXML
     private MenuItem undoItem;
@@ -121,10 +133,18 @@ public class MainController {
     private Label errorStatusLabel;
     @FXML
     private Label warningStatusLabel;
+    // 错误 / 警告标签后面各跟一条 1px 分隔竖线。计数为 0 时标签文本清空，这两条竖线必须
+    // 同步隐藏——只清文本会留下「就绪  | |  章节 12 | …」这种孤立竖线的视觉噪音。
+    @FXML
+    private Region errorStatusDivider;
+    @FXML
+    private Region warningStatusDivider;
     @FXML
     private Label chapterStatusLabel;
     @FXML
     private Label wordStatusLabel;
+    @FXML
+    private Label chapterWordStatusLabel;
     @FXML
     private Label themeStatusLabel;
     @FXML
@@ -158,6 +178,9 @@ public class MainController {
 
     /** 当前主题。initialize 时取自持久化配置，切换后预览区与整个界面同步换色。 */
     private Theme currentTheme = Theme.LIGHT;
+
+    /** 编辑区呈现模式：{@code false} = 内容与预览分标签，{@code true} = 左右并排对照。 */
+    private boolean splitPreview = false;
 
     public void setStage(Stage stage) {
         ctx.setStage(stage);
@@ -203,11 +226,12 @@ public class MainController {
         bottomPanelController.setupTable();
 
         metadataViewController.bind(ctx, this::recordBeforeChange, this::markDirty,
-                this::refreshAll, this::setStatus);
+                this::refreshAll, this::refreshResources, this::setStatus);
 
         resourceViewController.bind(ctx, editorTabs, contentArea,
                 this::beginChange, this::markDirty,
                 this::refreshAll, this::refreshResources,
+                () -> metadataViewController.refreshCoverCard(),
                 this::updateStatus, this::setStatus, this::warn,
                 this::confirmDiscardChanges, this::showError);
 
@@ -233,6 +257,7 @@ public class MainController {
         applyThemeWhenSceneReady();
 
         wireAutosave();
+        wireFileDropWhenSceneReady();
 
         ensureDocumentController();
         // 启动恢复扫描：必须在 newBook() 之前判断——否则新建的空书会覆盖 ctx，
@@ -253,7 +278,10 @@ public class MainController {
         ctx.bus().subscribe(com.epubra.app.support.AppEventBus.BookRestoredEvent.class,
                 e -> refreshAll());
         ctx.bus().subscribe(com.epubra.app.support.AppEventBus.BookSavedEvent.class,
-                e -> updateTitleAndHistory());
+                e -> {
+                    updateTitleAndHistory();
+                    flashStatus("已保存");
+                });
         ctx.bus().subscribe(com.epubra.app.support.AppEventBus.BookDirtyChangedEvent.class,
                 e -> updateTitleAndHistory());
     }
@@ -288,14 +316,23 @@ public class MainController {
             warn("无法打开：" + path + "（文件不存在或目录下没有 .epub）");
             return;
         }
+        openPath(target);
+    }
+
+    /**
+     * 打开指定 .epub 的统一入口：确认丢弃未保存修改 → 清旧草稿 → 读文件 → 高亮反馈。
+     *
+     * <p>「最近」列表点击与文件拖放共用这一条路径，避免两处各写一遍确认与清理逻辑。
+     */
+    private void openPath(java.nio.file.Path epub) {
         if (!confirmDiscardChanges()) {
             return;
         }
         Autosave.discardFor(ctx);
         ensureDocumentController();
         try {
-            documentController.openFile(target);
-            statusLabel.setText("已打开 " + target.getFileName());
+            documentController.openFile(epub);
+            flashStatus("已打开 " + epub.getFileName());
         } catch (java.io.IOException e) {
             reportError("打开失败：" + e.getMessage());
         }
@@ -449,6 +486,48 @@ public class MainController {
         setStatus("预览已刷新");
     }
 
+    /**
+     * 「视图 → 并排预览」开关：标签模式 ↔ 左右并排对照。
+     *
+     * <p>长文档在标签模式下要反复切 Tab 才能看到改动效果，并排模式让源码与渲染结果同屏，
+     * 省掉切换成本。
+     */
+    @FXML
+    public void onToggleSplitPreview() {
+        splitPreview = !splitPreview;
+        applyPreviewMode();
+        refreshPreview();
+        setStatus(splitPreview ? "已切换为并排预览" : "已切换为标签预览");
+    }
+
+    /**
+     * 把 contentArea 与 previewView 在两个父容器之间搬移。
+     *
+     * <p>一个 Node 只能挂在一个父容器下，所以两种模式不能各持一份，只能切一次搬一次。
+     * 摘 Tab 内容时先 {@code setContent(null)}——直接把节点塞进 SplitPane 会让 JavaFX
+     * 抛「节点已有父容器」异常。
+     */
+    private void applyPreviewMode() {
+        if (splitPreviewPane == null || editorTabs == null || editorTabs.getTabs().size() < 2) {
+            return;
+        }
+        if (splitPreview) {
+            editorTabs.getTabs().get(0).setContent(null);
+            editorTabs.getTabs().get(1).setContent(null);
+            splitPreviewPane.getItems().setAll(contentArea, previewView);
+        } else {
+            splitPreviewPane.getItems().clear();
+            editorTabs.getTabs().get(0).setContent(contentArea);
+            editorTabs.getTabs().get(1).setContent(previewView);
+        }
+        // 两个容器互斥显示：visible 与 managed 必须同步，否则隐藏的那个仍占 StackPane 布局
+        setVisibleManaged(editorTabs, !splitPreview);
+        setVisibleManaged(splitPreviewPane, splitPreview);
+        if (splitPreviewItem != null) {
+            splitPreviewItem.setText(splitPreview ? "标签预览" : "并排预览");
+        }
+    }
+
     // ------------------------------------------------------------------ 主题
 
     @FXML
@@ -520,6 +599,90 @@ public class MainController {
         if (themeStatusLabel != null) {
             themeStatusLabel.setText(theme.displayName());
         }
+    }
+
+    // ------------------------------------------------------------------ 文件拖放
+
+    /**
+     * 装配「拖 .epub 到窗口即打开」，兑现欢迎页文案里「拖一个 .epub 文件到此处」的承诺。
+     *
+     * <p>挂在 Scene 上而不是欢迎页节点上——欢迎页在载入书籍后就隐藏了，挂在那里之后
+     * 再也收不到拖放事件；而拖放打开应该是全流程可用的能力，不限于起始页。
+     */
+    private void wireFileDropWhenSceneReady() {
+        Scene scene = statusLabel.getScene();
+        if (scene != null) {
+            wireFileDropTo(scene);
+            return;
+        }
+        statusLabel.sceneProperty().addListener(new ChangeListener<>() {
+            @Override
+            public void changed(ObservableValue<? extends Scene> obs, Scene oldScene, Scene newScene) {
+                if (newScene == null) {
+                    return;
+                }
+                statusLabel.sceneProperty().removeListener(this);
+                wireFileDropTo(newScene);
+            }
+        });
+    }
+
+    private void wireFileDropTo(Scene scene) {
+        scene.setOnDragOver(event -> {
+            if (firstEpub(event.getDragboard()) != null) {
+                event.acceptTransferModes(TransferMode.COPY);
+            }
+            event.consume();
+        });
+        scene.setOnDragDropped(event -> {
+            Path epub = firstEpub(event.getDragboard());
+            if (epub == null) {
+                event.setDropCompleted(false);
+                event.consume();
+                return;
+            }
+            event.setDropCompleted(true);
+            event.consume();
+            openPath(epub);
+        });
+    }
+
+    /** 从拖放载体里挑第一个 .epub；没有则返回 null（此时不接受落点）。 */
+    private static Path firstEpub(Dragboard board) {
+        if (board == null || !board.hasFiles()) {
+            return null;
+        }
+        List<File> files = board.getFiles();
+        if (files == null) {
+            return null;
+        }
+        for (File file : files) {
+            if (file.isFile() && file.getName().toLowerCase().endsWith(".epub")) {
+                return file.toPath();
+            }
+        }
+        return null;
+    }
+
+    // ------------------------------------------------------------------ 状态反馈
+
+    /**
+     * 关键操作的强化反馈：状态栏文字短暂高亮 1.2 秒后自动复原。
+     *
+     * <p>普通 {@link #setStatus} 写的是一行灰色小字，保存成功、打开完成这类关键结果
+     * 混在里面很容易被忽略——这里用主题色加粗闪一下再退回常态。
+     */
+    private void flashStatus(String message) {
+        setStatus(message);
+        if (statusLabel == null) {
+            return;
+        }
+        if (!statusLabel.getStyleClass().contains("status-flash")) {
+            statusLabel.getStyleClass().add("status-flash");
+        }
+        PauseTransition flash = new PauseTransition(Duration.seconds(1.2));
+        flash.setOnFinished(e -> statusLabel.getStyleClass().remove("status-flash"));
+        flash.play();
     }
 
     // ------------------------------------------------------------------ 自动暂存
@@ -839,6 +1002,108 @@ private void bindProblemsAccelerator() {
         resourceViewController.insertSelectedImageIntoChapter();
     }
 
+    // ------------------------------------------------------------------
+    // 编辑工具条（段落 / 标题 / 加粗 / 斜体 / 列表）
+
+    /**
+     * 在当前光标处插入段落。空选区时把光标放进 &lt;p&gt;&lt;/p&gt; 中间，方便直接输入；
+     * 有选区时用 &lt;p&gt; 包裹选中文本，光标定位到包裹后内容末尾。
+     */
+    @FXML
+    public void onInsertParagraph() {
+        insertFragment("<p></p>", 3);
+    }
+
+    /**
+     * 在当前光标处插入二级标题。H1 通常留作章名，H2 是小节标。
+     */
+    @FXML
+    public void onInsertHeading() {
+        insertFragment("<h2></h2>", 4);
+    }
+
+    /**
+     * 把选中文本用 &lt;strong&gt; 包裹；无选区时空插入 &lt;strong&gt;&lt;/strong&gt;，
+     * 光标落在中间。包裹后默认把内容再次选中，便于连续调整字号 / 颜色等其他属性。
+     */
+    @FXML
+    public void onInsertBold() {
+        insertWrapTag("strong");
+    }
+
+    /** {@link #onInsertBold()} 的斜体版，用 &lt;em&gt;。 */
+    @FXML
+    public void onInsertItalic() {
+        insertWrapTag("em");
+    }
+
+    /**
+     * 插入无序列表骨架 &lt;ul&gt;&lt;li&gt;&lt;/li&gt;&lt;/ul&gt;，光标落在第一个
+     * &lt;li&gt; 内。多行内容由用户自行复制 &lt;li&gt; 增加；不试图预判列表项数。
+     */
+    @FXML
+    public void onInsertList() {
+        insertFragment("<ul>\n<li></li>\n</ul>", "<ul>\n<li>".length());
+    }
+
+    /**
+     * 通用片段插入助手。选区非空时把 {@code fragment} 视作「左右两侧开闭标记 + 选区内容」
+     * 重写；选区为空时把 {@code fragment} 插到光标处。光标停在 {@code caretOffset}
+     * 指定的相对位置，便于用户接着输入。
+     *
+     * <p>写入之前调 {@link #beginChange()} 让撤销栈只记一次；后续文本变更由
+     * {@code contentArea} 的 listener 自动触发 {@code markDirty}，本方法不重复调。
+     */
+    private void insertFragment(String fragment, int caretOffset) {
+        if (contentArea == null || contentArea.isDisabled()) {
+            setStatus("当前章节不可编辑，无法插入片段");
+            return;
+        }
+        beginChange();
+        IndexRange sel = contentArea.getSelection();
+        if (sel.getLength() > 0) {
+            String selected = contentArea.getSelectedText();
+            String wrapped = fragment.substring(0, caretOffset)
+                    + selected
+                    + fragment.substring(caretOffset);
+            int start = sel.getStart();
+            contentArea.replaceSelection(wrapped);
+            contentArea.positionCaret(start + caretOffset + selected.length());
+        } else {
+            int caretPos = contentArea.getCaretPosition();
+            contentArea.insertText(caretPos, fragment);
+            contentArea.positionCaret(caretPos + caretOffset);
+        }
+    }
+
+    /**
+     * 包标签助手：选中文本时用 {@code <tag>...</tag>} 包裹并把内容重新选中，
+     * 选区为空时空插入一对标签并把光标落在开标签之后。
+     */
+    private void insertWrapTag(String tag) {
+        if (contentArea == null || contentArea.isDisabled()) {
+            setStatus("当前章节不可编辑，无法插入片段");
+            return;
+        }
+        beginChange();
+        IndexRange sel = contentArea.getSelection();
+        String open = "<" + tag + ">";
+        String close = "</" + tag + ">";
+        if (sel.getLength() > 0) {
+            String selected = contentArea.getSelectedText();
+            String wrapped = open + selected + close;
+            int start = sel.getStart();
+            contentArea.replaceSelection(wrapped);
+            // 把刚被包裹的内容再次选中，方便接着改字号 / 颜色等其他属性
+            contentArea.selectRange(start + open.length(), start + wrapped.length() - close.length());
+        } else {
+            String fragment = open + close;
+            int caretPos = contentArea.getCaretPosition();
+            contentArea.insertText(caretPos, fragment);
+            contentArea.positionCaret(caretPos + open.length());
+        }
+    }
+
     @FXML
     public void onCleanupResources() {
         resourceViewController.cleanupUnused();
@@ -984,24 +1249,63 @@ private void bindProblemsAccelerator() {
         if (ctx.book() == null) {
             chapterStatusLabel.setText("章节 —");
             wordStatusLabel.setText("字数 —");
+            setChapterWordStatus(null);
             updateHistoryControls();
             return;
         }
         chapterStatusLabel.setText("章节 " + ctx.book().spineResources().size());
         wordStatusLabel.setText("字数 " + wordCount());
+        setChapterWordStatus(ctx.currentNode());
         updateIssueCounters();
         updateHistoryControls();
         updateTitle();
     }
 
-    /** 状态栏的错误 / 警告计数，取自最近一次校验结果。 */
+    /**
+     * 当前章节字数。未选中章节时显示「本章 —」而不是 0——0 看起来像「这章是空的」，
+     * 与「还没选章节」是两回事。
+     */
+    private void setChapterWordStatus(ChapterNode node) {
+        if (chapterWordStatusLabel == null) {
+            return;
+        }
+        if (node == null || node.resource() == null) {
+            chapterWordStatusLabel.setText("本章 —");
+            return;
+        }
+        // 编辑区可用时以它的实时内容为准——用户敲进去还没写回的字符也要算进去
+        String text = contentArea != null && !contentArea.isDisabled()
+                ? contentArea.getText()
+                : node.resource().asString();
+        chapterWordStatusLabel.setText("本章 " + TextSearch.plainTextLength(text) + " 字");
+    }
+
+    /**
+     * 状态栏的错误 / 警告计数，取自最近一次校验结果。
+     *
+     * <p>零值不显示——避免「错误 0 / 警告 0」这种恒常噪音。注意必须连同标签后面那条
+     * 分隔竖线一起隐藏，只清文本会留下孤立竖线。
+     */
     private void updateIssueCounters() {
+        int err = ctx.lastReport().errorCount();
+        int warn = ctx.lastReport().warningCount();
         if (errorStatusLabel != null) {
-            errorStatusLabel.setText("错误 " + ctx.lastReport().errorCount());
+            errorStatusLabel.setText(err > 0 ? "错误 " + err : "");
         }
         if (warningStatusLabel != null) {
-            warningStatusLabel.setText("警告 " + ctx.lastReport().warningCount());
+            warningStatusLabel.setText(warn > 0 ? "警告 " + warn : "");
         }
+        setVisibleManaged(errorStatusDivider, err > 0);
+        setVisibleManaged(warningStatusDivider, warn > 0);
+    }
+
+    /** 状态栏分区显隐助手：visible 与 managed 必须同步，否则隐藏后仍占布局间距。 */
+    private static void setVisibleManaged(Region node, boolean visible) {
+        if (node == null) {
+            return;
+        }
+        node.setVisible(visible);
+        node.setManaged(visible);
     }
 
     /**
@@ -1043,7 +1347,9 @@ private void bindProblemsAccelerator() {
             return;
         }
         String name = ctx.currentFile() == null ? "新书籍" : ctx.currentFile().getFileName().toString();
-        ctx.stage().setTitle(EpubraApp.APP_NAME + " - " + name + (ctx.dirty() ? " *" : ""));
+        // dirty 标记用 ● / ○（U+25CF / U+25CB）放在最前——比藏在末尾的 * 显著得多
+        String marker = ctx.dirty() ? "\u25CF " : "\u25CB ";
+        ctx.stage().setTitle(marker + EpubraApp.APP_NAME + " - " + name);
     }
 
     private void showError(String title, String message, Exception e) {

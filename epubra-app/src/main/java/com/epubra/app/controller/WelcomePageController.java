@@ -8,6 +8,7 @@ import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 
 import java.nio.file.Files;
@@ -37,6 +38,8 @@ public class WelcomePageController {
     /** 最大展示的最近项目 / 工作空间条目数。 */
     private static final int MAX_RECENTS = 6;
 
+    @FXML
+    private StackPane welcomeRoot;
     @FXML
     private VBox welcomePane;
     @FXML
@@ -183,23 +186,30 @@ public class WelcomePageController {
         return Files.isDirectory(p);
     }
 
-    /** 显式收起欢迎页。 */
+    /**
+     * 显式收起欢迎页。
+     *
+     * <p>必须作用于 {@code fx:include} 的<b>根节点</b>（welcomeRoot StackPane），
+     * 不能只藏内层 {@code welcomePane} VBox——JavaFX 的鼠标命中测试只认 visible：
+     * 根 StackPane 保持 visible 时，其透明区域（pickOnBounds=true）仍会拦截整个
+     * 编辑区的点击，表现为「打开书后左侧按钮 / 编辑区全部无效」。2026-09-06 修复。
+     */
     public void hide() {
-        if (welcomePane == null) {
+        if (welcomeRoot == null) {
             return;
         }
-        welcomePane.setVisible(false);
-        welcomePane.setManaged(false);
+        welcomeRoot.setVisible(false);
+        welcomeRoot.setManaged(false);
     }
 
     /** 显式展示欢迎页——为将来「关闭项目」场景预留。 */
     public void show() {
-        if (welcomePane == null) {
+        if (welcomeRoot == null) {
             return;
         }
         rebuildRecents();
-        welcomePane.setVisible(true);
-        welcomePane.setManaged(true);
+        welcomeRoot.setVisible(true);
+        welcomeRoot.setManaged(true);
     }
 
     /** 解绑——绑定过的 JavaFX 节点还在，但事件订阅已失效。MainController 关闭时调用。 */
@@ -212,6 +222,6 @@ public class WelcomePageController {
 
     /** 给单元测试用：读最近面板的可见性状态。 */
     public boolean isVisible() {
-        return welcomePane != null && welcomePane.isVisible();
+        return welcomeRoot != null && welcomeRoot.isVisible();
     }
 }

@@ -1,16 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.TreeView?>
+<?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
 
 <!--
   目录侧边视图：由 main-window.fxml 以 <fx:include fx:id="tocView"/> 引入，
   控制器实例注入父控制器的 tocViewController 字段。
+
+  操作入口原先全藏在「开始」菜单 / 右键菜单 / 快捷键里，侧栏只有一棵光秃秃的树，
+  新用户面对它不知道能做什么（对比资源侧栏一上来就有 6 个可见按钮，两个视图的
+  交互模型不一致）。这里补齐可见按钮，并把「可拖拽排序」这条隐藏能力写出来。
 -->
 <VBox xmlns="http://javafx.com/javafx/24" xmlns:fx="http://javafx.com/fxml"
       styleClass="side-view" spacing="6.0"
+      minWidth="180.0"
       maxWidth="Infinity" maxHeight="Infinity"
       fx:controller="com.epubra.app.controller.TocController">
     <padding>
@@ -18,4 +25,17 @@
     </padding>
     <Label text="目录" styleClass="panel-title"/>
     <TreeView fx:id="tocTree" VBox.vgrow="ALWAYS"/>
+
+    <!-- 拖拽排序早已实现，但此前没有任何提示，用户仍去点上下移按钮 -->
+    <Label text="拖动章节可调整顺序，右键查看更多操作" styleClass="panel-hint" wrapText="true"/>
+
+    <HBox spacing="4.0">
+        <Button text="添加" styleClass="flat-button" onAction="#onAddChapter"/>
+        <Button text="重命名" styleClass="flat-button" onAction="#onRenameChapter"/>
+    </HBox>
+    <HBox spacing="4.0">
+        <Button text="上移" styleClass="flat-button" onAction="#onMoveUp"/>
+        <Button text="下移" styleClass="flat-button" onAction="#onMoveDown"/>
+        <Button text="删除" styleClass="flat-button" onAction="#onDeleteChapter"/>
+    </HBox>
 </VBox>

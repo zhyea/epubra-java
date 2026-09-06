@@ -86,7 +86,7 @@ public enum Theme {
     public String previewStyleCss() {
         return """
                 html, body { background: %s !important; color: %s !important; }
-                body { margin: 0; padding: 18px 22px; font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 15px; line-height: 1.7; }
+                body { margin: 0; padding: 18px 22px; font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 16px; line-height: 1.7; }
                 p, li, h1, h2, h3, h4, h5, h6, div, section, article, blockquote, td, th, span, figcaption { color: %s !important; border-color: %s !important; }
                 a { color: %s !important; }
                 hr, table, th, td, pre, img { border-color: %s !important; }
