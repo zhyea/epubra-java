@@ -132,12 +132,12 @@
 新增前端纯逻辑类（符合项目「与控件无关的逻辑放 support」约定）：
 
 ```
-com.epubra.app.support.CoverOps          // 封面状态判定 + 操作语义
+support.org.chobit.epubra.app.CoverOps          // 封面状态判定 + 操作语义
   ├─ describe(Book)      -> CoverState    // EMPTY / SET / DANGLING
   ├─ pick(Book, Resource) -> boolean      // 资源可否作封面（是否图片）
   └─ clear(Book)                          // 清封面（含属性回退）
 
-com.epubra.app.support.CoverImageInfo    // 纯 Java 解析 PNG/JPEG/GIF/WebP 头取宽高
+support.org.chobit.epubra.app.CoverImageInfo    // 纯 Java 解析 PNG/JPEG/GIF/WebP 头取宽高
   └─ read(byte[]) -> Optional<Dimension>
 ```
 

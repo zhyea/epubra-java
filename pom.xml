@@ -6,7 +6,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.epubra</groupId>
-    <artifactId>epubra-parent</artifactId>
+    <artifactId>epubra</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
@@ -14,7 +14,7 @@
     <description>EPUB 文件维护工具（JavaFX 桌面端）— 多模块聚合构建</description>
 
     <modules>
-        <module>epubra-epublib</module>
+        <module>epubra-lib</module>
         <module>epubra-app</module>
     </modules>
 
@@ -36,7 +36,7 @@
             <!-- 内部模块 -->
             <dependency>
                 <groupId>com.epubra</groupId>
-                <artifactId>epubra-epublib</artifactId>
+                <artifactId>epubra-lib</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

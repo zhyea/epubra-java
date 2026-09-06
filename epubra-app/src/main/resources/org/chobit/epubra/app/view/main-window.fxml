@@ -1,0 +1,304 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Menu?>
+<?import javafx.scene.control.MenuBar?>
+<?import javafx.scene.control.MenuItem?>
+<?import javafx.scene.control.ProgressBar?>
+<?import javafx.scene.control.RadioMenuItem?>
+<?import javafx.scene.control.SeparatorMenuItem?>
+<?import javafx.scene.control.SplitPane?>
+<?import javafx.scene.control.Tab?>
+<?import javafx.scene.control.TabPane?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.control.ToggleButton?>
+<?import javafx.scene.control.ToggleGroup?>
+<?import javafx.scene.control.Tooltip?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.layout.VBox?>
+<?import javafx.scene.shape.SVGPath?>
+<?import javafx.scene.web.WebView?>
+
+<!--
+  Epubra 主界面：VSCode 风格布局。
+
+    top    MenuBar（命令全部走菜单 + 快捷键，已移除工具栏）
+    left   活动栏（48px）：目录 / 资源 / 元数据 / 校验，四个 ToggleButton 共用一个 ToggleGroup
+    center 侧边栏（单视图切换）| 编辑区（内容 / 预览）+ 底部「问题」面板，底下挂隐藏式查找条
+    bottom 状态栏：左侧提示语，右侧错误 / 警告 / 章节 / 字数 / 主题
+
+  侧边栏三个视图、查找条与底部问题面板各拆为独立 FXML，经 <fx:include> 引入：
+  include 的 fx:id 决定父控制器的两个字段——根节点（如 tocView: VBox）与子控制器
+  （如 tocViewController: TocController，命名规则 <fx:id>Controller）。
+  子控制器由 FXML 实例化，BookContext 与回调在 MainController.initialize() 统一 bind。
+
+  活动栏图标用 SVGPath（16×16 视口）绘制，颜色走 -epubra-* 变量，三套主题自动换色。
+-->
+<BorderPane xmlns="http://javafx.com/javafx/24" xmlns:fx="http://javafx.com/fxml"
+            fx:controller="org.chobit.epubra.app.controller.MainController"
+            stylesheets="@../css/app.css">
+
+    <top>
+        <MenuBar>
+            <menus>
+                <Menu text="文件">
+                    <items>
+                        <MenuItem text="新建" onAction="#onNew" accelerator="Ctrl+N"/>
+                        <MenuItem text="打开…" onAction="#onOpen" accelerator="Ctrl+O"/>
+                        <SeparatorMenuItem/>
+                        <MenuItem text="保存" onAction="#onSave" accelerator="Ctrl+S"/>
+                        <MenuItem text="另存为…" onAction="#onSaveAs" accelerator="Ctrl+Shift+S"/>
+                        <SeparatorMenuItem/>
+                        <MenuItem text="退出" onAction="#onExit"/>
+                    </items>
+                </Menu>
+                <Menu text="编辑">
+                    <items>
+                        <MenuItem fx:id="undoItem" text="撤销" onAction="#onUndo" accelerator="Ctrl+Z"/>
+                        <MenuItem fx:id="redoItem" text="重做" onAction="#onRedo" accelerator="Ctrl+Shift+Z"/>
+                        <SeparatorMenuItem/>
+                        <MenuItem text="查找替换…" onAction="#onShowFind" accelerator="Ctrl+F"/>
+                    </items>
+                </Menu>
+                <!-- 原「开始」。章节是结构操作而非格式化操作，放「开始」不符合常规心智；
+                     「重命名章节…」也从「编辑」归并过来，让章节相关操作集中一处。 -->
+                <Menu text="章节">
+                    <items>
+                        <MenuItem text="添加章节" onAction="#onAddChapter"/>
+                        <MenuItem text="重命名章节…" onAction="#onRenameChapter" accelerator="F2"/>
+                        <MenuItem text="删除章节" onAction="#onDeleteChapter"/>
+                        <SeparatorMenuItem/>
+                        <MenuItem text="上移" onAction="#onMoveUp"/>
+                        <MenuItem text="下移" onAction="#onMoveDown"/>
+                    </items>
+                </Menu>
+                <Menu text="插入">
+                    <items>
+                        <MenuItem text="导入资源…" onAction="#onImportResources"/>
+                        <MenuItem text="插入图片" onAction="#onInsertImage"/>
+                    </items>
+                </Menu>
+                <Menu text="视图">
+                    <items>
+                        <MenuItem text="刷新预览" onAction="#onRefreshPreview"/>
+                        <SeparatorMenuItem/>
+                        <!-- 快捷键 Ctrl+` 在控制器里绑定：FXML 的 accelerator 字符串解析反引号不可靠 -->
+                        <MenuItem fx:id="problemsItem" text="问题面板" onAction="#onToggleProblems"/>
+                        <MenuItem fx:id="splitPreviewItem" text="并排预览" onAction="#onToggleSplitPreview"/>
+                        <SeparatorMenuItem/>
+                        <RadioMenuItem fx:id="themeLightItem" text="浅色" onAction="#onThemeLight"
+                                       selected="true">
+                            <toggleGroup>
+                                <ToggleGroup fx:id="themeGroup"/>
+                            </toggleGroup>
+                        </RadioMenuItem>
+                        <RadioMenuItem fx:id="themeDarkItem" text="深色" onAction="#onThemeDark"
+                                       toggleGroup="$themeGroup"/>
+                        <RadioMenuItem fx:id="themeSepiaItem" text="护眼米黄" onAction="#onThemeSepia"
+                                       toggleGroup="$themeGroup"/>
+                    </items>
+                </Menu>
+                <!-- 「清理未引用资源」不是插入动作，「运行校验」是工具性操作而非视图开关，
+                     两者从原「插入」「视图」里分出来单独立项。 -->
+                <Menu text="工具">
+                    <items>
+                        <MenuItem text="运行校验" onAction="#onRunValidation"/>
+                        <MenuItem text="清理未引用资源" onAction="#onCleanupResources"/>
+                    </items>
+                </Menu>
+                <Menu text="帮助">
+                    <items>
+                        <MenuItem text="关于" onAction="#onAbout"/>
+                    </items>
+                </Menu>
+            </menus>
+        </MenuBar>
+    </top>
+
+    <left>
+        <VBox styleClass="activity-bar" prefWidth="48.0" minWidth="48.0" maxWidth="48.0" spacing="2.0">
+            <padding>
+                <Insets top="6.0" right="0.0" bottom="6.0" left="0.0"/>
+            </padding>
+
+            <ToggleButton fx:id="tocActivityButton" styleClass="activity-button" selected="true"
+                          contentDisplay="GRAPHIC_ONLY"
+                          onAction="#onShowTocView">
+                <toggleGroup>
+                    <ToggleGroup fx:id="activityGroup"/>
+                </toggleGroup>
+                <graphic>
+                    <!-- 书页 + 三行正文 -->
+                    <SVGPath styleClass="activity-icon" fillRule="EVEN_ODD"
+                             content="M 3.5 2.5 h 6 l 2 2 v 9 h -8 z M 5.5 6.5 h 5 v 1 h -5 z M 5.5 8.5 h 5 v 1 h -5 z M 5.5 10.5 h 3 v 1 h -3 z"/>
+                </graphic>
+                <tooltip>
+                    <Tooltip text="目录"/>
+                </tooltip>
+            </ToggleButton>
+
+            <ToggleButton fx:id="resourceActivityButton" styleClass="activity-button"
+                          contentDisplay="GRAPHIC_ONLY"
+                          toggleGroup="$activityGroup" onAction="#onShowResourceView">
+                <graphic>
+                    <!-- 文件夹 -->
+                    <SVGPath styleClass="activity-icon"
+                             content="M 1.5 4 h 4.2 l 1.5 2 H 14 V 13 H 1.5 Z"/>
+                </graphic>
+                <tooltip>
+                    <Tooltip text="资源"/>
+                </tooltip>
+            </ToggleButton>
+
+            <ToggleButton fx:id="metadataActivityButton" styleClass="activity-button"
+                          contentDisplay="GRAPHIC_ONLY"
+                          toggleGroup="$activityGroup" onAction="#onShowMetadataView">
+                <graphic>
+                    <!-- 信息圆 -->
+                    <SVGPath styleClass="activity-icon" fillRule="EVEN_ODD"
+                             content="M 8 1.75 a 6.25 6.25 0 1 0 0 12.5 a 6.25 6.25 0 1 0 0 -12.5 z M 7.25 6.9 h 1.5 v 4.4 h -1.5 z M 7.25 4.1 h 1.5 v 1.6 h -1.5 z"/>
+                </graphic>
+                <tooltip>
+                    <Tooltip text="元数据"/>
+                </tooltip>
+            </ToggleButton>
+
+            <ToggleButton fx:id="validationActivityButton" styleClass="activity-button"
+                          contentDisplay="GRAPHIC_ONLY"
+                          toggleGroup="$activityGroup" onAction="#onShowProblems">
+                <graphic>
+                    <!-- 对勾圆 -->
+                    <SVGPath styleClass="activity-icon" fillRule="EVEN_ODD"
+                             content="M 8 1.75 a 6.25 6.25 0 1 0 0 12.5 a 6.25 6.25 0 1 0 0 -12.5 z M 11.2 5.6 L 7.1 10.1 L 5 8.2 L 5.9 7.2 L 7.1 8.4 L 10.3 4.7 Z"/>
+                </graphic>
+                <tooltip>
+                    <Tooltip text="校验（显示问题面板并立即校验）"/>
+                </tooltip>
+            </ToggleButton>
+        </VBox>
+    </left>
+
+    <center>
+        <StackPane styleClass="main-center">
+            <children>
+                <!-- 常规编辑面板：无项目时也保留，但被 welcome-page 覆盖 -->
+                <VBox>
+                    <SplitPane fx:id="mainSplit" dividerPositions="0.22" VBox.vgrow="ALWAYS">
+                        <items>
+                            <!-- 侧边栏：三个视图叠放，按活动栏切换 visible + managed。
+
+                                 注意：收起侧栏时必须连**本容器**一起隐藏——只把内层三个视图
+                                 设为不可见，SplitPane 的 item 0 仍占着 dividerPositions 的
+                                 22%，编辑区不会伸展过去（2026-09-06 修复的布局 bug）。 -->
+                            <StackPane fx:id="sidePanel" styleClass="side-panel">
+                                <children>
+                                    <fx:include fx:id="tocView" source="toc-view.fxml"/>
+                                    <fx:include fx:id="resourceView" source="resource-view.fxml"/>
+                                    <fx:include fx:id="metadataView" source="metadata-view.fxml"/>
+                                </children>
+                            </StackPane>
+
+                            <!-- 编辑区：内容 / 预览 + 底部问题面板。
+
+                     两种呈现模式共用 contentArea 与 previewView 两个节点：
+                       标签模式（默认）— 分别挂在 editorTabs 的两个 Tab 上
+                       并排模式        — 一起挂进 splitPreviewPane 左右分栏
+                     切换时把节点在两个父容器之间搬运——一个 Node 只能有一个 parent。 -->
+                            <VBox maxWidth="Infinity" maxHeight="Infinity">
+                                <!-- 编辑辅助工具条：把常用 XHTML 片段做成一键插入，降低手写标签的门槛。
+                                     这里刻意不做所见即所得——JavaFX 的 HTMLEditor 产出 HTML 而非 XHTML
+                                     （标签不闭合、属性不带引号、&lt;br&gt; 而非 &lt;br/&gt;），
+                                     直接替换正文编辑器会让产出的 EPUB 校验失败。 -->
+                                <HBox styleClass="editor-toolbar" spacing="4.0" alignment="CENTER_LEFT">
+                                    <padding>
+                                        <Insets top="4.0" right="8.0" bottom="4.0" left="8.0"/>
+                                    </padding>
+                                    <Button text="段落" styleClass="flat-button" onAction="#onInsertParagraph"/>
+                                    <Button text="标题" styleClass="flat-button" onAction="#onInsertHeading"/>
+                                    <Button text="加粗" styleClass="flat-button" onAction="#onInsertBold"/>
+                                    <Button text="斜体" styleClass="flat-button" onAction="#onInsertItalic"/>
+                                    <Button text="列表" styleClass="flat-button" onAction="#onInsertList"/>
+                                    <!-- 图片走菜单「插入」同一个入口（从已导入资源里选），
+                                         不在这里另插一个裸 img 标签，避免两种不一致的行为 -->
+                                    <Button text="图片" styleClass="flat-button" onAction="#onInsertImage"/>
+                                </HBox>
+
+                                <StackPane VBox.vgrow="ALWAYS">
+                                    <TabPane fx:id="editorTabs" tabClosingPolicy="UNAVAILABLE">
+                                        <tabs>
+                                            <Tab text="内容">
+                                                <TextArea fx:id="contentArea"
+                                                          promptText="选择左侧章节后，在此编辑 XHTML 内容"/>
+                                            </Tab>
+                                            <Tab text="预览">
+                                                <WebView fx:id="previewView"/>
+                                            </Tab>
+                                        </tabs>
+                                    </TabPane>
+                                    <SplitPane fx:id="splitPreviewPane" visible="false" managed="false"
+                                               dividerPositions="0.5"/>
+                                </StackPane>
+
+                                <fx:include fx:id="bottomPanel" source="problems-panel.fxml"/>
+                            </VBox>
+                        </items>
+                    </SplitPane>
+
+                    <!-- 查找替换条：默认隐藏，Ctrl+F 唤出 -->
+                    <fx:include fx:id="findBar" source="find-bar.fxml"/>
+                </VBox>
+
+                <!-- 欢迎页：覆盖在所有编辑面板之上，无项目时显示，BookLoadedEvent 触发时收起 -->
+                <fx:include fx:id="welcomePage" source="welcome-page.fxml"/>
+            </children>
+        </StackPane>
+    </center>
+
+    <bottom>
+        <HBox styleClass="status-bar" spacing="8.0" alignment="CENTER_LEFT">
+            <padding>
+                <Insets top="6.0" right="10.0" bottom="6.0" left="12.0"/>
+            </padding>
+            <Label fx:id="statusLabel" text="就绪" HBox.hgrow="ALWAYS"/>
+
+            <!-- 进度反馈：长操作（保存/打开/校验/导入）跑时显示，跑完自动隐藏。
+                 进度条 indeterminate 模式——多数长操作没有稳定进度报告。 -->
+            <ProgressBar fx:id="statusProgressBar" styleClass="status-progress"
+                         prefWidth="80" prefHeight="10.0" maxHeight="10.0"
+                         visible="false" managed="false"/>
+            <Label fx:id="statusProgressLabel" styleClass="status-progress-label"
+                   visible="false" managed="false"/>
+            <Region fx:id="statusProgressDivider" styleClass="status-divider" minWidth="1.0" prefWidth="1.0"
+                    maxWidth="1.0" minHeight="13.0" prefHeight="13.0" maxHeight="13.0"
+                    visible="false" managed="false"/>
+
+            <!-- 右侧分区：错误 / 警告走强调色，其余走弱化色，中间用 1px 竖线隔开。
+                 计数为 0 时错误 / 警告标签及其后那条竖线一并隐藏——只清标签会留下孤立竖线。 -->
+            <Label fx:id="errorStatusLabel" styleClass="status-error"/>
+            <Region fx:id="errorStatusDivider" styleClass="status-divider" minWidth="1.0" prefWidth="1.0"
+                    maxWidth="1.0" minHeight="13.0" prefHeight="13.0" maxHeight="13.0"/>
+            <Label fx:id="warningStatusLabel" styleClass="status-warning"/>
+            <Region fx:id="warningStatusDivider" styleClass="status-divider" minWidth="1.0" prefWidth="1.0"
+                    maxWidth="1.0" minHeight="13.0" prefHeight="13.0" maxHeight="13.0"/>
+            <Label fx:id="chapterStatusLabel" styleClass="status-item"/>
+            <Region styleClass="status-divider" minWidth="1.0" prefWidth="1.0" maxWidth="1.0"
+                    minHeight="13.0" prefHeight="13.0" maxHeight="13.0"/>
+            <Label fx:id="wordStatusLabel" styleClass="status-item"/>
+            <Region styleClass="status-divider" minWidth="1.0" prefWidth="1.0" maxWidth="1.0"
+                    minHeight="13.0" prefHeight="13.0" maxHeight="13.0"/>
+            <!-- 当前章节字数：全书总数之外再给一个局部刻度，便于按章控制篇幅 -->
+            <Label fx:id="chapterWordStatusLabel" styleClass="status-item"/>
+            <Region styleClass="status-divider" minWidth="1.0" prefWidth="1.0" maxWidth="1.0"
+                    minHeight="13.0" prefHeight="13.0" maxHeight="13.0"/>
+            <Label fx:id="themeStatusLabel" styleClass="status-item"/>
+            <Region styleClass="status-divider" minWidth="1.0" prefWidth="1.0" maxWidth="1.0"
+                    minHeight="13.0" prefHeight="13.0" maxHeight="13.0"/>
+            <Label fx:id="autosaveStatusLabel" styleClass="status-item"/>
+        </HBox>
+    </bottom>
+</BorderPane>

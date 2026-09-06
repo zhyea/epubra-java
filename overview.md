@@ -2,15 +2,15 @@
 
 ## 当前轮：用户数据目录统一到 ~/.Epubra/（Sprint 10，2026-09-05 晚）
 
-用户指令：「放在 用户目录下的 临时数据目录最好 不使用 com.epubra.app.EpubraApp 这样的目录， 改为使用简单直接的 .Epubra」。
+用户指令：「放在 用户目录下的 临时数据目录最好 不使用 org.chobit.epubra.app.EpubraApp 这样的目录， 改为使用简单直接的 .Epubra」。
 
 ### 现象
 
 JavaFX 24 WebView 在 Windows 上以 main class FQCN 派生 native 缓存目录，实测为：
 
 ```
-C:\Users\robin\.com.epubra.app.EpubraApp\webview\.lock
-C:\Users\robin\.com.epubra.app.EpubraApp\webview\localstorage\
+C:\Users\robin\.org.chobit.epubra.app.EpubraApp\webview\.lock
+C:\Users\robin\.org.chobit.epubra.app.EpubraApp\webview\localstorage\
 ```
 
 丑且长，与 IDEA / VSCode / Git 等工具的「`.工具名/`」命名风格不一致。
@@ -50,7 +50,7 @@ C:\Users\robin\.com.epubra.app.EpubraApp\webview\localstorage\
 ~/.Epubra/
 ├── autosave/                                  ← AppPaths.autosaveDir()
 ├── webview/                                   ← AppPaths.webviewCacheDir()（预创建）
-├── .com.epubra.app.EpubraApp/webview/         ← JavaFX WebView native 缓存（子目录名是 JavaFX 硬编码）
+├── .org.chobit.epubra.app.EpubraApp/webview/         ← JavaFX WebView native 缓存（子目录名是 JavaFX 硬编码）
 └── .openjfx/cache/24.0.1+4/amd64/             ← openjfx native 资源缓存
 ```
 

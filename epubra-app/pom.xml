@@ -6,7 +6,7 @@
 
     <parent>
         <groupId>com.epubra</groupId>
-        <artifactId>epubra-parent</artifactId>
+        <artifactId>epubra</artifactId>
         <version>1.0.0-SNAPSHOT</version>
     </parent>
 
@@ -17,7 +17,7 @@
     <dependencies>
         <dependency>
             <groupId>com.epubra</groupId>
-            <artifactId>epubra-epublib</artifactId>
+            <artifactId>epubra-lib</artifactId>
         </dependency>
 
         <dependency>
@@ -48,7 +48,7 @@
                 <configuration>
                     <!-- 走 EpubraLauncher 而非 EpubraApp：非模块化构建下以 Application 子类为主类会
                          被 JVM 的运行时组件校验拦下，改由引导类启动后两种运行方式都成立 -->
-                    <mainClass>com.epubra.app.EpubraLauncher</mainClass>
+                    <mainClass>org.chobit.epubra.app.EpubraLauncher</mainClass>
                     <!--
                       JDK 22+ 收紧了 native 访问与 sun.misc.Unsafe，启动时会产生告警：
                         · System::load（glass NativeLibLoader）与 WebPage native 绑定
@@ -147,7 +147,7 @@
                                         <argument>--main-jar</argument>
                                         <argument>${project.build.finalName}.jar</argument>
                                         <argument>--main-class</argument>
-                                        <argument>com.epubra.app.EpubraLauncher</argument>
+                                        <argument>org.chobit.epubra.app.EpubraLauncher</argument>
                                         <!--
                                           打包产物里 JavaFX 走 classpath（无 module-info），
                                           因此 native 访问要对 unnamed module 开放；与 javafx:run

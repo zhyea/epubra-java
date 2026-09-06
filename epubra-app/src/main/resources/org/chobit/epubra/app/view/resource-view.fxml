@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.cell.PropertyValueFactory?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+
+<!--
+  资源侧边视图：由 main-window.fxml 以 <fx:include fx:id="resourceView"/> 引入，
+  控制器实例注入父控制器的 resourceViewController 字段。按钮 onAction 直连控制器方法。
+-->
+<VBox xmlns="http://javafx.com/javafx/24" xmlns:fx="http://javafx.com/fxml"
+      styleClass="side-view" spacing="6.0"
+      visible="false" managed="false"
+      maxWidth="Infinity" maxHeight="Infinity"
+      fx:controller="org.chobit.epubra.app.controller.ResourceController">
+    <padding>
+        <Insets top="8.0" right="8.0" bottom="8.0" left="8.0"/>
+    </padding>
+    <Label text="资源" styleClass="panel-title"/>
+    <TableView fx:id="resourceTable" VBox.vgrow="ALWAYS">
+        <columns>
+            <TableColumn text="封面" prefWidth="32" sortable="false">
+                <cellValueFactory>
+                    <PropertyValueFactory property="coverBadge"/>
+                </cellValueFactory>
+            </TableColumn>
+            <TableColumn text="名称" prefWidth="146" sortable="false">
+                <cellValueFactory>
+                    <PropertyValueFactory property="name"/>
+                </cellValueFactory>
+            </TableColumn>
+            <TableColumn text="类型" prefWidth="52" sortable="false">
+                <cellValueFactory>
+                    <PropertyValueFactory property="type"/>
+                </cellValueFactory>
+            </TableColumn>
+            <TableColumn text="大小" prefWidth="58" sortable="false">
+                <cellValueFactory>
+                    <PropertyValueFactory property="size"/>
+                </cellValueFactory>
+            </TableColumn>
+        </columns>
+    </TableView>
+    <HBox spacing="4.0">
+        <Button text="导入" styleClass="flat-button" onAction="#importResources"/>
+        <Button text="导出" styleClass="flat-button" onAction="#exportSelected"/>
+        <Button text="删除" styleClass="flat-button" onAction="#deleteSelected"/>
+    </HBox>
+    <HBox spacing="4.0">
+        <Button fx:id="setCoverButton" text="设为封面" styleClass="flat-button" onAction="#setCoverFromSelected"/>
+        <Button text="插入图片" styleClass="flat-button" onAction="#insertSelectedImageIntoChapter"/>
+        <Button text="清理未引用" styleClass="flat-button" onAction="#cleanupUnused"/>
+    </HBox>
+</VBox>

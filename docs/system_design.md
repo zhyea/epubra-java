@@ -78,45 +78,45 @@
 
 ## 2. 文件清单
 
-### 2.1 新增 — `epubra-epublib`
+### 2.1 新增 — `epubra-lib`
 
 | # | 相对路径 | 职责 |
 |---|---|---|
-| 1 | `epubra-epublib/src/main/java/com/epubra/epublib/validation/Severity.java` | 严重级别枚举 `ERROR` / `WARNING`，含 `label()` 返回「错误」/「警告」 |
-| 2 | `epubra-epublib/src/main/java/com/epubra/epublib/validation/IssueGroup.java` | 规则分组枚举（容器/OPF/阅读顺序/目录/资源引用/元数据），决定排序段位与界面「分类」列 |
-| 3 | `epubra-epublib/src/main/java/com/epubra/epublib/validation/IssueKind.java` | **全部校验项枚举**：`code` + `group` + 默认 `severity` + 中文说明模板（本轮的规则总表就落在这个文件里） |
-| 4 | `epubra-epublib/src/main/java/com/epubra/epublib/validation/ValidationIssue.java` | 单条校验结果 record：`kind` / `severity` / `message` / `resourceHref` / `detail` |
-| 5 | `epubra-epublib/src/main/java/com/epubra/epublib/validation/ValidationReport.java` | 结果集：构造即排序、错误/警告计数与分拣、`isEmpty()`、`containerChecked()`、`summary()`；提供 `EMPTY` 常量 |
-| 6 | `epubra-epublib/src/main/java/com/epubra/epublib/validation/ContainerFacts.java` | 从 ZIP 采集的事实：条目名集合、物理首条目名、mimetype 是否存在/是否 STORED/内容、container.xml 的 `full-path`、原始 OPF 的 `version`/`unique-identifier`/manifest 明细 |
-| 7 | `epubra-epublib/src/main/java/com/epubra/epublib/validation/ContainerRules.java` | A 组（mimetype / container.xml）+ 容器增强规则（原始 OPF 重复 id/href、version、清单条目是否在 ZIP） |
-| 8 | `epubra-epublib/src/main/java/com/epubra/epublib/validation/StructureRules.java` | B 组（OPF/manifest 自身）+ C 组（spine ↔ manifest）+ D 组（Nav/NCX/TOC/封面一致性）+ F 组（元数据） |
-| 9 | `epubra-epublib/src/main/java/com/epubra/epublib/validation/ReferenceRules.java` | E 组：正文/CSS/SVG 引用解析、断链、越界、锚点缺失、孤儿资源 |
-| 10 | `epubra-epublib/src/main/java/com/epubra/epublib/validation/EpubValidator.java` | 门面：`validate(Book)`、`validate(Book, Path)`；装配三组规则 → 合并 → 排序 → 出报告 |
-| 11 | `epubra-epublib/src/main/java/com/epubra/epublib/util/ResourceReferences.java` | 引用提取工具：DOM 解析提取 URI 引用，解析失败正则回退；`resolveTarget` / `isExternal` / `percentDecode` / `urlReferences` / `fragmentIds` |
-| 12 | `epubra-epublib/src/test/java/com/epubra/epublib/validation/EpubValidatorTest.java` | 内核校验端到端测试（造病态 Book + 造真实 .epub 走容器校验） |
-| 13 | `epubra-epublib/src/test/java/com/epubra/epublib/util/ResourceReferencesTest.java` | 引用提取测试（img/link/a/svg use/inline style/CSS url/@import/百分号编码/外部链接） |
+| 1 | `../epubra-lib` | 严重级别枚举 `ERROR` / `WARNING`，含 `label()` 返回「错误」/「警告」 |
+| 2 | `../epubra-lib` | 规则分组枚举（容器/OPF/阅读顺序/目录/资源引用/元数据），决定排序段位与界面「分类」列 |
+| 3 | `../epubra-lib` | **全部校验项枚举**：`code` + `group` + 默认 `severity` + 中文说明模板（本轮的规则总表就落在这个文件里） |
+| 4 | `../epubra-lib` | 单条校验结果 record：`kind` / `severity` / `message` / `resourceHref` / `detail` |
+| 5 | `../epubra-lib` | 结果集：构造即排序、错误/警告计数与分拣、`isEmpty()`、`containerChecked()`、`summary()`；提供 `EMPTY` 常量 |
+| 6 | `../epubra-lib` | 从 ZIP 采集的事实：条目名集合、物理首条目名、mimetype 是否存在/是否 STORED/内容、container.xml 的 `full-path`、原始 OPF 的 `version`/`unique-identifier`/manifest 明细 |
+| 7 | `../epubra-lib` | A 组（mimetype / container.xml）+ 容器增强规则（原始 OPF 重复 id/href、version、清单条目是否在 ZIP） |
+| 8 | `../epubra-lib` | B 组（OPF/manifest 自身）+ C 组（spine ↔ manifest）+ D 组（Nav/NCX/TOC/封面一致性）+ F 组（元数据） |
+| 9 | `../epubra-lib` | E 组：正文/CSS/SVG 引用解析、断链、越界、锚点缺失、孤儿资源 |
+| 10 | `../epubra-lib` | 门面：`validate(Book)`、`validate(Book, Path)`；装配三组规则 → 合并 → 排序 → 出报告 |
+| 11 | `../epubra-lib` | 引用提取工具：DOM 解析提取 URI 引用，解析失败正则回退；`resolveTarget` / `isExternal` / `percentDecode` / `urlReferences` / `fragmentIds` |
+| 12 | `../epubra-lib` | 内核校验端到端测试（造病态 Book + 造真实 .epub 走容器校验） |
+| 13 | `../epubra-lib` | 引用提取测试（img/link/a/svg use/inline style/CSS url/@import/百分号编码/外部链接） |
 
-### 2.2 修改 — `epubra-epublib`
+### 2.2 修改 — `epubra-lib`
 
 | # | 相对路径 | 改动 |
 |---|---|---|
-| 14 | `epubra-epublib/src/main/java/com/epubra/epublib/domain/Book.java` | `unreferencedResources()`：把「拼全文 + `contains(fileName)`」替换为「用 `ResourceReferences` 收集全部真实引用 href 集合」再比对。白名单（nav / ncx / 封面 / spine）逻辑保持不变 |
+| 14 | `../epubra-lib` | `unreferencedResources()`：把「拼全文 + `contains(fileName)`」替换为「用 `ResourceReferences` 收集全部真实引用 href 集合」再比对。白名单（nav / ncx / 封面 / spine）逻辑保持不变 |
 
 ### 2.3 新增 — `epubra-app`
 
 | # | 相对路径 | 职责 |
 |---|---|---|
-| 15 | `epubra-app/src/main/java/com/epubra/app/controller/ValidationIssueRow.java` | 问题表格行视图模型，Bean 属性 `severity` / `severityKey` / `category` / `message` / `location` 供 `PropertyValueFactory` 取值 |
-| 16 | `epubra-app/src/main/java/com/epubra/app/support/ValidationTexts.java` | 与 JavaFX 无关的纯逻辑：级别/分组中文标签映射、报告摘要文案、关键字与「只看错误」过滤 ★可单测 |
-| 17 | `epubra-app/src/test/java/com/epubra/app/support/ValidationTextsTest.java` | `ValidationTexts` 单测（沿用 `@DisplayName` + 英文方法名风格） |
+| 15 | `../epubra-app/src/main/java/org/chobit/epubra/app` | 问题表格行视图模型，Bean 属性 `severity` / `severityKey` / `category` / `message` / `location` 供 `PropertyValueFactory` 取值 |
+| 16 | `../epubra-app/src/main/java/org/chobit/epubra/app` | 与 JavaFX 无关的纯逻辑：级别/分组中文标签映射、报告摘要文案、关键字与「只看错误」过滤 ★可单测 |
+| 17 | `../epubra-app/src/test/java/org/chobit/epubra/app` | `ValidationTexts` 单测（沿用 `@DisplayName` + 英文方法名风格） |
 
 ### 2.4 修改 — `epubra-app`
 
 | # | 相对路径 | 改动 |
 |---|---|---|
-| 18 | `epubra-app/src/main/java/com/epubra/app/controller/MainController.java` | 新增 `EpubValidator` 字段与 `lastReport`；新增校验面板的 `@FXML` 控件与 `onValidate()` / `onLocateIssue()` / `showValidationReport()` / `applyValidationFilter()` / `locateIssue()` / `selectResourceRow()` |
-| 19 | `epubra-app/src/main/resources/com/epubra/app/view/main-window.fxml` | 新增「工具」菜单 + 工具栏「结构校验」按钮 + `editorTabs` 第 4 个 Tab「校验结果」（摘要行 + 过滤条 + 问题表格） |
-| 20 | `epubra-app/src/main/resources/com/epubra/app/css/app.css` | 追加校验结果区样式：错误行红字、警告行橙字、摘要与过滤条 |
+| 18 | `../epubra-app/src/main/java/org/chobit/epubra/app` | 新增 `EpubValidator` 字段与 `lastReport`；新增校验面板的 `@FXML` 控件与 `onValidate()` / `onLocateIssue()` / `showValidationReport()` / `applyValidationFilter()` / `locateIssue()` / `selectResourceRow()` |
+| 19 | `../epubra-app/src/main/resources/org/chobit/epubra/app` | 新增「工具」菜单 + 工具栏「结构校验」按钮 + `editorTabs` 第 4 个 Tab「校验结果」（摘要行 + 过滤条 + 问题表格） |
+| 20 | `../epubra-app/src/main/resources/org/chobit/epubra/app` | 追加校验结果区样式：错误行红字、警告行橙字、摘要与过滤条 |
 
 > 三个 `pom.xml` **均不需要改动**（内核零依赖、前端只依赖既有模块与 JavaFX）。
 
@@ -878,7 +878,7 @@ graph TD
    5. 最后按 `message` 自然序。
 9. **文案风格**：全中文，与现有状态栏一致（`已打开 xxx`、`已添加章节：xxx`），句子末尾不加句号。`IssueKind.template()` 写通用说明（如「spine 中的 idref 在 manifest 中不存在」），`ValidationIssue.message()` 填具体值（如「spine 第 3 项的 idref 'ch-9' 在 manifest 中不存在」），技术细节放 `detail`。
 10. **不可变性**：`ValidationReport.issues()` 返回 `List.copyOf` 后的不可变列表；`ContainerFacts.entryNames()` 用 `Set.copyOf`。
-11. **测试命名**：`epubra-epublib` 的测试沿用中文方法名（`ResourceManagementTest` 风格）；`epubra-app` 的测试沿用 `@DisplayName` + 英文方法名（`TextSearchTest` 风格）。
+11. **测试命名**：`epubra-lib` 的测试沿用中文方法名（`ResourceManagementTest` 风格）；`epubra-app` 的测试沿用 `@DisplayName` + 英文方法名（`TextSearchTest` 风格）。
 12. **校验是同步执行**的（预估几百毫秒内）。本轮不引入 `javafx.concurrent.Task`，保持简单、便于测试；如实测大书卡顿再单独优化。
 
 ---

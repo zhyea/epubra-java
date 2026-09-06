@@ -9,7 +9,7 @@ EPUB 电子书维护工具，JavaFX 桌面应用。界面采用 **VSCode 风格�
 | 模块 | 产物 | 职责 |
 | --- | --- | --- |
 | `epubra-parent`（根 POM） | pom | 聚合构建、依赖与插件版本锁定（dependencyManagement / pluginManagement） |
-| `epubra-epublib` | jar | EPUB 内核：EPUB 2/3 的读取与写出。**只依赖 JDK**（`java.util.zip` + `javax.xml`），零第三方库 |
+| `epubra-lib` | jar | EPUB 内核：EPUB 2/3 的读取与写出。**只依赖 JDK**（`java.util.zip` + `javax.xml`），零第三方库 |
 | `epubra-app` | jar | JavaFX 前端：目录浏览、章节编辑、资源维护、元数据编辑、存取 EPUB、EPUB 结构校验 |
 
 ```
@@ -63,7 +63,7 @@ epubra/
 | --- | --- | --- |
 | JDK | 25.0.3 | `maven.compiler.release=25` |
 | JavaFX | 24.0.1 | controls + fxml + web，FXML + 控制器模式 |
-| EPUB 内核 | 自维护 | `epubra-epublib`，无第三方 EPUB 依赖 |
+| EPUB 内核 | 自维护 | `epubra-lib`，无第三方 EPUB 依赖 |
 | JUnit | 5.12.0 | 仅测试，两个模块共 82 个用例 |
 | Maven | 3.9.15 | 见下方环境说明 |
 
@@ -101,7 +101,7 @@ cd epubra-app && ~/.workbuddy/bin/mvn javafx:run
 ## 运行方式说明
 
 1. 入口为 `EpubraLauncher`（普通类）→ 间接调用 `EpubraApp.main()`。原因是本项目为非模块化构建（无 `module-info.java`），JavaFX 只出现在 classpath；此时若以 `Application` 子类直接作为 main-class，JVM 会在启动阶段做 JavaFX 运行时组件校验并失败，命令行 `java -cp` 与 jpackage 打包产物都无法启动。经由引导类绕开校验后，同一份产物既能被 `javafx:run` 运行，也能被打包成可双击的桌面应用。
-2. `epubra-app` 依赖 `epubra-epublib`，后者已在本地仓库时可直接运行；修改内核后需重新 `mvn install` 才会被前端用到。
+2. `epubra-app` 依赖 `epubra-lib`，后者已在本地仓库时可直接运行；修改内核后需重新 `mvn install` 才会被前端用到。
 3. JavaFX 不能打成 fat jar —— native 库（glass / prism 的 dll）必须在真实文件系统上，shade 后反而加载不到。因此 `dist` profile 采用「应用 jar + 依赖目录」交给 `jpackage` 组装。
 4. **启动告警处理**：JDK 22+ 收紧了 native 访问与 `sun.misc.Unsafe`，启动时会有两类告警。
    - `Unsupported JavaFX configuration: classes were loaded from 'unnamed module'` —— 非模块化运行的必然结果，由 `PlatformLogging` 在启动早期用 JUL Handler Filter 精准拦截（只拦这一条，JavaFX 其它告警照常输出）。
@@ -154,7 +154,7 @@ cd epubra-app && ~/.workbuddy/bin/mvn javafx:run
 ~/.workbuddy/bin/mvn test
 ```
 
-- `epubra-epublib`：51 个用例 —— 读写往返、容器结构、目录层级、EPUB 2 NCX 兼容、资源管理、目录编辑、结构校验
+- `epubra-lib`：51 个用例 —— 读写往返、容器结构、目录层级、EPUB 2 NCX 兼容、资源管理、目录编辑、结构校验
 - `epubra-app`：31 个用例 —— `TextSearch`（查找替换与标题同步的文本逻辑）、`BookHistory`（快照式撤销 / 重做）、
   `Theme` / `ThemeManager`（主题枚举与偏好存取往复）、`PreviewHtml`（预览区主题样式注入）
 
