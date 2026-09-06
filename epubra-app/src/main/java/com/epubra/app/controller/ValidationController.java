@@ -1,8 +1,10 @@
 package com.epubra.app.controller;
 
+import com.epubra.app.support.AsyncTasks;
 import com.epubra.app.support.BookContext;
 import com.epubra.app.support.TextSearch;
 import com.epubra.app.support.ValidationTexts;
+import com.epubra.epublib.domain.Book;
 import com.epubra.epublib.domain.Resource;
 import com.epubra.epublib.util.Hrefs;
 import com.epubra.epublib.validation.EpubValidator;
@@ -53,12 +55,14 @@ public class ValidationController {
     private SidebarController sidebarController;
     private Runnable commitPendingEdits;
     private Consumer<String> setStatus;
+    private AsyncTasks.ProgressController progress;
 
     /** FXML 加载后由父控制器注入运行时依赖；必须在任何 onAction 触发前完成。 */
     public void bind(BookContext ctx, EpubValidator validator,
                      TabPane editorTabs, TextArea contentArea,
                      TocController tocController, SidebarController sidebarController,
-                     Runnable commitPendingEdits, Consumer<String> setStatus) {
+                     Runnable commitPendingEdits, Consumer<String> setStatus,
+                     AsyncTasks.ProgressController progress) {
         this.ctx = ctx;
         this.validator = validator;
         this.editorTabs = editorTabs;
@@ -67,6 +71,7 @@ public class ValidationController {
         this.sidebarController = sidebarController;
         this.commitPendingEdits = commitPendingEdits;
         this.setStatus = setStatus;
+        this.progress = progress;
     }
 
     /** 面板头「关闭」按钮：收起底部面板并还原活动栏选中态。 */
@@ -106,18 +111,27 @@ public class ValidationController {
             return;
         }
         commitPendingEdits.run();
+        // 快照 book 与容器路径——后台线程只读这些引用，避免与 FX 线程换书时漂移。
+        // containerFile 可能因「刚换了书但 currentFile 未更新」而指向旧文件，但
+        // validator 内部对不存在 / null 都有降级处理，行为有界。
+        Book bookAtStart = ctx.book();
         Path container = ctx.currentFile() != null && Files.isRegularFile(ctx.currentFile())
                 ? ctx.currentFile()
                 : null;
-        ValidationReport report;
-        try {
-            report = validator.validate(ctx.book(), container);
-        } catch (RuntimeException ex) {
-            // 主 controller 提供 setStatus，但异常对话框应在 MainController 弹出
-            // 校验本身已经包装了 RuntimeException；这里只记录到状态栏
-            setStatus.accept("校验失败：" + ex.getMessage());
-            return;
-        }
+        AsyncTasks.runIo(
+                "正在校验 " + (container != null ? container.getFileName() : "内存中的书籍"),
+                () -> validator.validate(bookAtStart, container),
+                progress != null ? progress : AsyncTasks.NOOP_PROGRESS,
+                this::applyReport,
+                err -> setStatus.accept("校验失败：" + err.getMessage())
+        );
+    }
+
+    /**
+     * FX 线程回调：把校验报告灌进面板。拆成独立方法便于在测试里直接调用
+     * （跳过异步等待，直接验证面板渲染逻辑）。
+     */
+    public void applyReport(ValidationReport report) {
         ctx.setLastReport(report);
         issueTable.getItems().setAll(report.issues().stream().map(ValidationIssueRow::new).toList());
         updateProblemHeader();
@@ -125,7 +139,6 @@ public class ValidationController {
             sidebarController.showBottomPanelOnly(true);
         }
         setStatus.accept(ValidationTexts.statusText(report, report.containerChecked() && ctx.dirty()));
-        // 广播完成事件，让其它关心"校验刚跑完"的子控制器订阅即可，不必经 MainController 中转
         ctx.bus().publish(new com.epubra.app.support.AppEventBus.ValidationCompletedEvent(report));
     }
 

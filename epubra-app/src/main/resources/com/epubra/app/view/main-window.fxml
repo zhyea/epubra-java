@@ -6,6 +6,7 @@
 <?import javafx.scene.control.Menu?>
 <?import javafx.scene.control.MenuBar?>
 <?import javafx.scene.control.MenuItem?>
+<?import javafx.scene.control.ProgressBar?>
 <?import javafx.scene.control.RadioMenuItem?>
 <?import javafx.scene.control.SeparatorMenuItem?>
 <?import javafx.scene.control.SplitPane?>
@@ -187,10 +188,14 @@
             <children>
                 <!-- 常规编辑面板：无项目时也保留，但被 welcome-page 覆盖 -->
                 <VBox>
-                    <SplitPane dividerPositions="0.22" VBox.vgrow="ALWAYS">
+                    <SplitPane fx:id="mainSplit" dividerPositions="0.22" VBox.vgrow="ALWAYS">
                         <items>
-                            <!-- 侧边栏：三个视图叠放，按活动栏切换 visible + managed -->
-                            <StackPane styleClass="side-panel">
+                            <!-- 侧边栏：三个视图叠放，按活动栏切换 visible + managed。
+
+                                 注意：收起侧栏时必须连**本容器**一起隐藏——只把内层三个视图
+                                 设为不可见，SplitPane 的 item 0 仍占着 dividerPositions 的
+                                 22%，编辑区不会伸展过去（2026-09-06 修复的布局 bug）。 -->
+                            <StackPane fx:id="sidePanel" styleClass="side-panel">
                                 <children>
                                     <fx:include fx:id="tocView" source="toc-view.fxml"/>
                                     <fx:include fx:id="resourceView" source="resource-view.fxml"/>
@@ -260,6 +265,17 @@
                 <Insets top="6.0" right="10.0" bottom="6.0" left="12.0"/>
             </padding>
             <Label fx:id="statusLabel" text="就绪" HBox.hgrow="ALWAYS"/>
+
+            <!-- 进度反馈：长操作（保存/打开/校验/导入）跑时显示，跑完自动隐藏。
+                 进度条 indeterminate 模式——多数长操作没有稳定进度报告。 -->
+            <ProgressBar fx:id="statusProgressBar" styleClass="status-progress"
+                         prefWidth="80" prefHeight="10.0" maxHeight="10.0"
+                         visible="false" managed="false"/>
+            <Label fx:id="statusProgressLabel" styleClass="status-progress-label"
+                   visible="false" managed="false"/>
+            <Region fx:id="statusProgressDivider" styleClass="status-divider" minWidth="1.0" prefWidth="1.0"
+                    maxWidth="1.0" minHeight="13.0" prefHeight="13.0" maxHeight="13.0"
+                    visible="false" managed="false"/>
 
             <!-- 右侧分区：错误 / 警告走强调色，其余走弱化色，中间用 1px 竖线隔开。
                  计数为 0 时错误 / 警告标签及其后那条竖线一并隐藏——只清标签会留下孤立竖线。 -->

@@ -1,5 +1,6 @@
 package com.epubra.app.controller;
 
+import com.epubra.app.support.AsyncTasks;
 import com.epubra.app.support.BookContext;
 import com.epubra.app.support.CoverOps;
 import com.epubra.app.support.ResourceOps;
@@ -16,6 +17,7 @@ import javafx.stage.FileChooser;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BooleanSupplier;
@@ -53,6 +55,7 @@ public class ResourceController {
     private Consumer<String> warn;
     private BooleanSupplier confirm;
     private ErrorReporter showError;
+    private AsyncTasks.ProgressController progress;
 
     /** FXML 加载后由父控制器注入运行时依赖；必须在任何 onAction 触发前完成。 */
     public void bind(BookContext ctx, TabPane editorTabs, TextArea contentArea,
@@ -61,7 +64,8 @@ public class ResourceController {
                      Runnable refreshCoverCard,
                      Runnable updateStatus, Consumer<String> setStatus,
                      Consumer<String> warn, BooleanSupplier confirm,
-                     ErrorReporter showError) {
+                     ErrorReporter showError,
+                     AsyncTasks.ProgressController progress) {
         this.ctx = ctx;
         this.editorTabs = editorTabs;
         this.contentArea = contentArea;
@@ -75,6 +79,7 @@ public class ResourceController {
         this.warn = warn;
         this.confirm = confirm;
         this.showError = showError;
+        this.progress = progress;
         wireCoverButtonRefresh();
     }
 
@@ -137,21 +142,62 @@ public class ResourceController {
         if (files == null || files.isEmpty()) {
             return;
         }
+        // 快照路径——后台线程不直接拿到 File 句柄，只拿路径，避免 GUI 句柄跨线程泄漏。
+        final List<Path> paths = files.stream().map(File::toPath).toList();
+        AsyncTasks.runIo(
+                "正在导入 " + paths.size() + " 个资源",
+                () -> readFilesInBackground(paths),
+                progress != null ? progress : AsyncTasks.NOOP_PROGRESS,
+                loaded -> attachLoadedFiles(loaded),
+                err -> showError.report("导入失败", "后台读取出错", (Exception) err)
+        );
+    }
+
+    /**
+     * 后台线程跑的文件读取：每个 Path → 字节数组；失败时把异常塞进结果项，
+     * 由 FX 线程的 {@link #attachLoadedFiles} 走错误通道。
+     *
+     * <p>故意把 IO 与「往书籍挂资源」分开——{@link com.epubra.epublib.domain.Book#addResource}
+     * 会改 {@code Resources} 集合，与 FX 线程的 refreshResources / status bar / autosave
+     * 等读取存在 race；IO 后台、mutation FX 线程是安全做法。
+     */
+    private List<LoadedFile> readFilesInBackground(List<Path> paths) {
+        List<LoadedFile> loaded = new ArrayList<>(paths.size());
+        for (Path path : paths) {
+            try {
+                loaded.add(new LoadedFile(path.getFileName().toString(),
+                        Files.readAllBytes(path), null));
+            } catch (IOException ex) {
+                loaded.add(new LoadedFile(path.getFileName().toString(), null, ex));
+            }
+        }
+        return loaded;
+    }
+
+    /**
+     * FX 线程回调：把后台读到的字节挂到书籍上，统一走 {@code beginChange → addResource
+     * → markDirty → refreshResources → updateStatus} 这条流水线，与原同步版本语义一致。
+     * 单文件失败已由 {@code LoadedFile.error} 单独报，批量失败不会阻断其它文件。
+     */
+    private void attachLoadedFiles(List<LoadedFile> loaded) {
         beginChange.run();
         int imported = 0;
-        for (File file : files) {
-            try {
-                ctx.book().addResource(file.toPath());
-                imported++;
-            } catch (IOException ex) {
-                showError.report("导入失败", "无法读取 " + file.getName(), ex);
+        for (LoadedFile lf : loaded) {
+            if (lf.error != null) {
+                showError.report("导入失败", "无法读取 " + lf.fileName, lf.error);
+                continue;
             }
+            ctx.book().addResource(lf.fileName, lf.data);
+            imported++;
         }
         markDirty.run();
         refreshResources.run();
         updateStatus.run();
         setStatus.accept("已导入 " + imported + " 个资源");
     }
+
+    /** 后台读取产物的传输结构：bytes + 失败信息分两路，便于 FX 线程侧逐项处理。 */
+    private record LoadedFile(String fileName, byte[] data, IOException error) {}
 
     public void exportSelected() {
         ResourceRow row = selectedRow();
@@ -250,6 +296,12 @@ public class ResourceController {
     }
 
     public void cleanupUnused() {
+        // 设计上保持同步：B1 评估时把 6 个操作都过了一遍，cleanupUnused 的三个 FX 线程
+        // 步骤（计算 orphans / 弹确认 / forEach removeResource）都不涉及文件 IO，
+        // 对常规尺寸的书来说总耗时远低于人眼能感知的 100ms；走 AsyncTasks 包装反而会让
+        // 用户看到「正在清理 N 个」一闪而过（进度条实际无后台工作），UX 噪音大于收益。
+        // 若未来 books 容量增长到这一步真的卡顿，按 importResources 同款「IO 后台 +
+        // mutation FX」拆分即可。
         List<Resource> orphans = ctx.book().unreferencedResources();
         if (orphans.isEmpty()) {
             setStatus.accept("没有未被引用的资源");

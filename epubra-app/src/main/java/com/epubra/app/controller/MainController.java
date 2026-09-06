@@ -2,6 +2,7 @@ package com.epubra.app.controller;
 
 import com.epubra.app.EpubraApp;
 import com.epubra.app.support.AppPaths;
+import com.epubra.app.support.AsyncTasks;
 import com.epubra.app.support.Autosave;
 import com.epubra.app.support.BookContext;
 import com.epubra.app.support.BookHistory;
@@ -27,6 +28,7 @@ import javafx.scene.control.ButtonType;
 import javafx.scene.control.IndexRange;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.ProgressBar;
 import javafx.scene.control.RadioMenuItem;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.SplitPane;
@@ -92,6 +94,15 @@ public class MainController {
     private VBox resourceView;
     @FXML
     private ScrollPane metadataView;
+    /**
+     * 侧边栏三个视图的公共容器（SplitPane item 0）。收起侧栏时必须连它一起隐藏，
+     * 否则 SplitPane 仍按 dividerPositions 给它留 22% 宽度，编辑区伸不过去。
+     */
+    @FXML
+    private StackPane sidePanel;
+    /** 主区左右分栏：侧栏容器 + 编辑区。 */
+    @FXML
+    private SplitPane mainSplit;
     @FXML
     private VBox bottomPanel;
     @FXML
@@ -129,6 +140,13 @@ public class MainController {
 
     @FXML
     private Label statusLabel;
+    /** 长操作进度条与标题标签——{@link AsyncTasks} 启动时显示、结束时自动隐藏。 */
+    @FXML
+    private ProgressBar statusProgressBar;
+    @FXML
+    private Label statusProgressLabel;
+    @FXML
+    private Region statusProgressDivider;
     @FXML
     private Label errorStatusLabel;
     @FXML
@@ -202,7 +220,7 @@ public class MainController {
                 tocActivityButton, resourceActivityButton,
                 metadataActivityButton, validationActivityButton,
                 tocView, resourceView, metadataView,
-                bottomPanel);
+                bottomPanel, sidePanel, mainSplit);
         sidebarController.setupActivityBarInteraction();
 
         tocViewController.bind(ctx, this::beginChange, this::setStatus, this::warn);
@@ -222,7 +240,7 @@ public class MainController {
 
         bottomPanelController.bind(ctx, validator, editorTabs, contentArea,
                 tocViewController, sidebarController,
-                this::commitPendingEdits, this::setStatus);
+                this::commitPendingEdits, this::setStatus, progressSink());
         bottomPanelController.setupTable();
 
         metadataViewController.bind(ctx, this::recordBeforeChange, this::markDirty,
@@ -233,7 +251,8 @@ public class MainController {
                 this::refreshAll, this::refreshResources,
                 () -> metadataViewController.refreshCoverCard(),
                 this::updateStatus, this::setStatus, this::warn,
-                this::confirmDiscardChanges, this::showError);
+                this::confirmDiscardChanges, this::showError,
+                progressSink());
 
         findBarController.bind(ctx, contentArea,
                 this::beginChange, this::markDirty,
@@ -320,7 +339,9 @@ public class MainController {
     }
 
     /**
-     * 打开指定 .epub 的统一入口：确认丢弃未保存修改 → 清旧草稿 → 读文件 → 高亮反馈。
+     * 打开指定 .epub 的统一入口：确认丢弃未保存修改 → 清旧草稿 → 调
+     * {@code documentController.openFileAsync}（异步）→ 完成后由 AsyncTasks 的
+     * onSuccess 回调设置状态栏。
      *
      * <p>「最近」列表点击与文件拖放共用这一条路径，避免两处各写一遍确认与清理逻辑。
      */
@@ -330,12 +351,10 @@ public class MainController {
         }
         Autosave.discardFor(ctx);
         ensureDocumentController();
-        try {
-            documentController.openFile(epub);
-            flashStatus("已打开 " + epub.getFileName());
-        } catch (java.io.IOException e) {
-            reportError("打开失败：" + e.getMessage());
-        }
+        // 走异步：拖放打开大文件不卡 UI；状态栏「正在打开 X」由 progressSink 自动展示。
+        // 失败 / 打开完成 由 DocumentController.openFileAsync 内的 onSuccess / onError
+        // 处理（写到 statusLabel 与 errorReporter），这里不再写 flashStatus。
+        documentController.openFileAsync(epub);
     }
 
     /**
@@ -393,6 +412,7 @@ public class MainController {
                     this::setStatus,
                     this::confirmDiscardChanges,
                     DocumentController.defaultDialogs(ctx.stage()),
+                    progressSink(),
                     this::reportError);
         }
     }
@@ -683,6 +703,71 @@ public class MainController {
         PauseTransition flash = new PauseTransition(Duration.seconds(1.2));
         flash.setOnFinished(e -> statusLabel.getStyleClass().remove("status-flash"));
         flash.play();
+    }
+
+    /**
+     * 长操作进度反馈器：包装状态栏的 ProgressBar + 标签 + 分隔竖线，让
+     * {@link AsyncTasks#runIo} 在工作开始时把它们显示出来、结束时隐藏。
+     *
+     * <p>所有回调都在 FX 线程触发（{@link AsyncTasks} 已用 {@code Platform.runLater}
+     * 包好），直接读 / 写控件属性即可，不需要再次切线程。
+     *
+     * <p>这里没有把进度条做成「跨任务互斥」——同一窗口内不会同时跑两个长操作，但
+     * 万一有，新任务调 {@code begin} 会覆盖旧任务留下的标题，done 会把 UI 隐藏。
+     * 行为可接受：用户能看见最新任务的标题，看不见旧任务的结尾说明——后者由
+     * 各操作的 onSuccess 设到 {@link #statusLabel}（走 {@link #flashStatus}）。
+     */
+    private AsyncTasks.ProgressController progressSink() {
+        return new AsyncTasks.ProgressController() {
+            @Override
+            public void begin(String title) {
+                if (statusProgressBar == null || statusProgressLabel == null) {
+                    return;
+                }
+                statusProgressLabel.setText(title);
+                statusProgressBar.setProgress(-1); // indeterminate
+                setVisibleManaged(statusProgressBar, true);
+                setVisibleManaged(statusProgressLabel, true);
+                setVisibleManaged(statusProgressDivider, true);
+            }
+
+            @Override
+            public void update(double fraction) {
+                if (statusProgressBar == null) {
+                    return;
+                }
+                if (fraction < 0) {
+                    statusProgressBar.setProgress(-1);
+                } else {
+                    statusProgressBar.setProgress(clamp01(fraction));
+                }
+            }
+
+            @Override
+            public void done() {
+                if (statusProgressBar == null || statusProgressLabel == null) {
+                    return;
+                }
+                setVisibleManaged(statusProgressBar, false);
+                setVisibleManaged(statusProgressLabel, false);
+                setVisibleManaged(statusProgressDivider, false);
+                statusProgressBar.setProgress(0);
+                statusProgressLabel.setText("");
+            }
+        };
+    }
+
+    private static double clamp01(double v) {
+        if (Double.isNaN(v)) {
+            return 0;
+        }
+        if (v < 0) {
+            return 0;
+        }
+        if (v > 1) {
+            return 1;
+        }
+        return v;
     }
 
     // ------------------------------------------------------------------ 自动暂存

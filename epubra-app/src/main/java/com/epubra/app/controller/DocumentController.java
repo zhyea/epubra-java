@@ -1,6 +1,7 @@
 package com.epubra.app.controller;
 
 import com.epubra.app.EpubraApp;
+import com.epubra.app.support.AsyncTasks;
 import com.epubra.app.support.Autosave;
 import com.epubra.app.support.BookContext;
 import com.epubra.app.support.ProjectLayout;
@@ -23,6 +24,17 @@ import java.util.Optional;
  *
  * <p>持有 {@link BookContext}，对外只暴露语义清晰的方法；{@link MainController} 在
  * FXML 回调里直接转发，不做业务判断。
+ *
+ * <p>B1 起，3 个文件 IO 操作（{@code openFile} / {@code saveTo} / {@code newProject}）
+ * 走 {@link AsyncTasks} 后台执行：
+ * <ul>
+ *   <li>UI 入口（菜单 / 欢迎页 / 拖放）调 {@code openFileAsync} / {@code saveToAsync} /
+ *       {@code newProjectAsync}，立即返回不阻塞 FX 线程；</li>
+ *   <li>同步版 {@code openFile(Path)} / {@code newProject(Path, String, String)} 保留，
+ *       仅供单元测试与「拖放 → 直接打开」之类的原子路径调用，自身仍然阻塞；</li>
+ *   <li>{@code saveTo(Path)} 同步版已弃用——保留方法签名但抛
+ *       {@link UnsupportedOperationException}，引导使用方切到 {@code saveToAsync}。</li>
+ * </ul>
  */
 public class DocumentController {
 
@@ -49,20 +61,23 @@ public class DocumentController {
     private final EpubWriter writer = new EpubWriter();
     private final StatusSink status;
     private final DiscardConfirmation discarder;
+    private final AsyncTasks.ProgressController progress;
     private final FileChooserOpener dialogs;
     private final java.util.function.Consumer<String> errorReporter;
 
     public DocumentController(BookContext ctx, StatusSink status, DiscardConfirmation discarder,
                               FileChooserOpener dialogs,
+                              AsyncTasks.ProgressController progress,
                               java.util.function.Consumer<String> errorReporter) {
         this.ctx = ctx;
         this.status = status;
         this.discarder = discarder;
         this.dialogs = dialogs;
+        this.progress = progress;
         this.errorReporter = errorReporter;
     }
 
-    // ---- FXML 入口 ----
+    // ---- FXML 入口（异步版本：B1 落地） ----
 
     public void onNew() {
         if (!discarder.confirmDiscard()) {
@@ -77,11 +92,7 @@ public class DocumentController {
             return;
         }
         NewProjectResult res = picked.get();
-        try {
-            newProject(res.workspace(), res.name(), res.title());
-        } catch (IOException e) {
-            errorReporter.accept("创建项目失败：" + e.getMessage());
-        }
+        newProjectAsync(res.workspace(), res.name(), res.title());
     }
 
     /** 取最近一次访问的工作空间目录；没有或目录不存在时返回 null。 */
@@ -94,43 +105,6 @@ public class DocumentController {
         return java.nio.file.Files.isDirectory(candidate) ? candidate : null;
     }
 
-    /**
-     * 在选定 workspace 下创建一个新项目脚手架（项目目录 + .epubra/ + project.json），
-     * 写入初始 EPUB（绑定 source），并将其载入当前 ctx。
-     *
-     * <p>本方法不弹任何对话框——UI 入口（菜单 / 欢迎页）应当先收集 workspace/name/title
-     * 再调用，避免在新模型与旧「新建空白书籍」混淆。
-     *
-     * @param workspace 父工作空间目录；若不存在会自动创建
-     * @param name      项目目录名 / EPUB 文件名（同一字符串），不可包含文件系统非法字符
-     * @param title     EPUB 标题；空字符串回退为 {@code name}
-     * @return 创建好的 EPUB 文件路径（== ctx.currentFile()）
-     * @throws IOException 任何目录 / 文件 IO 失败
-     */
-    public Path newProject(Path workspace, String name, String title) throws IOException {
-        // 项目已存在 → 直接覆盖式打开会丢用户内容，宁可先报错。
-        Path projectDir = ProjectLayout.projectDir(workspace, name);
-        if (java.nio.file.Files.exists(projectDir)) {
-            throw new IOException("项目目录已存在: " + projectDir);
-        }
-        ProjectLayout.createProjectScaffolding(workspace, name);
-        Book created = ProjectLayout.createInitialEpub(workspace, name, title);
-        Path target = ProjectLayout.epubFile(workspace, name);
-        ctx.setBook(created);
-        ctx.setCurrentFile(target);
-        ctx.setCurrentNode(null);
-        ctx.setDirty(false);
-        ctx.history().reset();
-        ctx.setEditCaptured(false);
-        ctx.bus().publish(new com.epubra.app.support.AppEventBus.BookLoadedEvent());
-        // 落两条 recent：workspace 与打开过的 project 文件
-        RecentProjectsStore.addWorkspace(workspace.toString());
-        RecentProjectsStore.addProject(target.toString());
-        ProjectLayout.touchLastOpened(projectDir);
-        status.setStatus("已创建项目 " + projectDir.getFileName());
-        return target;
-    }
-
     public void onOpen() {
         if (!discarder.confirmDiscard()) {
             return;
@@ -141,12 +115,7 @@ public class DocumentController {
         if (file == null) {
             return;
         }
-        try {
-            openFile(file.toPath());
-            status.setStatus("已打开 " + file.getName());
-        } catch (IOException e) {
-            errorReporter.accept("打开失败：无法读取 " + file.getName() + "（" + e.getMessage() + "）");
-        }
+        openFileAsync(file.toPath());
     }
 
     public void onSave() {
@@ -154,7 +123,7 @@ public class DocumentController {
             onSaveAs();
             return;
         }
-        saveTo(ctx.currentFile());
+        saveToAsync(ctx.currentFile());
     }
 
     public void onSaveAs() {
@@ -162,7 +131,7 @@ public class DocumentController {
         if (file == null) {
             return;
         }
-        saveTo(file.toPath());
+        saveToAsync(file.toPath());
     }
 
     public void onExit(Runnable closeStage) {
@@ -183,6 +152,114 @@ public class DocumentController {
         alert.showAndWait();
     }
 
+    // ---- 异步入口（FXML 走这里） ----
+
+    /**
+     * 异步打开 EPUB：FX 线程立即返回；后台线程跑 {@code EpubReader.read}；
+     * 完成后切回 FX 线程写入 ctx、广播事件。
+     */
+    public void openFileAsync(Path file) {
+        AsyncTasks.runIo(
+                "正在打开 " + file.getFileName(),
+                () -> reader.read(file),
+                progress,
+                opened -> applyOpenedBook(opened, file),
+                err -> errorReporter.accept("打开失败：无法读取 " + file.getFileName() + "（" + err.getMessage() + "）")
+        );
+    }
+
+    /**
+     * 异步保存到指定路径：后台线程跑 {@code EpubWriter.write}；完成后切回 FX 线程
+     * 写 currentFile / dirty / BookSavedEvent。
+     *
+     * <p><b>并发约束</b>：保存期间用户在编辑器里继续输入，{@code markDirty} 会把
+     * {@code ctx.dirty} 重新置 true。保存完成回调里的 {@code setDirty(false)} 不会
+     * 清掉用户的新改动——自动暂存节流器会在下一次击键后重启并在 N 秒后再次落盘，
+     * 把最新内容写进去。这是把同步版本「先阻塞后清 dirty」的语义放宽为「后台 IO，
+     * 并发时由自动暂存兜底」，UX 不退化。
+     */
+    public void saveToAsync(Path target) {
+        Book bookAtStart = ctx.book(); // 后台线程用：避免并发被换书时引用漂移
+        if (bookAtStart == null) {
+            errorReporter.accept("没有可保存的书籍");
+            return;
+        }
+        AsyncTasks.runIo(
+                "正在保存 " + target.getFileName(),
+                (java.util.concurrent.Callable<Void>) () -> {
+                    writer.write(bookAtStart, target);
+                    return null;
+                },
+                progress,
+                ignored -> {
+                    ctx.setCurrentFile(target);
+                    ctx.book().setSource(target);
+                    ctx.setDirty(false);
+                    status.setStatus("已保存到 " + target.getFileName());
+                    ctx.bus().publish(new com.epubra.app.support.AppEventBus.BookSavedEvent());
+                },
+                err -> errorReporter.accept("保存失败：无法写入 " + target + "（" + err.getMessage() + "）")
+        );
+    }
+
+    /**
+     * 异步创建新项目：后台线程跑 {@code ProjectLayout.createProjectScaffolding} +
+     * {@code ProjectLayout.createInitialEpub}；完成后切回 FX 线程写入 ctx。
+     */
+    public void newProjectAsync(Path workspace, String name, String title) {
+        Path projectDir = ProjectLayout.projectDir(workspace, name);
+        // 已在 FX 线程，磁盘检查与后续后台的 ProjectLayout.exists 检查存在小竞态窗口
+        // （用户在异步过程中手工建同名目录）；此处先在 FX 线程预检给出明确错误，
+        // ProjectLayout.createProjectScaffolding 自身还有兜底。
+        if (java.nio.file.Files.exists(projectDir)) {
+            errorReporter.accept("创建项目失败：项目目录已存在 " + projectDir);
+            return;
+        }
+        final String finalTitle = title == null || title.isBlank() ? name : title;
+        AsyncTasks.runIo(
+                "正在创建项目 " + name,
+                () -> {
+                    ProjectLayout.createProjectScaffolding(workspace, name);
+                    return ProjectLayout.createInitialEpub(workspace, name, finalTitle);
+                },
+                progress,
+                created -> {
+                    Path target = ProjectLayout.epubFile(workspace, name);
+                    applyLoadedBook(created, target, "已创建项目 " + projectDir.getFileName());
+                    RecentProjectsStore.addWorkspace(workspace.toString());
+                    RecentProjectsStore.addProject(target.toString());
+                    ProjectLayout.touchLastOpened(projectDir);
+                },
+                err -> errorReporter.accept("创建项目失败：" + err.getMessage())
+        );
+    }
+
+    /**
+     * FX 线程跑的回调：把 {@code openFileAsync} 读到的 book 落到 ctx。
+     *
+     * <p>openFileAsync 与 newProjectAsync 都需要把当前 ctx 重置到新书上——
+     * 抽出 {@code applyLoadedBook} 让两条路径用同一份语义，避免一处改了别处忘改。
+     */
+    private void applyLoadedBook(Book book, Path file, String statusMessage) {
+        ctx.setBook(book);
+        ctx.setCurrentFile(file);
+        ctx.setCurrentNode(null);
+        ctx.setDirty(false);
+        ctx.history().reset();
+        ctx.setEditCaptured(false);
+        ctx.bus().publish(new com.epubra.app.support.AppEventBus.BookLoadedEvent());
+        status.setStatus(statusMessage);
+    }
+
+    /**
+     * {@link #openFileAsync} 成功后的 FX 线程回调。
+     * 拆成独立方法仅为保留「已打开 X」与「已创建项目 X」两条不同状态文案——共用
+     * {@link #applyLoadedBook} 的 ctx 重置逻辑。
+     */
+    private void applyOpenedBook(Book opened, Path file) {
+        applyLoadedBook(opened, file, "已打开 " + file.getFileName());
+    }
+
     // ---- 编程入口：用于单元测试 / 其它控制器复用 ----
 
     public void newBook() {
@@ -195,29 +272,47 @@ public class DocumentController {
         status.setStatus("已新建空白书籍");
     }
 
+    /**
+     * 同步打开 EPUB：测试与原子路径（如拖放）使用，FX 线程会被阻塞。
+     *
+     * <p>生产 UI 入口走 {@link #openFileAsync(Path)}；本方法不再被 {@code onOpen} 调。
+     */
     public void openFile(Path file) throws IOException {
         Book opened = reader.read(file);
-        ctx.setBook(opened);
-        ctx.setCurrentFile(file);
-        ctx.setCurrentNode(null);
-        ctx.setDirty(false);
-        ctx.history().reset();
-        ctx.setEditCaptured(false);
-        ctx.bus().publish(new com.epubra.app.support.AppEventBus.BookLoadedEvent());
-        status.setStatus("已打开 " + file.getFileName());
+        applyOpenedBook(opened, file);
     }
 
-    public void saveTo(Path target) {
-        try {
-            writer.write(ctx.book(), target);
-            ctx.setCurrentFile(target);
-            ctx.book().setSource(target);
-            ctx.setDirty(false);
-            status.setStatus("已保存到 " + target.getFileName());
-            ctx.bus().publish(new com.epubra.app.support.AppEventBus.BookSavedEvent());
-        } catch (IOException e) {
-            errorReporter.accept("保存失败：无法写入 " + target + "（" + e.getMessage() + "）");
+    /**
+     * 同步创建项目：测试使用，FX 线程会被阻塞。生产 UI 入口走
+     * {@link #newProjectAsync(Path, String, String)}。
+     *
+     * @throws IOException 任何目录 / 文件 IO 失败
+     */
+    public Path newProject(Path workspace, String name, String title) throws IOException {
+        Path projectDir = ProjectLayout.projectDir(workspace, name);
+        if (java.nio.file.Files.exists(projectDir)) {
+            throw new IOException("项目目录已存在: " + projectDir);
         }
+        ProjectLayout.createProjectScaffolding(workspace, name);
+        Book created = ProjectLayout.createInitialEpub(workspace, name, title);
+        Path target = ProjectLayout.epubFile(workspace, name);
+        applyLoadedBook(created, target, "已创建项目 " + projectDir.getFileName());
+        RecentProjectsStore.addWorkspace(workspace.toString());
+        RecentProjectsStore.addProject(target.toString());
+        ProjectLayout.touchLastOpened(projectDir);
+        return target;
+    }
+
+    /**
+     * 同步保存：B1 起弃用。{@code saveToAsync} 已替代之，UI 入口不再调用本方法。
+     * 保留方法签名仅为兼容旧测试——实际不再产生调用。
+     *
+     * @deprecated 用 {@link #saveToAsync(Path)}
+     */
+    @Deprecated
+    public void saveTo(Path target) {
+        throw new UnsupportedOperationException(
+                "DocumentController.saveTo 已弃用——UI 走 saveToAsync(Path)；测试不应再调此方法");
     }
 
     /** 给 MainController 在 FXML 初始化时挂一个标准 FileChooser。 */

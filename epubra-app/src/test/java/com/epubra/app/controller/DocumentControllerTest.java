@@ -1,6 +1,7 @@
 package com.epubra.app.controller;
 
 import com.epubra.app.support.AppEventBus.BookLoadedEvent;
+import com.epubra.app.support.AsyncTasks;
 import com.epubra.app.support.BookContext;
 import com.epubra.app.support.ProjectLayout;
 import com.epubra.app.support.RecentProjectsStore;
@@ -47,7 +48,7 @@ class DocumentControllerTest {
         AtomicReference<String> status = new AtomicReference<>();
         ctx.bus().subscribe(BookLoadedEvent.class, e -> loadEvents.incrementAndGet());
         DocumentController doc = new DocumentController(ctx, status::set, () -> true,
-                noopDialogs(), s -> {});
+                noopDialogs(), AsyncTasks.NOOP_PROGRESS, s -> {});
 
         doc.newBook();
 
@@ -63,7 +64,7 @@ class DocumentControllerTest {
         BookContext ctx = new BookContext();
         AtomicInteger loadEvents = new AtomicInteger();
         DocumentController doc = new DocumentController(ctx, s -> {}, () -> false,
-                noopDialogs(), s -> {});
+                noopDialogs(), AsyncTasks.NOOP_PROGRESS, s -> {});
 
         doc.onNew();
 
@@ -78,7 +79,7 @@ class DocumentControllerTest {
         BookContext ctx = new BookContext();
         AtomicReference<String> error = new AtomicReference<>();
         DocumentController doc = new DocumentController(ctx, s -> {}, () -> true,
-                noopDialogs(), error::set);
+                noopDialogs(), AsyncTasks.NOOP_PROGRESS, error::set);
 
         try {
             doc.openFile(new File("/nonexistent/never.epub").toPath());
@@ -125,7 +126,7 @@ class DocumentControllerTest {
         AtomicReference<String> status = new AtomicReference<>();
         ctx.bus().subscribe(BookLoadedEvent.class, e -> loadEvents.incrementAndGet());
         DocumentController doc = new DocumentController(ctx, status::set, () -> true,
-                noopDialogs(), s -> {});
+                noopDialogs(), AsyncTasks.NOOP_PROGRESS, s -> {});
 
         Path target = doc.newProject(workspace, "Alpha", "测试标题");
 
@@ -161,7 +162,7 @@ class DocumentControllerTest {
         Files.createDirectory(workspace.resolve("Dupe"));
         BookContext ctx = new BookContext();
         DocumentController doc = new DocumentController(ctx, s -> {}, () -> true,
-                noopDialogs(), s -> {});
+                noopDialogs(), AsyncTasks.NOOP_PROGRESS, s -> {});
 
         IOException ex = assertThrows(IOException.class,
                 () -> doc.newProject(workspace, "Dupe", "标题"));
@@ -177,7 +178,7 @@ class DocumentControllerTest {
         AtomicInteger loadEvents = new AtomicInteger();
         ctx.bus().subscribe(BookLoadedEvent.class, e -> loadEvents.incrementAndGet());
         DocumentController doc = new DocumentController(ctx, s -> {}, () -> true,
-                noopDialogs(), s -> {});
+                noopDialogs(), AsyncTasks.NOOP_PROGRESS, s -> {});
 
         assertThrows(IOException.class,
                 () -> doc.newProject(workspace, "Block", "x"));

@@ -2,6 +2,7 @@ package com.epubra.app.controller;
 
 import javafx.animation.FadeTransition;
 import javafx.scene.Node;
+import javafx.scene.control.SplitPane;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.control.ToggleGroup;
 import javafx.util.Duration;
@@ -35,6 +36,31 @@ public class SidebarController {
     private final Node metadataView;
     private final Node bottomPanel;
 
+    /**
+     * 三个侧栏视图的公共容器（main-window.fxml 里的 {@code sidePanel} StackPane，
+     * 作为 SplitPane 的 item 0 存在）。
+     *
+     * <p><b>为什么必须持有它</b>：收起侧栏只把内层三个视图设 {@code visible=false} 是不够的——
+     * SplitPane 按 {@code dividerPositions} 给 item 0 分配 22% 宽度，容器本身还占着这块地方，
+     * 编辑区不会伸展过去（2026-09-06 修复：点击已选中按钮收起侧栏后内容区没占满）。
+     * 必须连容器一起退出布局，SplitPane 才会把全部宽度让给编辑区。
+     */
+    private final Node sidePanel;
+
+    /**
+     * 侧栏容器所在的 {@link SplitPane}（main-window.fxml 的 {@code mainSplit}）。
+     *
+     * <p><b>为什么必须持有它</b>：实测（2026-09-06）JavaFX {@code SplitPane} 在布局时
+     * <b>不</b>跳过 {@code visible=false} 的 item——只把侧栏设成不可见，item 0 仍按
+     * {@code dividerPositions} 占着 22% 宽度，编辑区伸不过去。要让编辑区真正占满，
+     * 必须把侧栏<b>从 items 里移除</b>（见 {@link #collapseSidebar()} /
+     * {@link #restoreSidebar()}）。
+     */
+    private final SplitPane splitPane;
+
+    /** 侧栏被移除前的最后一个 divider 位置；恢复时照它摆回去。 */
+    private double savedDividerPosition = 0.22;
+
     /** 当前显示的侧边栏视图。{@code null} 表示侧栏全收起（仅底部面板可见）。 */
     private Node activeSideView;
     /** 切换到「校验」之前选中的侧栏按钮，用于校验按钮取消时一键还原。 */
@@ -61,7 +87,7 @@ public class SidebarController {
                              ToggleButton tocButton, ToggleButton resourceButton,
                              ToggleButton metadataButton, ToggleButton validationButton,
                              Node tocView, Node resourceView, Node metadataView,
-                             Node bottomPanel) {
+                             Node bottomPanel, Node sidePanel, SplitPane splitPane) {
         this.activityGroup = activityGroup;
         this.tocButton = tocButton;
         this.resourceButton = resourceButton;
@@ -71,6 +97,8 @@ public class SidebarController {
         this.resourceView = resourceView;
         this.metadataView = metadataView;
         this.bottomPanel = bottomPanel;
+        this.sidePanel = sidePanel;
+        this.splitPane = splitPane;
     }
 
     /** 活动栏初始化：把「目录」切到前台。默认入口由 {@code MainController.setupActivityBar} 触发。 */
@@ -169,11 +197,53 @@ public class SidebarController {
         lastSideButton = view == resourceView ? resourceButton
                 : view == metadataView ? metadataButton
                 : tocButton;
+        // 容器先回布局（必要时重新挂回 SplitPane），再切内层视图——否则内层视图
+        // 拿到的是 0 宽度，显示时会闪一下。
+        restoreSidebar();
         setVisibleManaged(tocView, view == tocView);
         setVisibleManaged(resourceView, view == resourceView);
         setVisibleManaged(metadataView, view == metadataView);
         // 首次显示时 fade in 150ms——后续切换因 opacity 已 1 自然跳过，避免重复动画的闪烁感
         fadeInIfNeeded(view);
+    }
+
+    /**
+     * 把侧栏容器从 {@link SplitPane} 的 items 里摘掉——这是让编辑区真正占满的唯一可靠做法。
+     *
+     * <p><b>为什么不能只设 visible=false</b>：实测 JavaFX SplitPane 布局时依然给
+     * invisible 的 item 按 dividerPositions 分配宽度（2026-09-06 修复的 bug 现场：
+     * 侧栏已隐藏但宽度仍 270px，编辑区原地不动）。只有把 item 摘掉，SplitPane 才会
+     * 把全部空间让给剩下的编辑区。
+     *
+     * <p>摘之前记下 divider 位置，{@link #restoreSidebar()} 照原样摆回去。
+     */
+    private void collapseSidebar() {
+        if (splitPane == null || sidePanel == null) {
+            return;
+        }
+        if (splitPane.getItems().contains(sidePanel)) {
+            double[] positions = splitPane.getDividerPositions();
+            if (positions.length > 0 && positions[0] > 0.01) {
+                savedDividerPosition = positions[0];
+            }
+            splitPane.getItems().remove(sidePanel);
+        }
+        setVisibleManaged(sidePanel, false);
+    }
+
+    /** {@link #collapseSidebar()} 的逆操作：把侧栏挂回 items 首位并恢复 divider 位置。 */
+    private void restoreSidebar() {
+        if (splitPane == null || sidePanel == null) {
+            return;
+        }
+        setVisibleManaged(sidePanel, true);
+        boolean wasCollapsed = !splitPane.getItems().contains(sidePanel);
+        if (wasCollapsed) {
+            splitPane.getItems().add(0, sidePanel);
+            // 只在"从收起状态恢复"时摆回 divider——若侧栏本来就在（用户只是在目录/资源/
+            // 元数据之间切换视图），不要动 divider，否则会把用户手动拖过的分隔条弹回原位。
+            splitPane.setDividerPositions(savedDividerPosition);
+        }
     }
 
     /**
@@ -202,6 +272,10 @@ public class SidebarController {
         setVisibleManaged(tocView, false);
         setVisibleManaged(resourceView, false);
         setVisibleManaged(metadataView, false);
+        // 关键一步：把 side-panel 容器从 SplitPane 的 items 里摘掉。只设 visible=false
+        // 是不够的——SplitPane 仍按 dividerPositions 给它留 22% 宽度，编辑区伸不过去
+        // （2026-09-06 修复）。
+        collapseSidebar();
         // 把三个视图的 opacity 归 0——下次 showSideView 触发 fadeInIfNeeded 时能正常淡入
         resetOpacity(tocView);
         resetOpacity(resourceView);

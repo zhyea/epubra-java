@@ -533,6 +533,22 @@
     -fx-background-color: -epubra-border-input;
 }
 
+/* 长操作进度反馈（B1 异步化）：状态栏右侧 ProgressBar + 标题。
+   走主题强调色，进度条 indeterminate 模式（多数长操作无稳定进度报告）。 */
+.status-progress {
+    -fx-accent: -epubra-accent;
+}
+
+.status-progress > .bar {
+    -fx-background-color: -epubra-accent;
+    -fx-background-insets: 0;
+}
+
+.status-progress-label {
+    -fx-font-size: 12px;
+    -fx-text-fill: -epubra-fg;
+}
+
 /* 自动暂存：默认走 status-item（弱化色），保存中切到主题色强调，关掉时显示中性灰 */
 .status-autosave-saving {
     -fx-text-fill: -epubra-accent;

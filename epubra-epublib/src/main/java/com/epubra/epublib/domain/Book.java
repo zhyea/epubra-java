@@ -173,6 +173,21 @@ public class Book {
     public Resource addResource(Path file) throws IOException {
         byte[] data = Files.readAllBytes(file);
         String fileName = file.getFileName().toString();
+        return addResource(fileName, data);
+    }
+
+    /**
+     * 把已在内存里的资源字节接进书籍——{@link #addResource(Path)} 的去文件 IO 版本。
+     *
+     * <p>B1 异步化（{@code support.AsyncTasks}）背景下：批量导入时文件 IO 走后台线程，
+     * 但 {@link Resources#add(Resource)} 这种书籍状态修改必须在 FX 线程。两者之间
+     * 会有「读到字节、但还没挂到 book 上」的窗口——本方法就是把 bytes 与 fileName
+     * 算好 id/href 并挂上去的最终一步。
+     *
+     * <p>媒体类型按文件名后缀猜测，href / id 仍走 {@link Resources#uniqueHref} /
+     * {@link Resources#uniqueId} 去重，与 {@code addResource(Path)} 行为完全等价。
+     */
+    public Resource addResource(String fileName, byte[] data) {
         String mediaType = MediaTypes.guessByExtension(fileName);
         String href = resources.uniqueHref(contentDirectory() + subDirectoryFor(mediaType) + fileName);
         Resource resource = new Resource(resources.uniqueId(toId(fileName)), href, mediaType, data);
