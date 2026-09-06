@@ -15,19 +15,20 @@ EPUB 电子书维护工具，JavaFX 桌面应用。界面采用 **VSCode 风格�
 ```
 epubra/
 ├── pom.xml                    epubra-parent（packaging=pom，聚合两个模块）
-├── epubra-epublib/
-│   └── src/main/java/com/epubra/epublib/
+├── epubra-lib/
+│   └── src/main/java/org/chobit/epubra/lib/
 │       ├── io/                EpubReader / EpubWriter
 │       ├── domain/            Book、Metadata、Spine、TableOfContents、Resource、TocEditor…
 │       └── util/              Hrefs、Xmls
 └── epubra-app/
     └── src/main/
-        ├── java/com/epubra/app/
+        ├── java/org/chobit/epubra/app/
         │   ├── Launcher.java          启动引导类（非 Application 子类）
         │   ├── EpubraApp.java        Application 子类，装载主界面
-        │   ├── controller/            MainController（主界面）、ChapterNode、ResourceRow、ValidationIssueRow
+        │   ├── controller/            MainController（主界面）
+        │   ├── components/            ChapterNode、ResourceRow、ValidationIssueRow、NewProjectDialog、NewProjectDialogController
         │   └── support/               BookHistory、TextSearch、Theme / ThemeManager / PreviewHtml、ValidationTexts
-        └── resources/com/epubra/app/
+        └── resources/org/chobit/epubra/app/
             ├── view/main-window.fxml  主界面布局（活动栏 / 侧边栏 / 编辑区 / 底部面板 / 状态栏）
             └── css/app.css            三主题样式（浅色 / 深色 / 护眼米黄）与 -epubra-* 配色变量
 ```
@@ -64,7 +65,7 @@ epubra/
 | JDK | 25.0.3 | `maven.compiler.release=25` |
 | JavaFX | 24.0.1 | controls + fxml + web，FXML + 控制器模式 |
 | EPUB 内核 | 自维护 | `epubra-lib`，无第三方 EPUB 依赖 |
-| JUnit | 5.12.0 | 仅测试，两个模块共 82 个用例 |
+| JUnit | 5.12.0 | 仅测试，两个模块共 306 个用例 |
 | Maven | 3.9.15 | 见下方环境说明 |
 
 ## 环境说明
@@ -117,7 +118,7 @@ cd epubra-app && ~/.workbuddy/bin/mvn javafx:run
 
 ## 当前能力
 
-**EPUB 内核（epubra-epublib）**
+**EPUB 内核（epubra-lib）**
 
 - EPUB 2/3 读取与写出，`mimetype` 按规范以 STORE 方式置于归档首位
 - OPF / NCX / Nav 文档的解析与生成，spine 与目录（TOC）维护
@@ -154,11 +155,11 @@ cd epubra-app && ~/.workbuddy/bin/mvn javafx:run
 ~/.workbuddy/bin/mvn test
 ```
 
-- `epubra-lib`：51 个用例 —— 读写往返、容器结构、目录层级、EPUB 2 NCX 兼容、资源管理、目录编辑、结构校验
-- `epubra-app`：31 个用例 —— `TextSearch`（查找替换与标题同步的文本逻辑）、`BookHistory`（快照式撤销 / 重做）、
+- `epubra-lib`：57 个用例 —— 读写往返、容器结构、目录层级、EPUB 2 NCX 兼容、资源管理、目录编辑、结构校验
+- `epubra-app`：249 个用例 —— `TextSearch`（查找替换与标题同步的文本逻辑）、`BookHistory`（快照式撤销 / 重做）、
   `Theme` / `ThemeManager`（主题枚举与偏好存取往复）、`PreviewHtml`（预览区主题样式注入）
 
-与界面控件绑定的部分（拖拽落点、对话框）依赖 JavaFX 运行时，未做自动化测试；纯逻辑已抽到 `com.epubra.app.support` 下以便单测。
+与界面控件绑定的部分（拖拽落点、对话框）依赖 JavaFX 运行时，未做自动化测试；纯逻辑已抽到 `org.chobit.epubra.app.support` 下以便单测。
 
 ## 后续迭代
 

@@ -1,4 +1,4 @@
-package org.chobit.epubra.app.controller;
+package org.chobit.epubra.app.components;
 
 import org.chobit.epubra.app.support.RecentProjectsStore;
 import javafx.fxml.FXML;

@@ -1,4 +1,4 @@
-package org.chobit.epubra.app.controller;
+package org.chobit.epubra.app.components;
 
 import org.chobit.epubra.lib.domain.MediaTypes;
 import org.chobit.epubra.lib.domain.Book;

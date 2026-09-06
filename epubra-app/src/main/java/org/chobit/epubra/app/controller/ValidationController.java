@@ -1,5 +1,6 @@
 package org.chobit.epubra.app.controller;
 
+import org.chobit.epubra.app.components.ValidationIssueRow;
 import org.chobit.epubra.app.support.AsyncTasks;
 import org.chobit.epubra.app.support.BookContext;
 import org.chobit.epubra.app.support.TextSearch;

@@ -56,7 +56,7 @@ class PlatformLoggingTest {
 
     private static LogRecord appWarning() {
         LogRecord record = new LogRecord(Level.WARNING, "书籍尚未保存");
-        record.setLoggerName("com.epubra.app.controller");
+        record.setLoggerName("org.chobit.epubra.app.controller");
         return record;
     }
 
@@ -87,7 +87,7 @@ class PlatformLoggingTest {
     void javaFxLoggerNameIsBareJavafx() {
         assertTrue(PlatformLogging.isJavaFxLogger("javafx"));
         assertTrue(PlatformLogging.isJavaFxLogger("com.sun.javafx.application.PlatformImpl"));
-        assertFalse(PlatformLogging.isJavaFxLogger("com.epubra.app.controller"));
+        assertFalse(PlatformLogging.isJavaFxLogger("org.chobit.epubra.app.controller"));
         assertFalse(PlatformLogging.isJavaFxLogger(null));
     }
 

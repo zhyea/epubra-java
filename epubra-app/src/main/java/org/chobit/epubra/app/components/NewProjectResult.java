@@ -1,4 +1,4 @@
-package org.chobit.epubra.app.controller;
+package org.chobit.epubra.app.components;
 
 import java.nio.file.Path;
 

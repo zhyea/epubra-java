@@ -34,4 +34,6 @@ build/
 .DS_Store
 .idea
 .workbuddy
-*/target
+*/target/
+/epubra-app/target/
+/epubra-lib/target/

@@ -1,7 +1,7 @@
 package org.chobit.epubra.app.controller;
 
 import org.chobit.epubra.app.EpubraApp;
-import org.chobit.epubra.app.models.ChapterNode;
+import org.chobit.epubra.app.components.ChapterNode;
 import org.chobit.epubra.app.support.*;
 import org.chobit.epubra.app.support.AsyncTasks;
 import org.chobit.epubra.app.support.BookContext;

@@ -9,15 +9,15 @@
 JavaFX 24 WebView 在 Windows 上以 main class FQCN 派生 native 缓存目录，实测为：
 
 ```
-C:\Users\robin\.org.chobit.epubra.app.EpubraApp\webview\.lock
-C:\Users\robin\.org.chobit.epubra.app.EpubraApp\webview\localstorage\
+C:\Users\robin\.Epubra\.org.chobit.epubra.app.EpubraApp\webview\.lock
+C:\Users\robin\.Epubra\.org.chobit.epubra.app.EpubraApp\webview\localstorage\
 ```
 
 丑且长，与 IDEA / VSCode / Git 等工具的「`.工具名/`」命名风格不一致。
 
 ### 交付内容
 
-**1. AppPaths 工具类**（`com.epubra.app.support.AppPaths`）
+**1. AppPaths 工具类**（`org.chobit.epubra.app.support.AppPaths`）
 - `userDataDir()` / `autosaveDir()` / `webviewCacheDir()`：统一路径入口
 - `redirectUserHome()`：把 `user.home` 改写到 `~/.Epubra/`，让 JavaFX native 缓存跟随
 - `migrateLegacyIfAny()`：一次性把旧 `<user.dir>/epubra-autosave` 与 `~/epubra-autosave` 下的 `.draft` 搬到新位置
@@ -54,7 +54,7 @@ C:\Users\robin\.org.chobit.epubra.app.EpubraApp\webview\localstorage\
 └── .openjfx/cache/24.0.1+4/amd64/             ← openjfx native 资源缓存
 ```
 
-老位置 `~/.com.epubra.app.EpubraApp/` 删除后重启不再创建 ✓
+老位置 `~/.org.chobit.epubra.app.EpubraApp/` 删除后重启不再创建 ✓
 
 ### 关键实现要点
 
@@ -65,7 +65,7 @@ C:\Users\robin\.org.chobit.epubra.app.EpubraApp\webview\localstorage\
 
 ### 遗留 / 已知限制
 
-- **`~/.Epubra/.com.epubra.app.EpubraApp/webview/` 子目录名无法消除**——这是 JavaFX 24 native 基于 launcher 标识的硬编码派生，父目录已正确，但子目录名需等 OpenJFX 上游提供公开 system property 或改 launcher 标识策略才能根治
+- **`~/.Epubra/.org.chobit.epubra.app.EpubraApp/webview/` 子目录名无法消除**——这是 JavaFX 24 native 基于 launcher 标识的硬编码派生，父目录已正确，但子目录名需等 OpenJFX 上游提供公开 system property 或改 launcher 标识策略才能根治
 - **Preferences 旧键迁移未做**——本次未加「旧 `com\epubra\app\support\Xxx` 键值 → 新 `Epubra\Xxx` 键值」的一次性 copy；首次启动后主题会回退到 light，最近项目列表为空。如需保留旧偏好，加一层 `preferences().get(legacyKey, default)` 回退即可
 
 ### Follow-up

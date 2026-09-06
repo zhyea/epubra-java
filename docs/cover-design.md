@@ -2,7 +2,7 @@
 
 > 状态：待评审（设计稿，未实现）
 > 日期：2026-09-06
-> 范围：Epubra JavaFX 版（epubra-epublib 内核 + epubra-app 前端）
+> 范围：Epubra JavaFX 版（epubra-lib 内核 + epubra-app 前端）
 
 ---
 

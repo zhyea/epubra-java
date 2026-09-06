@@ -1,6 +1,8 @@
 package org.chobit.epubra.app.controller;
 
 import org.chobit.epubra.app.EpubraApp;
+import org.chobit.epubra.app.components.NewProjectDialog;
+import org.chobit.epubra.app.components.NewProjectResult;
 import org.chobit.epubra.app.support.AsyncTasks;
 import org.chobit.epubra.app.support.AppEventBus;
 import org.chobit.epubra.app.support.Autosave;

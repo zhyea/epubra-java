@@ -20,7 +20,7 @@
 -->
 <VBox xmlns="http://javafx.com/javafx/24" xmlns:fx="http://javafx.com/fxml"
       spacing="14.0" prefWidth="520.0"
-      fx:controller="org.chobit.epubra.app.controller.NewProjectDialogController">
+      fx:controller="org.chobit.epubra.app.components.NewProjectDialogController">
     <padding>
         <Insets top="14.0" right="20.0" bottom="6.0" left="20.0"/>
     </padding>

@@ -1,5 +1,6 @@
 package org.chobit.epubra.app.controller;
 
+import org.chobit.epubra.app.components.ResourceRow;
 import org.chobit.epubra.app.support.AppEventBus;
 import org.chobit.epubra.app.support.BookContext;
 import org.chobit.epubra.lib.domain.Book;

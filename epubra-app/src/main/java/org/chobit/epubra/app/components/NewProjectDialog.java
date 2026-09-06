@@ -1,4 +1,4 @@
-package org.chobit.epubra.app.controller;
+package org.chobit.epubra.app.components;
 
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;

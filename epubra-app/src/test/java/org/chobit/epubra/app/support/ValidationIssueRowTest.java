@@ -1,6 +1,6 @@
 package org.chobit.epubra.app.support;
 
-import org.chobit.epubra.app.controller.ValidationIssueRow;
+import org.chobit.epubra.app.components.ValidationIssueRow;
 import org.chobit.epubra.lib.validation.IssueKind;
 import org.chobit.epubra.lib.validation.ValidationIssue;
 import org.junit.jupiter.api.DisplayName;

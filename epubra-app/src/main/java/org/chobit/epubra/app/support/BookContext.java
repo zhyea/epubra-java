@@ -1,7 +1,7 @@
 package org.chobit.epubra.app.support;
 
 import org.chobit.epubra.app.EpubraLauncher;
-import org.chobit.epubra.app.models.ChapterNode;
+import org.chobit.epubra.app.components.ChapterNode;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.Resource;
 import org.chobit.epubra.lib.validation.ValidationReport;

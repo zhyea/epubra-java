@@ -1,6 +1,6 @@
 package org.chobit.epubra.app.controller;
 
-import org.chobit.epubra.app.models.ChapterNode;
+import org.chobit.epubra.app.components.ChapterNode;
 import org.chobit.epubra.app.support.BookContext;
 import org.chobit.epubra.app.support.TextSearch;
 import org.chobit.epubra.lib.domain.Resource;

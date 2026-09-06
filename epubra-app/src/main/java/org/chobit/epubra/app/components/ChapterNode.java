@@ -1,4 +1,4 @@
-package org.chobit.epubra.app.models;
+package org.chobit.epubra.app.components;
 
 import org.chobit.epubra.lib.domain.Resource;
 import org.chobit.epubra.lib.domain.TOCReference;
