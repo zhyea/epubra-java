@@ -1,5 +1,6 @@
 package com.epubra.app.support;
 
+import java.util.prefs.BackingStoreException;
 import java.util.prefs.Preferences;
 
 /**
@@ -61,30 +62,39 @@ public final class AutosaveConfig {
 
     /** 读当前用户的配置（缺省值见 DEFAULT_* 常量）。 */
     public static AutosaveConfig read() {
-        Preferences prefs = preferences();
-        return new AutosaveConfig(
-                prefs.getBoolean(KEY_ENABLED, DEFAULT_ENABLED),
-                prefs.getInt(KEY_DEBOUNCE, DEFAULT_DEBOUNCE_SECONDS),
-                prefs.get(KEY_DIR, null));
+        try {
+            Preferences prefs = preferences();
+            return new AutosaveConfig(
+                    prefs.getBoolean(KEY_ENABLED, DEFAULT_ENABLED),
+                    prefs.getInt(KEY_DEBOUNCE, DEFAULT_DEBOUNCE_SECONDS),
+                    prefs.get(KEY_DIR, null));
+        } catch (RuntimeException e) {
+            return new AutosaveConfig(DEFAULT_ENABLED, DEFAULT_DEBOUNCE_SECONDS, null);
+        }
     }
 
     /** 写配置到 Preferences 持久存储。 */
     public static void write(AutosaveConfig config) {
-        Preferences prefs = preferences();
-        prefs.putBoolean(KEY_ENABLED, config.enabled);
-        prefs.putInt(KEY_DEBOUNCE, config.debounceSeconds);
-        if (config.dirOverride == null || config.dirOverride.isBlank()) {
-            prefs.remove(KEY_DIR);
-        } else {
-            prefs.put(KEY_DIR, config.dirOverride);
+        try {
+            Preferences prefs = preferences();
+            prefs.putBoolean(KEY_ENABLED, config.enabled);
+            prefs.putInt(KEY_DEBOUNCE, config.debounceSeconds);
+            if (config.dirOverride == null || config.dirOverride.isBlank()) {
+                prefs.remove(KEY_DIR);
+            } else {
+                prefs.put(KEY_DIR, config.dirOverride);
+            }
+            prefs.flush();
+        } catch (BackingStoreException | RuntimeException ignored) {
+            // 偏好不可写时放弃持久化，调用方仍可在内存中使用当前配置
         }
     }
 
     private static Preferences preferences() {
-        Preferences prefs = Preferences.userRoot().node("/Epubra/AutosaveConfig");
+        Preferences prefs = PreferenceNodes.node("/Epubra/AutosaveConfig");
         // 一次性把旧节点 /com/epubra/app/support/AutosaveConfig 的所有键搬到新节点,再删旧节点
         PreferencesMigrator.migrate(
-                Preferences.userRoot().node("/com/epubra/app/support/AutosaveConfig"),
+                PreferenceNodes.node("/com/epubra/app/support/AutosaveConfig"),
                 prefs);
         return prefs;
     }

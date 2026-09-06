@@ -56,7 +56,11 @@ public final class ThemeManager {
 
     /** 读取上次选择的主题；从未选择过或取值非法时回退到 {@link Theme#LIGHT}。 */
     public static Theme current() {
-        return Theme.of(preferences().get(PREF_KEY, Theme.LIGHT.storageKey()));
+        try {
+            return Theme.of(preferences().get(PREF_KEY, Theme.LIGHT.storageKey()));
+        } catch (RuntimeException e) {
+            return Theme.LIGHT;
+        }
     }
 
     /**
@@ -72,15 +76,15 @@ public final class ThemeManager {
             Preferences preferences = preferences();
             preferences.put(PREF_KEY, theme.storageKey());
             preferences.flush();
-        } catch (BackingStoreException ignored) {
+        } catch (BackingStoreException | RuntimeException ignored) {
             // 无注册表 / 无家目录等环境下写不进去就算了，主题在本次会话里仍然有效
         }
     }
 
     private static Preferences preferences() {
-        Preferences prefs = Preferences.userRoot().node("/Epubra/ThemeManager");
+        Preferences prefs = PreferenceNodes.node("/Epubra/ThemeManager");
         PreferencesMigrator.migrate(
-                Preferences.userRoot().node("/com/epubra/app/support/ThemeManager"),
+                PreferenceNodes.node("/com/epubra/app/support/ThemeManager"),
                 prefs);
         return prefs;
     }

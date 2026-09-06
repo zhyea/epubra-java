@@ -6,7 +6,6 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.prefs.Preferences;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -15,30 +14,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * {@link RecentProjectsStore} 契约测试。
  *
- * <p>Preferences 用真实节点（{@code userNodeForPackage}）写完即清，避免污染用户配置；
- * 用 @BeforeEach 备份 + @AfterEach 恢复做防御。
+ * <p>Preferences 通过 {@link PreferenceNodes} 切到内存根节点，避免污染用户配置，
+ * 也避免 Windows 注册表权限影响测试结果。
  */
 class RecentProjectsStoreTest {
 
-    private java.util.List<String> originalWorkspaces;
-    private java.util.List<String> originalProjects;
-
     @BeforeEach
-    void backUp() {
-        originalWorkspaces = RecentProjectsStore.workspaces();
-        originalProjects = RecentProjectsStore.projects();
-        clear();
+    void setUp() {
+        PreferenceNodes.useInMemoryForTesting();
     }
 
     @AfterEach
-    void restore() {
+    void tearDown() {
         clear();
-        for (String w : originalWorkspaces) {
-            RecentProjectsStore.addWorkspace(w);
-        }
-        for (String p : originalProjects) {
-            RecentProjectsStore.addProject(p);
-        }
+        PreferenceNodes.resetForTesting();
     }
 
     private void clear() {
@@ -156,7 +145,7 @@ class RecentProjectsStoreTest {
     void survivesRoundTripThroughPreferences() {
         RecentProjectsStore.addWorkspace("D:/Round-trip");
         // 直接重新打开 Preferences 节点应能读到
-        Preferences p = Preferences.userRoot().node("/Epubra/RecentProjectsStore");
+        java.util.prefs.Preferences p = PreferenceNodes.node("/Epubra/RecentProjectsStore");
         String raw = p.get("recentWorkspaces", "");
         assertTrue(raw.contains("D:/Round-trip"));
     }

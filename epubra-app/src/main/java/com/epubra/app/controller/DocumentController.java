@@ -6,6 +6,7 @@ import com.epubra.app.support.Autosave;
 import com.epubra.app.support.BookContext;
 import com.epubra.app.support.ProjectLayout;
 import com.epubra.app.support.RecentProjectsStore;
+import com.epubra.app.support.WorkspaceStore;
 import com.epubra.epublib.domain.Book;
 import com.epubra.epublib.io.EpubReader;
 import com.epubra.epublib.io.EpubWriter;
@@ -166,6 +167,75 @@ public class DocumentController {
                 opened -> applyOpenedBook(opened, file),
                 err -> errorReporter.accept("打开失败：无法读取 " + file.getFileName() + "（" + err.getMessage() + "）")
         );
+    }
+
+    // ---- .draft 文档（工作空间里的处理中文档）----
+
+    /**
+     * 异步打开工作空间里的 {@code *.draft} 文档并<b>直接进入编辑页</b>——宫格卡片
+     * 点击走这条路径，无中间确认页、无二次对话框。
+     *
+     * <p>与 {@link #openFileAsync(Path)} 的差别只有两处：
+     * <ol>
+     *   <li>状态栏文案去掉 {@code .draft} 后缀（「已打开 三体」而非「已打开 三体.draft」）；</li>
+     *   <li>打开后把<b>文档所在目录</b>记为当前工作空间
+     *       （{@link WorkspaceStore#setLast}）——下次启动直达该工作空间。</li>
+     * </ol>
+     *
+     * <p>读取本身与打开 .epub 完全一致：{@code .draft} 的内容就是合法 EPUB zip
+     * （"草稿即 EPUB 快照"语义），{@code EpubReader} 无需任何适配。
+     *
+     * <p>读失败时走 {@code errorReporter} 报错，<b>停留在宫格</b>——不进入一个空的编辑页，
+     * 否则用户会以为文档被清空了。
+     */
+    public void openDraftAsync(Path draftFile) {
+        if (draftFile == null) {
+            errorReporter.accept("打开失败：文档路径为空");
+            return;
+        }
+        AsyncTasks.runIo(
+                "正在打开 " + draftDisplayName(draftFile),
+                () -> reader.read(draftFile),
+                progress,
+                opened -> {
+                    applyLoadedBook(opened, draftFile, "已打开 " + draftDisplayName(draftFile));
+                    rememberWorkspaceOf(draftFile);
+                },
+                err -> errorReporter.accept(
+                        "打开失败：无法读取 " + draftFile.getFileName() + "（" + err.getMessage() + "）")
+        );
+    }
+
+    /**
+     * 同步打开 {@code *.draft} 文档——单元测试与需要阻塞返回的路径使用。
+     *
+     * @throws IOException 文档不存在 / 不是合法 EPUB / IO 错误
+     */
+    public void openDraft(Path draftFile) throws IOException {
+        Book opened = reader.read(draftFile);
+        applyLoadedBook(opened, draftFile, "已打开 " + draftDisplayName(draftFile));
+        rememberWorkspaceOf(draftFile);
+    }
+
+    /** 文档显示名：文件名去掉 {@code .draft} 后缀。 */
+    public static String draftDisplayName(Path draftFile) {
+        if (draftFile == null || draftFile.getFileName() == null) {
+            return "";
+        }
+        return Autosave.stripDraftSuffix(draftFile.getFileName().toString());
+    }
+
+    /**
+     * 记住文档所在的工作空间目录——下次启动直达。
+     *
+     * <p>只更新 {@code last}，不写最近列表：用户可能只是从菜单进了个新目录还没"确认"常用，
+     * 列表应由显式的「打开工作空间…」动作（{@link WorkspaceStore#add}）维护。
+     */
+    private static void rememberWorkspaceOf(Path draftFile) {
+        Path parent = draftFile.getParent();
+        if (parent != null) {
+            WorkspaceStore.setLast(parent);
+        }
     }
 
     /**

@@ -64,7 +64,7 @@ public final class PreferencesMigrator {
             safeClear(legacy);
             try {
                 target.flush();
-            } catch (BackingStoreException flushEx) {
+            } catch (BackingStoreException | RuntimeException flushEx) {
                 // flush 失败仅记录;不影响下次启动的迁移(下次 target 已有数据会跳过)
                 LOG.log(System.Logger.Level.WARNING,
                         "Preferences flush failed after migration: " + flushEx.getMessage(), flushEx);
@@ -72,7 +72,7 @@ public final class PreferencesMigrator {
             LOG.log(System.Logger.Level.INFO,
                     "Preferences migrated: " + legacy.absolutePath() + " -> " + target.absolutePath()
                             + " (" + legacyKeys.length + " keys)");
-        } catch (BackingStoreException e) {
+        } catch (BackingStoreException | RuntimeException e) {
             LOG.log(System.Logger.Level.WARNING,
                     "Preferences migration skipped: " + legacy.absolutePath()
                             + " -> " + target.absolutePath() + " (" + e.getMessage() + ")", e);
@@ -83,7 +83,7 @@ public final class PreferencesMigrator {
         try {
             node.clear();
             node.flush();
-        } catch (BackingStoreException ignored) {
+        } catch (BackingStoreException | RuntimeException ignored) {
             // 清理失败不致命——旧值仍存在但下次迁移检测到 target 非空会跳过
         }
     }

@@ -1,6 +1,8 @@
 package com.epubra.app.support;
 
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -12,10 +14,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 主题枚举与主题管理器的持久化。
  *
- * <p>Preferences 是跨测试共享的全局存储，存取往复用例会在 finally 里把原值写回，
- * 避免污染其他测试与下一次真实启动。
+ * <p>Preferences 通过 {@link PreferenceNodes} 切到内存根节点，测试只验证持久化契约，
+ * 不触碰真实用户配置。
  */
 class ThemeTest {
+
+    @BeforeEach
+    void setUpPreferences() {
+        PreferenceNodes.useInMemoryForTesting();
+    }
+
+    @AfterEach
+    void tearDownPreferences() {
+        PreferenceNodes.resetForTesting();
+    }
 
     @Test
     @DisplayName("三个主题的样式类名与 app.css 中的 .root.theme-* 规则对应")

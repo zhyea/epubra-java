@@ -15,10 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * {@link PreferencesMigrator} 契约测试。
  *
- * <p>用 JUnit 默认的 {@link AbstractPreferences} 用户根节点（真实 Windows 注册表 / macOS plist /
- * Linux 文件系统）做端到端测试，避免破坏全局节点：每个测试用一个唯一命名前缀，结束清掉。
- *
- * <p>虽然真实后端有副作用，但行为契约（move 而非 copy、target 非空跳过、幂等）必须真打。
+ * <p>用内存 {@link AbstractPreferences} 做端到端测试，避免碰真实 Windows 注册表 /
+ * macOS plist / Linux 文件系统。
  */
 class PreferencesMigratorTest {
 
@@ -30,8 +28,9 @@ class PreferencesMigratorTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        legacy = Preferences.userRoot().node(LEGACY_PATH);
-        target = Preferences.userRoot().node(TARGET_PATH);
+        PreferenceNodes.useInMemoryForTesting();
+        legacy = PreferenceNodes.node(LEGACY_PATH);
+        target = PreferenceNodes.node(TARGET_PATH);
         legacy.clear();
         target.clear();
     }
@@ -40,6 +39,7 @@ class PreferencesMigratorTest {
     void tearDown() throws Exception {
         legacy.clear();
         target.clear();
+        PreferenceNodes.resetForTesting();
     }
 
     // ---- 迁移执行 ----
@@ -145,7 +145,7 @@ class PreferencesMigratorTest {
         PreferencesMigrator.migrate(legacy, target);
 
         // 重新打开 target 节点,数据应已落盘(flush 起效)
-        Preferences reopened = Preferences.userRoot().node(TARGET_PATH);
+        Preferences reopened = PreferenceNodes.node(TARGET_PATH);
         assertEquals("yes", reopened.get("flushed", null));
     }
 

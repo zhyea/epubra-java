@@ -94,6 +94,23 @@ public final class Autosave {
     // ---- 路径解析 ----
 
     /**
+     * 去掉文件名的 {@value #DRAFT_SUFFIX} 后缀；不带该后缀时原样返回。
+     *
+     * <p>后缀处理集中在这一处——{@link DraftDocument#stem()}、宫格标题、导入时推导
+     * 新文档名都要用，散落各处硬编码 {@code ".draft"} 会在改后缀时漏改。
+     *
+     * @param fileName 文件名（不含目录）；为 null 时返回空串
+     */
+    public static String stripDraftSuffix(String fileName) {
+        if (fileName == null) {
+            return "";
+        }
+        return fileName.endsWith(DRAFT_SUFFIX)
+                ? fileName.substring(0, fileName.length() - DRAFT_SUFFIX.length())
+                : fileName;
+    }
+
+    /**
      * 解析草稿文件路径：主文件存在 → 与主文件同目录、文件名加 {@value #DRAFT_SUFFIX}；
      * 主文件为 null → 放 {@link BookContext#autosaveDir()} 的 {@value #UNTITLED_DRAFT_NAME}。
      *

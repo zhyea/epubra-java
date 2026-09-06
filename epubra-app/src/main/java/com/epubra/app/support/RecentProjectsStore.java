@@ -42,7 +42,11 @@ public final class RecentProjectsStore {
     // ---- 工作空间 ----
 
     public static List<String> workspaces() {
-        return readList(preferences().get(KEY_WORKSPACES, ""));
+        try {
+            return readList(preferences().get(KEY_WORKSPACES, ""));
+        } catch (RuntimeException e) {
+            return new ArrayList<>();
+        }
     }
 
     public static void addWorkspace(String workspace) {
@@ -69,7 +73,11 @@ public final class RecentProjectsStore {
     // ---- 项目 ----
 
     public static List<String> projects() {
-        return readList(preferences().get(KEY_PROJECTS, ""));
+        try {
+            return readList(preferences().get(KEY_PROJECTS, ""));
+        } catch (RuntimeException e) {
+            return new ArrayList<>();
+        }
     }
 
     public static void addProject(String projectFile) {
@@ -146,7 +154,7 @@ public final class RecentProjectsStore {
             Preferences prefs = preferences();
             prefs.put(key, String.join(SEP, list));
             prefs.flush();
-        } catch (BackingStoreException ignored) {
+        } catch (BackingStoreException | RuntimeException ignored) {
             // 持久化不可用就放弃，下次启动清单不会更新
         }
     }
@@ -158,9 +166,9 @@ public final class RecentProjectsStore {
     }
 
     private static Preferences preferences() {
-        Preferences prefs = Preferences.userRoot().node("/Epubra/RecentProjectsStore");
+        Preferences prefs = PreferenceNodes.node("/Epubra/RecentProjectsStore");
         PreferencesMigrator.migrate(
-                Preferences.userRoot().node("/com/epubra/app/support/RecentProjectsStore"),
+                PreferenceNodes.node("/com/epubra/app/support/RecentProjectsStore"),
                 prefs);
         return prefs;
     }
