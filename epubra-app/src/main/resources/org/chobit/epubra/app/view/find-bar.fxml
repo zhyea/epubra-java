@@ -14,7 +14,7 @@
 <HBox xmlns="http://javafx.com/javafx/24" xmlns:fx="http://javafx.com/fxml"
       styleClass="find-bar" spacing="6.0" alignment="CENTER_LEFT"
       visible="false" managed="false"
-      fx:controller="org.chobit.epubra.app.controller.FindController">
+      fx:controller="org.chobit.epubra.app.controller.view.FindController">
     <padding>
         <Insets top="6.0" right="10.0" bottom="6.0" left="10.0"/>
     </padding>

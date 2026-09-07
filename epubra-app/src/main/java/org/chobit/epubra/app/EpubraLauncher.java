@@ -1,7 +1,7 @@
 package org.chobit.epubra.app;
 
-import org.chobit.epubra.app.support.AppPaths;
-import org.chobit.epubra.app.support.PlatformLogging;
+import org.chobit.epubra.app.support.platform.AppPaths;
+import org.chobit.epubra.app.support.platform.PlatformLogging;
 
 /**
  * 启动引导类。

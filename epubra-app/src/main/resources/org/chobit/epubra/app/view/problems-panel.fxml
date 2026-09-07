@@ -16,7 +16,7 @@
 <VBox xmlns="http://javafx.com/javafx/24" xmlns:fx="http://javafx.com/fxml"
       styleClass="bottom-panel" VBox.vgrow="NEVER"
       visible="false" managed="false"
-      fx:controller="org.chobit.epubra.app.controller.ValidationController">
+      fx:controller="org.chobit.epubra.app.controller.view.ValidationController">
     <HBox styleClass="panel-header" alignment="CENTER_LEFT" spacing="10.0">
         <padding>
             <Insets top="4.0" right="10.0" bottom="4.0" left="10.0"/>

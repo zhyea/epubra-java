@@ -17,7 +17,7 @@ C:\Users\robin\.Epubra\.org.chobit.epubra.app.EpubraApp\webview\localstorage\
 
 ### 交付内容
 
-**1. AppPaths 工具类**（`org.chobit.epubra.app.support.AppPaths`）
+**1. AppPaths 工具类**（`org.chobit.epubra.app.support.platform.AppPaths`）
 - `userDataDir()` / `autosaveDir()` / `webviewCacheDir()`：统一路径入口
 - `redirectUserHome()`：把 `user.home` 改写到 `~/.Epubra/`，让 JavaFX native 缓存跟随
 - `migrateLegacyIfAny()`：一次性把旧 `<user.dir>/epubra-autosave` 与 `~/epubra-autosave` 下的 `.draft` 搬到新位置

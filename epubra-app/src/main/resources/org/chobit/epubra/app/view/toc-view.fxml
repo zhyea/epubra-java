@@ -19,7 +19,7 @@
       styleClass="side-view" spacing="6.0"
       minWidth="180.0"
       maxWidth="Infinity" maxHeight="Infinity"
-      fx:controller="org.chobit.epubra.app.controller.TocController">
+      fx:controller="org.chobit.epubra.app.controller.view.TocController">
     <padding>
         <Insets top="8.0" right="8.0" bottom="8.0" left="8.0"/>
     </padding>

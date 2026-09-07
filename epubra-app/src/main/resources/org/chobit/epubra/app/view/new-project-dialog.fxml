@@ -14,13 +14,13 @@
   「新建 EPUB 项目」对话框的内容视图。
 
   字段：工作空间目录 + 项目名 + 标题。
-  由 controller.org.chobit.epubra.app.NewProjectDialog.show(stage, initialWorkspace)
+  由 ui.dialog.NewProjectDialog.show(stage, initialWorkspace)
   加载并塞进 DialogPane 的 content。OK / Cancel 按钮由 DialogPane 自带，
   FXML 不重复声明——避免破坏 Dialog 的按钮布局。
 -->
 <VBox xmlns="http://javafx.com/javafx/24" xmlns:fx="http://javafx.com/fxml"
       spacing="14.0" prefWidth="520.0"
-      fx:controller="org.chobit.epubra.app.components.NewProjectDialogController">
+      fx:controller="org.chobit.epubra.app.ui.dialog.NewProjectDialogController">
     <padding>
         <Insets top="14.0" right="20.0" bottom="6.0" left="20.0"/>
     </padding>

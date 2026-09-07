@@ -26,7 +26,8 @@ epubra/
         │   ├── Launcher.java          启动引导类（非 Application 子类）
         │   ├── EpubraApp.java        Application 子类，装载主界面
         │   ├── controller/            MainController（主界面）
-        │   ├── components/            ChapterNode、ResourceRow、ValidationIssueRow、NewProjectDialog、NewProjectDialogController
+        │   ├── ui/dialog/            NewProjectDialog、NewProjectDialogController
+        │   └── ui/model/             ChapterNode、ResourceRow、ValidationIssueRow、NewProjectResult
         │   └── support/               BookHistory、TextSearch、Theme / ThemeManager / PreviewHtml、ValidationTexts
         └── resources/org/chobit/epubra/app/
             ├── view/main-window.fxml  主界面布局（活动栏 / 侧边栏 / 编辑区 / 底部面板 / 状态栏）

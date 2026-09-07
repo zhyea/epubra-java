@@ -17,7 +17,7 @@
       styleClass="side-view" spacing="6.0"
       visible="false" managed="false"
       maxWidth="Infinity" maxHeight="Infinity"
-      fx:controller="org.chobit.epubra.app.controller.ResourceController">
+      fx:controller="org.chobit.epubra.app.controller.view.ResourceController">
     <padding>
         <Insets top="8.0" right="8.0" bottom="8.0" left="8.0"/>
     </padding>

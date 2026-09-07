@@ -26,7 +26,7 @@
             styleClass="side-view" fitToWidth="true"
             visible="false" managed="false"
             maxWidth="Infinity" maxHeight="Infinity"
-            fx:controller="org.chobit.epubra.app.controller.MetadataViewController">
+            fx:controller="org.chobit.epubra.app.controller.view.MetadataViewController">
     <VBox spacing="10.0">
         <padding>
             <Insets top="10.0" right="10.0" bottom="10.0" left="10.0"/>
