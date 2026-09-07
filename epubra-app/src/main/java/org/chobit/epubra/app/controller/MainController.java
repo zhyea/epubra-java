@@ -1,6 +1,8 @@
 package org.chobit.epubra.app.controller;
 
 import org.chobit.epubra.app.EpubraApp;
+import org.chobit.epubra.app.activities.DocumentActivity;
+import org.chobit.epubra.app.activities.UndoActivity;
 import org.chobit.epubra.app.controller.layout.SidebarController;
 import org.chobit.epubra.app.controller.view.FindController;
 import org.chobit.epubra.app.controller.view.MetadataViewController;
@@ -8,17 +10,15 @@ import org.chobit.epubra.app.controller.view.ResourceController;
 import org.chobit.epubra.app.controller.view.TocController;
 import org.chobit.epubra.app.controller.view.ValidationController;
 import org.chobit.epubra.app.controller.view.WelcomePageController;
-import org.chobit.epubra.app.controller.workflow.DocumentController;
-import org.chobit.epubra.app.controller.workflow.UndoController;
 import org.chobit.epubra.app.ui.model.ChapterNode;
-import org.chobit.epubra.app.support.context.AppEventBus;
-import org.chobit.epubra.app.support.context.BookContext;
+import org.chobit.epubra.app.ui.support.context.AppEventBus;
+import org.chobit.epubra.app.ui.support.context.BookContext;
 import org.chobit.epubra.app.support.document.Autosave;
 import org.chobit.epubra.app.support.document.AutosaveConfig;
-import org.chobit.epubra.app.support.editor.PreviewHtml;
-import org.chobit.epubra.app.support.editor.TextSearch;
-import org.chobit.epubra.app.support.editor.Theme;
-import org.chobit.epubra.app.support.editor.ThemeManager;
+import org.chobit.epubra.app.ui.support.editor.PreviewHtml;
+import org.chobit.epubra.app.ui.support.editor.TextSearch;
+import org.chobit.epubra.app.ui.support.editor.Theme;
+import org.chobit.epubra.app.ui.support.editor.ThemeManager;
 import org.chobit.epubra.app.support.platform.AppPaths;
 import org.chobit.epubra.app.support.platform.AsyncTasks;
 import org.chobit.epubra.lib.domain.Book;
@@ -67,8 +67,7 @@ import java.util.Optional;
  * 主窗口控制器：目录浏览、章节编辑、元数据维护与 EPUB 存取。
  *
  * <p>本轮重构（Task S3a）：把原本散落的 30+ 业务字段全部下沉到 {@link BookContext}，
- * 本类保留纯 UI 与编排职责。后续 Sprint 将按职责进一步拆出 {@code UndoController}、
- * {@code DocumentController} 等子控制器。
+ * 本类保留纯 UI 与编排职责；文件流程、撤销流程等业务动作交给 activities 层。
  */
 public class MainController {
 
@@ -188,8 +187,8 @@ public class MainController {
     private final EpubReader reader = new EpubReader();
     private final EpubWriter writer = new EpubWriter();
     private final EpubValidator validator = new EpubValidator();
-    private UndoController undoController;
-    private DocumentController documentController;
+    private UndoActivity undoActivity;
+    private DocumentActivity documentActivity;
     private SidebarController sidebarController;
 
     /**
@@ -271,8 +270,8 @@ public class MainController {
                 return;
             }
             // 一段连续输入只在第一次击键时记录一次快照（此时 book 还是变更前的状态）
-            ensureUndoController();
-            undoController.onTextInput();
+            ensureUndoActivity();
+            undoActivity.onTextInput();
             markDirty();
         });
 
@@ -285,7 +284,7 @@ public class MainController {
         wireAutosave();
         wireFileDropWhenSceneReady();
 
-        ensureDocumentController();
+        ensureDocumentActivity();
         // 启动恢复扫描：必须在 newBook() 之前判断——否则新建的空书会覆盖 ctx，
         // findRecoverable(ctx) 看到的 currentFile 就是新建后的 null，找不到任何东西。
         promptRecoveryIfAny();
@@ -322,14 +321,14 @@ public class MainController {
 
     @FXML
     public void onNew() {
-        ensureDocumentController();
-        documentController.onNew();
+        ensureDocumentActivity();
+        documentActivity.onNew();
     }
 
     @FXML
     public void onOpen() {
-        ensureDocumentController();
-        documentController.onOpen();
+        ensureDocumentActivity();
+        documentActivity.onOpen();
     }
 
     /**
@@ -347,7 +346,7 @@ public class MainController {
 
     /**
      * 打开指定 .epub 的统一入口：确认丢弃未保存修改 → 清旧草稿 → 调
-     * {@code documentController.openFileAsync}（异步）→ 完成后由 AsyncTasks 的
+     * {@code documentActivity.openFileAsync}（异步）→ 完成后由 AsyncTasks 的
      * onSuccess 回调设置状态栏。
      *
      * <p>「最近」列表点击与文件拖放共用这一条路径，避免两处各写一遍确认与清理逻辑。
@@ -357,11 +356,11 @@ public class MainController {
             return;
         }
         Autosave.discardFor(ctx);
-        ensureDocumentController();
+        ensureDocumentActivity();
         // 走异步：拖放打开大文件不卡 UI；状态栏「正在打开 X」由 progressSink 自动展示。
-        // 失败 / 打开完成 由 DocumentController.openFileAsync 内的 onSuccess / onError
+        // 失败 / 打开完成 由 DocumentActivity.openFileAsync 内的 onSuccess / onError
         // 处理（写到 statusLabel 与 errorReporter），这里不再写 flashStatus。
-        documentController.openFileAsync(epub);
+        documentActivity.openFileAsync(epub);
     }
 
     /**
@@ -391,40 +390,40 @@ public class MainController {
 
     @FXML
     public void onSave() {
-        ensureDocumentController();
-        documentController.onSave();
+        ensureDocumentActivity();
+        documentActivity.onSave();
     }
 
     @FXML
     public void onSaveAs() {
-        ensureDocumentController();
-        documentController.onSaveAs();
+        ensureDocumentActivity();
+        documentActivity.onSaveAs();
     }
 
     @FXML
     public void onExit() {
-        ensureDocumentController();
-        documentController.onExit(ctx.stage()::close);
+        ensureDocumentActivity();
+        documentActivity.onExit(ctx.stage()::close);
     }
 
     @FXML
     public void onAbout() {
-        ensureDocumentController();
-        documentController.onAbout();
+        ensureDocumentActivity();
+        documentActivity.onAbout();
     }
 
-    private void ensureDocumentController() {
-        if (documentController == null) {
-            documentController = new DocumentController(ctx,
+    private void ensureDocumentActivity() {
+        if (documentActivity == null) {
+            documentActivity = new DocumentActivity(ctx,
                     this::setStatus,
                     this::confirmDiscardChanges,
-                    DocumentController.defaultDialogs(ctx.stage()),
+                    DocumentActivity.defaultDialogs(ctx.stage()),
                     progressSink(),
                     this::reportError);
         }
     }
 
-    /** 错误信息直接打到状态栏。复杂场景会让 DocumentController 触发 Alert，这里保持简洁。 */
+    /** 错误信息直接打到状态栏。复杂场景会让 DocumentActivity 触发 Alert，这里保持简洁。 */
     private void reportError(String message) {
         setStatus(message);
     }
@@ -433,14 +432,14 @@ public class MainController {
 
     @FXML
     public void onUndo() {
-        ensureUndoController();
-        undoController.undo();
+        ensureUndoActivity();
+        undoActivity.undo();
     }
 
     @FXML
     public void onRedo() {
-        ensureUndoController();
-        undoController.redo();
+        ensureUndoActivity();
+        undoActivity.redo();
     }
 
     /**
@@ -450,8 +449,8 @@ public class MainController {
      * 之后本次操作引起的界面文本变更不再重复计入历史。
      */
     private void beginChange() {
-        ensureUndoController();
-        undoController.beginChange();
+        ensureUndoActivity();
+        undoActivity.beginChange();
     }
 
     /**
@@ -461,19 +460,19 @@ public class MainController {
      * 元数据这类「界面文本本身就是变更内容」的操作必须反过来，否则快照里已经是新值。
      */
     private void recordBeforeChange() {
-        ensureUndoController();
-        undoController.recordBeforeChange();
+        ensureUndoActivity();
+        undoActivity.recordBeforeChange();
     }
 
     private void commitPendingEdits() {
-        ensureUndoController();
-        undoController.commitPendingEdits();
+        ensureUndoActivity();
+        undoActivity.commitPendingEdits();
     }
 
-    private void ensureUndoController() {
-        if (undoController == null) {
-            undoController = new UndoController(ctx, this::setStatus, this::clearValidationResults);
-            undoController.installFlushCallbacks(this::flushCurrentChapter, this::flushMetadata);
+    private void ensureUndoActivity() {
+        if (undoActivity == null) {
+            undoActivity = new UndoActivity(ctx, this::setStatus, this::clearValidationResults);
+            undoActivity.installFlushCallbacks(this::flushCurrentChapter, this::flushMetadata);
         }
     }
 
@@ -1002,7 +1001,7 @@ private void bindProblemsAccelerator() {
     // 校验全部委托给 ValidationController：MainController 只保留入口与回调钩子。
 
     /**
-     * 清空校验结果——{@link UndoController} 在撤销/重做、打开、新建时需要回调它。
+     * 清空校验结果——{@link UndoActivity} 在撤销/重做、打开、新建时需要回调它。
      */
     private void clearValidationResults() {
         bottomPanelController.clear();
@@ -1030,7 +1029,7 @@ private void bindProblemsAccelerator() {
 
     // 元数据面板的全部逻辑（表单读写 / 应用修改 / 撤销快照前的写回）已迁至
     // MetadataViewController，由 metadata-view.fxml 直接绑定；本类只在
-    // refreshAll / UndoController 的 flush 回调里调它的 loadIntoFields / flush。
+    // refreshAll / UndoActivity 的 flush 回调里调它的 loadIntoFields / flush。
 
     // ------------------------------------------------------------------ 查找 / 替换
 

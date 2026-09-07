@@ -1,8 +1,8 @@
 package org.chobit.epubra.app.controller.view;
 
 import org.chobit.epubra.app.ui.model.ChapterNode;
-import org.chobit.epubra.app.support.context.BookContext;
-import org.chobit.epubra.app.support.editor.TextSearch;
+import org.chobit.epubra.app.ui.support.context.BookContext;
+import org.chobit.epubra.app.ui.support.editor.TextSearch;
 import org.chobit.epubra.lib.domain.Resource;
 import org.chobit.epubra.lib.domain.TOCReference;
 import org.chobit.epubra.lib.domain.TocEditor;
@@ -55,7 +55,7 @@ public class TocController {
     private StatusSink status;
     private WarningSink warner;
 
-    /** 拖拽相关：onAction 操作（add/delete/move 等）走这里，UndoController 已在 MainController 持有。 */
+    /** 拖拽相关：onAction 操作（add/delete/move 等）走这里，UndoActivity 已在 MainController 持有。 */
     @FunctionalInterface
     public interface BookAction {
         void run();

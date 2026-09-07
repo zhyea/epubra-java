@@ -1,6 +1,6 @@
 package org.chobit.epubra.app.ui.model;
 
-import org.chobit.epubra.app.support.validation.ValidationTexts;
+import org.chobit.epubra.app.ui.support.validation.ValidationTexts;
 import org.chobit.epubra.lib.validation.Severity;
 import org.chobit.epubra.lib.validation.ValidationIssue;
 

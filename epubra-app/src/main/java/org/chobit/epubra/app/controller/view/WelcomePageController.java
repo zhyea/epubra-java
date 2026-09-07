@@ -1,7 +1,7 @@
 package org.chobit.epubra.app.controller.view;
 
-import org.chobit.epubra.app.support.context.AppEventBus;
-import org.chobit.epubra.app.support.context.BookContext;
+import org.chobit.epubra.app.ui.support.context.AppEventBus;
+import org.chobit.epubra.app.ui.support.context.BookContext;
 import org.chobit.epubra.app.support.workspace.RecentProjectsStore;
 import javafx.fxml.FXML;
 import javafx.scene.Node;

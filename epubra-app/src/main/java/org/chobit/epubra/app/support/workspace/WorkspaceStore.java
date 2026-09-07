@@ -19,7 +19,7 @@ import java.util.prefs.Preferences;
  * 新模型下项目概念消失，工作空间直接装 {@code *.draft}，因此只需要一条工作空间列表，
  * 外加一个「启动时直达哪个工作空间」的 {@code lastWorkspace} 键。
  *
- * <p>{@code RecentProjectsStore} 的整体删除安排在 P2（{@code DocumentController} 改完之后），
+ * <p>{@code RecentProjectsStore} 的整体删除安排在 P2（{@code DocumentActivity} 改完之后），
  * 本类先落地，两者可短暂共存。
  *
  * <h2>存储格式</h2>

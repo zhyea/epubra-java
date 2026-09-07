@@ -1,8 +1,8 @@
 package org.chobit.epubra.app.controller.view;
 
-import org.chobit.epubra.app.support.context.BookContext;
-import org.chobit.epubra.app.support.editor.FindOps;
-import org.chobit.epubra.app.support.editor.TextSearch;
+import org.chobit.epubra.app.ui.support.context.BookContext;
+import org.chobit.epubra.app.ui.support.editor.FindOps;
+import org.chobit.epubra.app.ui.support.editor.TextSearch;
 import org.chobit.epubra.lib.domain.Resource;
 import javafx.fxml.FXML;
 import javafx.scene.control.CheckBox;

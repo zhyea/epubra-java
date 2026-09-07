@@ -1,6 +1,6 @@
 package org.chobit.epubra.app.support.document;
 
-import org.chobit.epubra.app.support.context.BookContext;
+import org.chobit.epubra.app.ui.support.context.BookContext;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.BookFactory;
 import org.chobit.epubra.lib.domain.Metadata;

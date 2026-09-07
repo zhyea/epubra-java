@@ -1,6 +1,6 @@
 package org.chobit.epubra.app.support.document;
 
-import org.chobit.epubra.app.support.context.BookContext;
+import org.chobit.epubra.app.ui.support.context.BookContext;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.Metadata;
 import org.chobit.epubra.lib.io.EpubReader;
@@ -35,7 +35,7 @@ import java.util.stream.Stream;
  * <pre>
  *   MainController.initialize()                  → 启动恢复扫描 findRecoverable
  *   ContentAreaListener (textProperty)            → scheduleDebounce(5s)
- *   DocumentController.onSave / onSaveAs 成功      → discardFor + unmarkDraft
+ *   DocumentActivity.onSave / onSaveAs 成功      → discardFor + unmarkDraft
  * </pre>
  */
 public final class Autosave {

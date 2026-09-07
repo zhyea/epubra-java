@@ -1,16 +1,16 @@
 package org.chobit.epubra.app.controller.view;
 
-import org.chobit.epubra.app.support.context.BookContext;
-import org.chobit.epubra.app.support.resource.CoverImageInfo;
-import org.chobit.epubra.app.support.resource.CoverOps;
-import org.chobit.epubra.app.support.resource.CoverOps.CoverState;
-import org.chobit.epubra.app.support.editor.MetadataDraft;
-import org.chobit.epubra.app.support.editor.MetadataOps;
+import org.chobit.epubra.app.ui.support.context.BookContext;
+import org.chobit.epubra.app.ui.support.resource.CoverImageInfo;
+import org.chobit.epubra.app.ui.support.resource.CoverOps;
+import org.chobit.epubra.app.ui.support.resource.CoverOps.CoverState;
+import org.chobit.epubra.app.ui.support.editor.MetadataDraft;
+import org.chobit.epubra.app.ui.support.editor.MetadataOps;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.MediaTypes;
 import org.chobit.epubra.lib.domain.Metadata;
 import org.chobit.epubra.lib.domain.Resource;
-import org.chobit.epubra.app.support.resource.CoverImageInfo.Dimension;
+import org.chobit.epubra.app.ui.support.resource.CoverImageInfo.Dimension;
 import javafx.fxml.FXML;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
@@ -98,7 +98,7 @@ public class MetadataViewController {
      * 字段失焦即应用——把元数据的提交模型对齐正文的「输入即生效」。
      *
      * <p>原设计只有「应用修改」按钮一个提交入口，用户改了书名去点别的视图时输入还悬着，
-     * 没有任何「未提交」标记，实际生效时机取决于 UndoController 何时回调 flush，
+     * 没有任何「未提交」标记，实际生效时机取决于 UndoActivity 何时回调 flush，
      * 对用户不可见也不可控。
      *
      * <p>失焦应用前先做 {@link MetadataOps#isDirty} 变更判定：没改动就不拍快照，
@@ -195,7 +195,7 @@ public class MetadataViewController {
     }
 
     /**
-     * 把面板上的当前值写回 {@link Metadata}；撤销快照回放时由 UndoController 调用。
+     * 把面板上的当前值写回 {@link Metadata}；撤销快照回放时由 UndoActivity 调用。
      */
     public void flush() {
         MetadataOps.apply(ctx.book().metadata(), draftFromFields());

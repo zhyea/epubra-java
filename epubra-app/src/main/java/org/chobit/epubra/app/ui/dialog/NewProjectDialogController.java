@@ -27,8 +27,7 @@ import java.util.regex.Pattern;
  *   <li>标题（可选，留空回退为项目名）</li>
  * </ul>
  *
- * <p>OK 按钮按字段实时校验动态启用 / 禁用——避免用户在 {@link DocumentController#newProject}
- * 路径里才发现输入不合法。
+ * <p>OK 按钮按字段实时校验动态启用 / 禁用——避免用户在新建流程路径里才发现输入不合法。
  */
 public class NewProjectDialogController {
 
