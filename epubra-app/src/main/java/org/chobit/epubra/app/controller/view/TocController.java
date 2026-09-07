@@ -1,8 +1,8 @@
 package org.chobit.epubra.app.controller.view;
 
 import org.chobit.epubra.app.ui.model.ChapterNode;
-import org.chobit.epubra.app.ui.support.context.BookContext;
-import org.chobit.epubra.app.ui.support.editor.TextSearch;
+import org.chobit.epubra.app.support.context.BookContext;
+import org.chobit.epubra.app.support.editor.TextSearch;
 import org.chobit.epubra.lib.domain.Resource;
 import org.chobit.epubra.lib.domain.TOCReference;
 import org.chobit.epubra.lib.domain.TocEditor;

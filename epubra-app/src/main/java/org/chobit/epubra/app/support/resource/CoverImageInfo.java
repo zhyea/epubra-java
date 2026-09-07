@@ -1,4 +1,4 @@
-package org.chobit.epubra.app.ui.support.resource;
+package org.chobit.epubra.app.support.resource;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;

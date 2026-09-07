@@ -1,6 +1,7 @@
 package org.chobit.epubra.app.ui.support.resource;
 
-import org.chobit.epubra.app.ui.support.resource.CoverImageInfo.Dimension;
+import org.chobit.epubra.app.support.resource.CoverImageInfo;
+import org.chobit.epubra.app.support.resource.CoverImageInfo.Dimension;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;

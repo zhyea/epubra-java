@@ -1,4 +1,4 @@
-package org.chobit.epubra.app.ui.support.editor;
+package org.chobit.epubra.app.support.editor;
 
 /**
  * 应用主题。

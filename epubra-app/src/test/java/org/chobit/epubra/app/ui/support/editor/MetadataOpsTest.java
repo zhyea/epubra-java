@@ -1,5 +1,7 @@
 package org.chobit.epubra.app.ui.support.editor;
 
+import org.chobit.epubra.app.support.editor.MetadataDraft;
+import org.chobit.epubra.app.support.editor.MetadataOps;
 import org.chobit.epubra.lib.domain.Metadata;
 import org.junit.jupiter.api.Test;
 

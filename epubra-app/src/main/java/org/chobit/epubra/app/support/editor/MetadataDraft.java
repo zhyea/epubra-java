@@ -1,4 +1,4 @@
-package org.chobit.epubra.app.ui.support.editor;
+package org.chobit.epubra.app.support.editor;
 
 import org.chobit.epubra.lib.domain.Metadata;
 

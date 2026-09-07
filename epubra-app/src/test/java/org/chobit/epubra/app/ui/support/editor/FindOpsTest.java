@@ -1,5 +1,6 @@
 package org.chobit.epubra.app.ui.support.editor;
 
+import org.chobit.epubra.app.support.editor.FindOps;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

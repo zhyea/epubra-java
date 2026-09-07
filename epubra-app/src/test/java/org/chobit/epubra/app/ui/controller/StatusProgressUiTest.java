@@ -1,9 +1,9 @@
 package org.chobit.epubra.app.ui.controller;
 
 import org.chobit.epubra.app.controller.MainController;
-import org.chobit.epubra.app.ui.support.context.AppEventBus;
+import org.chobit.epubra.app.support.context.AppEventBus;
 import org.chobit.epubra.app.support.platform.AsyncTasks;
-import org.chobit.epubra.app.ui.support.context.BookContext;
+import org.chobit.epubra.app.support.context.BookContext;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.BookFactory;
 import javafx.application.Platform;

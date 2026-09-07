@@ -1,5 +1,6 @@
 package org.chobit.epubra.app.ui.support.editor;
 
+import org.chobit.epubra.app.support.editor.TextSearch;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

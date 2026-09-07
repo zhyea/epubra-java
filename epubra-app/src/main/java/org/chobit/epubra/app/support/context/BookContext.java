@@ -1,4 +1,4 @@
-package org.chobit.epubra.app.ui.support.context;
+package org.chobit.epubra.app.support.context;
 
 import org.chobit.epubra.app.EpubraLauncher;
 import org.chobit.epubra.app.support.document.AutosaveConfig;

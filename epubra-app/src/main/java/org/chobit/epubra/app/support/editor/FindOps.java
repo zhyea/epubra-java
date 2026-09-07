@@ -1,4 +1,4 @@
-package org.chobit.epubra.app.ui.support.editor;
+package org.chobit.epubra.app.support.editor;
 
 /**
  * 章节内查找的索引推进逻辑：含回卷（从结尾回到开头，或反向）。

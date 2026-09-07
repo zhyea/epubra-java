@@ -1,5 +1,6 @@
 package org.chobit.epubra.app.ui.support.validation;
 
+import org.chobit.epubra.app.support.validation.ValidationOps;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.BookFactory;
 import org.chobit.epubra.lib.domain.MediaTypes;

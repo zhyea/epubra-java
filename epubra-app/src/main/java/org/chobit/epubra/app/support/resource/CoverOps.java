@@ -1,4 +1,4 @@
-package org.chobit.epubra.app.ui.support.resource;
+package org.chobit.epubra.app.support.resource;
 
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.MediaTypes;

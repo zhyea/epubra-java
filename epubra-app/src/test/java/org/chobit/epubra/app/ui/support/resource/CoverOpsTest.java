@@ -1,6 +1,7 @@
 package org.chobit.epubra.app.ui.support.resource;
 
-import org.chobit.epubra.app.ui.support.resource.CoverOps.CoverState;
+import org.chobit.epubra.app.support.resource.CoverOps;
+import org.chobit.epubra.app.support.resource.CoverOps.CoverState;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.BookFactory;
 import org.chobit.epubra.lib.domain.MediaTypes;

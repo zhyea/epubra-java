@@ -1,4 +1,4 @@
-package org.chobit.epubra.app.ui.support.validation;
+package org.chobit.epubra.app.support.validation;
 
 import org.chobit.epubra.lib.validation.IssueGroup;
 import org.chobit.epubra.lib.validation.Severity;

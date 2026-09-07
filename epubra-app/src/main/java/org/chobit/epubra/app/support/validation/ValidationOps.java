@@ -1,4 +1,4 @@
-package org.chobit.epubra.app.ui.support.validation;
+package org.chobit.epubra.app.support.validation;
 
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.Resource;
