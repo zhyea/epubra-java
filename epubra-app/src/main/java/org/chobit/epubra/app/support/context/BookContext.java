@@ -28,7 +28,7 @@ import java.util.Map;
  * <h2>归类</h2>
  * <ul>
  *   <li><b>文档</b>：{@link #book()}、{@link #currentFile()}、{@link #dirty()}、{@link #currentNode()}、{@link #loading()}</li>
- *   <li><b>撤销栈</b>：{@link #history()}、{@link #editCaptured()}、{@link #editStepPause()}</li>
+ *   <li><b>撤销栈</b>：{@link #history()}、{@link #editCaptured()}、{@link #editStepIdle()}</li>
  *   <li><b>校验</b>：{@link #lastReport()}</li>
  *   <li><b>字数缓存</b>：{@link #wordCounts()}</li>
  *   <li><b>阶段</b>：{@link #stage()}</li>

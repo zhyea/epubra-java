@@ -30,6 +30,10 @@ public class EpubraApp extends Application {
         Scene scene = new Scene(root, 1240, 780);
         stage.setTitle(APP_NAME + " - EPUB 编辑器");
         stage.setScene(scene);
+        // 标题栏 X / Alt+F4 关闭请求：先释放总线订阅等资源，再放行默认关闭。
+        // 菜单「退出」（MainController.onExit）走 stage.close()，不一定经过这里，
+        // 那一路由 onExit 自行调用 controller.dispose()。
+        stage.setOnCloseRequest(e -> controller.dispose());
         stage.show();
     }
 

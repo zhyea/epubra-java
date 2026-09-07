@@ -10,6 +10,7 @@ import org.chobit.epubra.app.controller.view.ResourceController;
 import org.chobit.epubra.app.controller.view.TocController;
 import org.chobit.epubra.app.controller.view.ValidationController;
 import org.chobit.epubra.app.controller.view.WelcomePageController;
+import org.chobit.epubra.app.support.context.Unsubscriber;
 import org.chobit.epubra.app.ui.model.ChapterNode;
 import org.chobit.epubra.app.support.context.AppEventBus;
 import org.chobit.epubra.app.support.context.BookContext;
@@ -60,6 +61,7 @@ import javafx.util.Duration;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -77,7 +79,9 @@ public class MainController {
     private WebView previewView;
     @FXML
     private TabPane editorTabs;
-    /** 并排预览容器：与 editorTabs 互斥显示，二者共用 contentArea / previewView 两个节点。 */
+    /**
+     * 并排预览容器：与 editorTabs 互斥显示，二者共用 contentArea / previewView 两个节点。
+     */
     @FXML
     private SplitPane splitPreviewPane;
 
@@ -106,7 +110,9 @@ public class MainController {
      */
     @FXML
     private StackPane sidePanel;
-    /** 主区左右分栏：侧栏容器 + 编辑区。 */
+    /**
+     * 主区左右分栏：侧栏容器 + 编辑区。
+     */
     @FXML
     private SplitPane mainSplit;
     @FXML
@@ -146,7 +152,9 @@ public class MainController {
 
     @FXML
     private Label statusLabel;
-    /** 长操作进度条与标题标签——{@link AsyncTasks} 启动时显示、结束时自动隐藏。 */
+    /**
+     * 长操作进度条与标题标签——{@link AsyncTasks} 启动时显示、结束时自动隐藏。
+     */
     @FXML
     private ProgressBar statusProgressBar;
     @FXML
@@ -181,15 +189,21 @@ public class MainController {
     @FXML
     private RadioMenuItem themeSepiaItem;
 
-    /** 跨控制器共享状态：原本散落的字段全部下沉到这里。 */
+    /**
+     * 跨控制器共享状态：原本散落的字段全部下沉到这里。
+     */
     private final BookContext ctx = new BookContext();
 
-    private final EpubReader reader = new EpubReader();
-    private final EpubWriter writer = new EpubWriter();
     private final EpubValidator validator = new EpubValidator();
     private UndoActivity undoActivity;
     private DocumentActivity documentActivity;
     private SidebarController sidebarController;
+
+    /**
+     * 事件总线订阅句柄：{@link #subscribeAppEvents()} 注册，主窗口关闭时由 {@link #dispose()} 统一退订。
+     * 订阅期与主控制器一致（整个主窗口生命周期），必须长期持有、不能随方法返回被 close。
+     */
+    private final List<Unsubscriber> busSubscribers = new ArrayList<>();
 
     /**
      * 自动暂存的「停顿 N 秒后落盘」节流器。每次内容变更时调 {@link PauseTransition#playFromStart()}
@@ -200,10 +214,14 @@ public class MainController {
      */
     private PauseTransition autosaveDebounce;
 
-    /** 当前主题。initialize 时取自持久化配置，切换后预览区与整个界面同步换色。 */
+    /**
+     * 当前主题。initialize 时取自持久化配置，切换后预览区与整个界面同步换色。
+     */
     private Theme currentTheme = Theme.LIGHT;
 
-    /** 编辑区呈现模式：{@code false} = 内容与预览分标签，{@code true} = 左右并排对照。 */
+    /**
+     * 编辑区呈现模式：{@code false} = 内容与预览分标签，{@code true} = 左右并排对照。
+     */
     private boolean splitPreview = false;
 
     public void setStage(Stage stage) {
@@ -240,7 +258,7 @@ public class MainController {
                 this::onNew,
                 this::onOpen,
                 this::onOpenRecent,
-                () -> onExit());
+                this::onExit);
         // 订阅 BookLoadedEvent 自动收起欢迎页（新建 / 打开 / 自动暂存恢复 都触发）
         welcomePageController.subscribeVisibility(ctx);
 
@@ -298,20 +316,33 @@ public class MainController {
      * 全部从手动回调改为事件订阅。新增子控制器后只需追加订阅，不必改 MainController 主流程。
      */
     private void subscribeAppEvents() {
-        ctx.bus().subscribe(AppEventBus.BookLoadedEvent.class,
-                e -> refreshAll());
-        ctx.bus().subscribe(AppEventBus.BookRestoredEvent.class,
-                e -> refreshAll());
-        ctx.bus().subscribe(AppEventBus.BookSavedEvent.class,
-                e -> {
-                    updateTitleAndHistory();
-                    flashStatus("已保存");
-                });
-        ctx.bus().subscribe(AppEventBus.BookDirtyChangedEvent.class,
-                e -> updateTitleAndHistory());
+        AppEventBus bus = ctx.bus();
+        // 订阅句柄必须长期持有，不能用 try-with-resources —— 那会在方法返回时自动 close()，
+        // 等于「注册完立刻退订」，之后发布的事件全部收不到。
+        busSubscribers.add(bus.subscribe(AppEventBus.BookLoadedEvent.class, e -> refreshAll()));
+        busSubscribers.add(bus.subscribe(AppEventBus.BookSavedEvent.class, e -> {
+            updateTitleAndHistory();
+            flashStatus("已保存");
+        }));
+        busSubscribers.add(bus.subscribe(AppEventBus.BookDirtyChangedEvent.class, e -> updateTitleAndHistory()));
     }
 
-    /** 集中更新标题栏与撤销菜单可用态；保存与脏标记均触发同一组 UI 重画。 */
+    /**
+     * 主窗口关闭前的清理入口：统一退订本类与子控制器的总线订阅。
+     * 与 {@link WelcomePageController#dispose()} 同一约定，接线点建议放在
+     * {@code EpubraApp.start()} 里 stage 的关闭请求处。
+     */
+    public void dispose() {
+        for (Unsubscriber subscriber : busSubscribers) {
+            subscriber.close();
+        }
+        busSubscribers.clear();
+        welcomePageController.dispose();
+    }
+
+    /**
+     * 集中更新标题栏与撤销菜单可用态；保存与脏标记均触发同一组 UI 重画。
+     */
     private void updateTitleAndHistory() {
         updateTitle();
         updateHistoryControls();
@@ -403,7 +434,13 @@ public class MainController {
     @FXML
     public void onExit() {
         ensureDocumentActivity();
-        documentActivity.onExit(ctx.stage()::close);
+        // 菜单退出走 stage.close()，不依赖标题栏 X 的 onCloseRequest 路径，
+        // 确认无未保存更改后、关窗前显式释放订阅资源。dispose() 幂等，
+        // 若 stage.close() 也触发了 onCloseRequest，重复调用无副作用。
+        documentActivity.onExit(() -> {
+            dispose();
+            ctx.stage().close();
+        });
     }
 
     @FXML
@@ -423,7 +460,9 @@ public class MainController {
         }
     }
 
-    /** 错误信息直接打到状态栏。复杂场景会让 DocumentActivity 触发 Alert，这里保持简洁。 */
+    /**
+     * 错误信息直接打到状态栏。复杂场景会让 DocumentActivity 触发 Alert，这里保持简洁。
+     */
     private void reportError(String message) {
         setStatus(message);
     }
@@ -504,7 +543,6 @@ public class MainController {
     }
 
 
-
     @FXML
     public void onRefreshPreview() {
         flushCurrentChapter();
@@ -571,7 +609,9 @@ public class MainController {
         switchTheme(Theme.SEPIA);
     }
 
-    /** 切换主题：落盘偏好、换根节点样式类，并让预览区跟着换配色。 */
+    /**
+     * 切换主题：落盘偏好、换根节点样式类，并让预览区跟着换配色。
+     */
     private void switchTheme(Theme theme) {
         if (theme == currentTheme) {
             return;
@@ -611,7 +651,9 @@ public class MainController {
         });
     }
 
-    /** 让单选菜单项的选中态与当前主题一致；setSelected 不触发 onAction，不会递归。 */
+    /**
+     * 让单选菜单项的选中态与当前主题一致；setSelected 不触发 onAction，不会递归。
+     */
     private void selectThemeItem(Theme theme) {
         RadioMenuItem target = switch (theme) {
             case DARK -> themeDarkItem;
@@ -673,7 +715,9 @@ public class MainController {
         });
     }
 
-    /** 从拖放载体里挑第一个 .epub；没有则返回 null（此时不接受落点）。 */
+    /**
+     * 从拖放载体里挑第一个 .epub；没有则返回 null（此时不接受落点）。
+     */
     private static Path firstEpub(Dragboard board) {
         if (board == null || !board.hasFiles()) {
             return null;
@@ -809,7 +853,9 @@ public class MainController {
         updateAutosaveLabel();
     }
 
-    /** 标记为"已禁用"——配置文件说不存就不存，避免给用户错误预期。 */
+    /**
+     * 标记为"已禁用"——配置文件说不存就不存，避免给用户错误预期。
+     */
     private void markAutosaveDisabled() {
         if (autosaveStatusLabel == null) {
             return;
@@ -821,7 +867,9 @@ public class MainController {
         }
     }
 
-    /** 用户刚改了东西——重启节流计时，UI 先翻到"保存中"状态。 */
+    /**
+     * 用户刚改了东西——重启节流计时，UI 先翻到"保存中"状态。
+     */
     private void markAutosaveSaving() {
         if (autosaveStatusLabel == null) {
             return;
@@ -832,7 +880,9 @@ public class MainController {
         }
     }
 
-    /** 节流到点 → 刚写完盘 → 落回"空闲"样式。 */
+    /**
+     * 节流到点 → 刚写完盘 → 落回"空闲"样式。
+     */
     private void markAutosaveIdle() {
         if (autosaveStatusLabel == null) {
             return;
@@ -840,7 +890,9 @@ public class MainController {
         autosaveStatusLabel.getStyleClass().removeAll("status-autosave-saving", "status-autosave-off");
     }
 
-    /** 把"自动暂存 开 / 关 + 间隔 N 秒"展示到状态栏标签上。 */
+    /**
+     * 把"自动暂存 开 / 关 + 间隔 N 秒"展示到状态栏标签上。
+     */
     private void updateAutosaveLabel() {
         if (autosaveStatusLabel == null) {
             return;
@@ -918,18 +970,18 @@ public class MainController {
 
     // ------------------------------------------------------------------ 活动栏与侧边栏
 
-/**
- * 给「问题面板」菜单项挂上 Ctrl+` 快捷键。
- *
- * <p>放在 controller 而不是 FXML：{@code KeyCombination} 对反引号的解析在不同实现下并不可靠，
- * 直接用 {@link KeyCode#BACK_QUOTE} 构造最稳。
- */
-private void bindProblemsAccelerator() {
-    if (problemsItem != null) {
-        problemsItem.setAccelerator(
-                new KeyCodeCombination(KeyCode.BACK_QUOTE, KeyCombination.CONTROL_DOWN));
+    /**
+     * 给「问题面板」菜单项挂上 Ctrl+` 快捷键。
+     *
+     * <p>放在 controller 而不是 FXML：{@code KeyCombination} 对反引号的解析在不同实现下并不可靠，
+     * 直接用 {@link KeyCode#BACK_QUOTE} 构造最稳。
+     */
+    private void bindProblemsAccelerator() {
+        if (problemsItem != null) {
+            problemsItem.setAccelerator(
+                    new KeyCodeCombination(KeyCode.BACK_QUOTE, KeyCombination.CONTROL_DOWN));
+        }
     }
-}
 
     /**
      * 处理活动栏「目录 / 资源 / 元数据」三类侧边栏切换。
@@ -992,7 +1044,9 @@ private void bindProblemsAccelerator() {
         sidebarController.showProblems(bottomPanelController::run);
     }
 
-    /** 底部面板头上的关闭按钮。 */
+    /**
+     * 底部面板头上的关闭按钮。
+     */
     @FXML
     public void onHideProblems() {
         sidebarController.hideProblems();
@@ -1122,7 +1176,9 @@ private void bindProblemsAccelerator() {
         insertWrapTag("strong");
     }
 
-    /** {@link #onInsertBold()} 的斜体版，用 &lt;em&gt;。 */
+    /**
+     * {@link #onInsertBold()} 的斜体版，用 &lt;em&gt;。
+     */
     @FXML
     public void onInsertItalic() {
         insertWrapTag("em");
@@ -1200,7 +1256,9 @@ private void bindProblemsAccelerator() {
         resourceViewController.cleanupUnused();
     }
 
-    /** 刷新资源列表；nav 与 ncx 由写出流程自动维护，不展示给用户。委托 ResourceController。 */
+    /**
+     * 刷新资源列表；nav 与 ncx 由写出流程自动维护，不展示给用户。委托 ResourceController。
+     */
     private void refreshResources() {
         resourceViewController.refresh();
     }
@@ -1223,7 +1281,9 @@ private void bindProblemsAccelerator() {
         updateStatus();
     }
 
-    /** 目录树刷新转发；null 防护保留——bind 之前不会有刷新请求，但保持防御式。 */
+    /**
+     * 目录树刷新转发；null 防护保留——bind 之前不会有刷新请求，但保持防御式。
+     */
     private void refreshToc() {
         if (tocViewController != null) {
             tocViewController.refresh();
@@ -1253,7 +1313,9 @@ private void bindProblemsAccelerator() {
         updateStatus();
     }
 
-    /** 把当前章节资源的内容重新读回编辑器；用于内容被程序化修改后同步界面。 */
+    /**
+     * 把当前章节资源的内容重新读回编辑器；用于内容被程序化修改后同步界面。
+     */
     private void reloadEditor() {
         ChapterNode current = ctx.currentNode();
         if (current == null || current.resource() == null || contentArea.isDisabled()) {
@@ -1280,7 +1342,9 @@ private void bindProblemsAccelerator() {
                 "application/xhtml+xml");
     }
 
-    /** 把编辑器中的内容写回当前章节资源。 */
+    /**
+     * 把编辑器中的内容写回当前章节资源。
+     */
     private void flushCurrentChapter() {
         ChapterNode current = ctx.currentNode();
         if (current == null || current.resource() == null) {
@@ -1290,7 +1354,9 @@ private void bindProblemsAccelerator() {
         ctx.invalidateWordCounts();
     }
 
-    /** 撤销快照回放前把元数据面板的当前值写回书籍；实现已迁 MetadataViewController。 */
+    /**
+     * 撤销快照回放前把元数据面板的当前值写回书籍；实现已迁 MetadataViewController。
+     */
     private void flushMetadata() {
         metadataViewController.flush();
     }
@@ -1390,7 +1456,9 @@ private void bindProblemsAccelerator() {
         setVisibleManaged(warningStatusDivider, warn > 0);
     }
 
-    /** 状态栏分区显隐助手：visible 与 managed 必须同步，否则隐藏后仍占布局间距。 */
+    /**
+     * 状态栏分区显隐助手：visible 与 managed 必须同步，否则隐藏后仍占布局间距。
+     */
     private static void setVisibleManaged(Region node, boolean visible) {
         if (node == null) {
             return;

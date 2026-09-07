@@ -2,6 +2,7 @@ package org.chobit.epubra.app.controller.view;
 
 import org.chobit.epubra.app.support.context.AppEventBus;
 import org.chobit.epubra.app.support.context.BookContext;
+import org.chobit.epubra.app.support.context.Unsubscriber;
 import org.chobit.epubra.app.support.workspace.RecentProjectsStore;
 import javafx.fxml.FXML;
 import javafx.scene.Node;
@@ -34,7 +35,9 @@ import java.util.stream.Collectors;
  */
 public class WelcomePageController {
 
-    /** 最大展示的最近项目 / 工作空间条目数。 */
+    /**
+     * 最大展示的最近项目 / 工作空间条目数。
+     */
     private static final int MAX_RECENTS = 6;
 
     @FXML
@@ -59,7 +62,7 @@ public class WelcomePageController {
     private Consumer<Path> onOpenRecent;
     private Runnable onExit;
 
-    private AppEventBus.Unsubscriber bookLoadedUnsubscriber;
+    private Unsubscriber bookLoadedUnsubscriber;
 
     /**
      * 父控制器在 FXML 加载完成后注入回调：本类只负责把按钮事件转发出去。
@@ -107,7 +110,9 @@ public class WelcomePageController {
         }
     }
 
-    /** 重新扫描两个 Recent 列表，刷新到 UI。 */
+    /**
+     * 重新扫描两个 Recent 列表，刷新到 UI。
+     */
     public void rebuildRecents() {
         if (recentProjectsList == null || recentWorkspacesList == null) {
             return;
@@ -136,7 +141,9 @@ public class WelcomePageController {
         }
     }
 
-    /** 把路径转 Path，路径有问题（删除 / 非目录）一律返回 null——让 rebuildRecents 自然过滤。 */
+    /**
+     * 把路径转 Path，路径有问题（删除 / 非目录）一律返回 null——让 rebuildRecents 自然过滤。
+     */
     private Path tryPath(String s) {
         if (s == null || s.isBlank()) {
             return null;
@@ -201,7 +208,9 @@ public class WelcomePageController {
         welcomeRoot.setManaged(false);
     }
 
-    /** 显式展示欢迎页——为将来「关闭项目」场景预留。 */
+    /**
+     * 显式展示欢迎页——为将来「关闭项目」场景预留。
+     */
     public void show() {
         if (welcomeRoot == null) {
             return;
@@ -211,7 +220,9 @@ public class WelcomePageController {
         welcomeRoot.setManaged(true);
     }
 
-    /** 解绑——绑定过的 JavaFX 节点还在，但事件订阅已失效。MainController 关闭时调用。 */
+    /**
+     * 解绑——绑定过的 JavaFX 节点还在，但事件订阅已失效。MainController 关闭时调用。
+     */
     public void dispose() {
         if (bookLoadedUnsubscriber != null) {
             bookLoadedUnsubscriber.close();
@@ -219,7 +230,9 @@ public class WelcomePageController {
         }
     }
 
-    /** 给单元测试用：读最近面板的可见性状态。 */
+    /**
+     * 给单元测试用：读最近面板的可见性状态。
+     */
     public boolean isVisible() {
         return welcomeRoot != null && welcomeRoot.isVisible();
     }
