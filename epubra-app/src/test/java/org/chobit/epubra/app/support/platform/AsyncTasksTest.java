@@ -1,6 +1,7 @@
 package org.chobit.epubra.app.support.platform;
 
 import javafx.application.Platform;
+import org.chobit.epubra.app.ui.support.platform.AsyncTasks;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;

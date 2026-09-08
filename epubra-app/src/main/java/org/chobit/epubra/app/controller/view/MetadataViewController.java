@@ -23,6 +23,7 @@ import javafx.scene.image.ImageView;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
+import javafx.stage.Stage;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -80,6 +81,13 @@ public class MetadataViewController {
     private Runnable refreshAll;
     private Runnable refreshResources;
     private Consumer<String> setStatus;
+
+    /** 主窗口 stage（FileChooser 的 owner）。由 {@link #setStage} 在 FXML 加载后补发。 */
+    private Stage stage;
+
+    public void setStage(Stage stage) {
+        this.stage = stage;
+    }
 
     /** FXML 加载后由父控制器注入运行时依赖；必须在任何 onAction 触发前完成。 */
     public void bind(BookContext ctx, Runnable recordBeforeChange, Runnable markDirty,
@@ -332,7 +340,7 @@ public class MetadataViewController {
                 new FileChooser.ExtensionFilter("封面图片",
                         "*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.svg"),
                 new FileChooser.ExtensionFilter("所有文件", "*.*"));
-        File file = chooser.showOpenDialog(ctx.stage());
+        File file = chooser.showOpenDialog(stage);
         if (file == null) {
             return;
         }

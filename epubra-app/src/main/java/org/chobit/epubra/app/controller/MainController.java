@@ -192,6 +192,12 @@ public class MainController {
     /**
      * 跨控制器共享状态：原本散落的字段全部下沉到这里。
      */
+    /**
+     * 主窗口 stage。由 {@code EpubraApp} 在 FXML 加载完成后注入——晚于 {@link #initialize()}，
+     * 所以子控制器拿不到构造期参数，只能由 {@link #setStage(Stage)} 补发。
+     */
+    private Stage stage;
+
     private final BookContext ctx = new BookContext();
 
     private final EpubValidator validator = new EpubValidator();
@@ -225,7 +231,34 @@ public class MainController {
     private boolean splitPreview = false;
 
     public void setStage(Stage stage) {
-        ctx.setStage(stage);
+        this.stage = stage;
+        // 子控制器在 initialize 阶段已 bind 完，此时只能补发 stage
+        if (documentActivity != null) {
+            documentActivity.setStage(stage);
+        }
+        if (tocViewController != null) {
+            tocViewController.setStage(stage);
+        }
+        if (resourceViewController != null) {
+            resourceViewController.setStage(stage);
+        }
+        if (metadataViewController != null) {
+            metadataViewController.setStage(stage);
+        }
+    }
+
+    /**
+     * 当前章节属于<b>目录 UI 状态</b>，归 {@link TocController} 持有（BookContext 只管 Book 数据）。
+     * 这里包一层做 null 防御：FXML 注入完成前的早期调用返回 null 而不是 NPE。
+     */
+    private ChapterNode currentChapter() {
+        return tocViewController == null ? null : tocViewController.currentNode();
+    }
+
+    private void setCurrentChapter(ChapterNode node) {
+        if (tocViewController != null) {
+            tocViewController.setCurrentNode(node);
+        }
     }
 
     @FXML
@@ -439,7 +472,7 @@ public class MainController {
         // 若 stage.close() 也触发了 onCloseRequest，重复调用无副作用。
         documentActivity.onExit(() -> {
             dispose();
-            ctx.stage().close();
+            stage.close();
         });
     }
 
@@ -454,7 +487,7 @@ public class MainController {
             documentActivity = new DocumentActivity(ctx,
                     this::setStatus,
                     this::confirmDiscardChanges,
-                    DocumentActivity.defaultDialogs(ctx.stage()),
+                    DocumentActivity.defaultDialogs(stage),
                     progressSink(),
                     this::reportError);
         }
@@ -920,8 +953,8 @@ public class MainController {
         alert.setTitle("发现未保存的草稿");
         alert.setHeaderText("检测到上次未保存的修改");
         alert.setContentText("文件：" + file.getFileName() + "\n是否恢复该草稿？");
-        if (ctx.stage() != null) {
-            alert.initOwner(ctx.stage());
+        if (stage != null) {
+            alert.initOwner(stage);
         }
         ButtonType restoreBtn = new ButtonType("恢复草稿");
         ButtonType discardBtn = new ButtonType("丢弃");
@@ -957,7 +990,7 @@ public class MainController {
             } else {
                 ctx.setCurrentFile(null);
             }
-            ctx.setCurrentNode(null);
+            setCurrentChapter(null);
             ctx.setDirty(true);
             ctx.history().reset();
             ctx.setEditCaptured(false);
@@ -1295,7 +1328,7 @@ public class MainController {
             return;
         }
         flushCurrentChapter();
-        ctx.setCurrentNode(node);
+        setCurrentChapter(node);
         ctx.setLoading(true);
         try {
             if (node == null || node.resource() == null) {
@@ -1317,7 +1350,7 @@ public class MainController {
      * 把当前章节资源的内容重新读回编辑器；用于内容被程序化修改后同步界面。
      */
     private void reloadEditor() {
-        ChapterNode current = ctx.currentNode();
+        ChapterNode current = currentChapter();
         if (current == null || current.resource() == null || contentArea.isDisabled()) {
             return;
         }
@@ -1331,7 +1364,7 @@ public class MainController {
     }
 
     private void refreshPreview() {
-        ChapterNode current = ctx.currentNode();
+        ChapterNode current = currentChapter();
         if (current == null || current.resource() == null) {
             previewView.getEngine().loadContent(PreviewHtml.emptyDocument(currentTheme));
             return;
@@ -1346,7 +1379,7 @@ public class MainController {
      * 把编辑器中的内容写回当前章节资源。
      */
     private void flushCurrentChapter() {
-        ChapterNode current = ctx.currentNode();
+        ChapterNode current = currentChapter();
         if (current == null || current.resource() == null) {
             return;
         }
@@ -1375,7 +1408,7 @@ public class MainController {
         alert.setTitle(title);
         alert.setHeaderText(null);
         alert.setContentText(message);
-        alert.initOwner(ctx.stage());
+        alert.initOwner(stage);
         return alert.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK;
     }
 
@@ -1384,7 +1417,7 @@ public class MainController {
         alert.setTitle("提示");
         alert.setHeaderText(null);
         alert.setContentText(message);
-        alert.initOwner(ctx.stage());
+        alert.initOwner(stage);
         alert.showAndWait();
     }
 
@@ -1412,7 +1445,7 @@ public class MainController {
         }
         chapterStatusLabel.setText("章节 " + ctx.book().spineResources().size());
         wordStatusLabel.setText("字数 " + wordCount());
-        setChapterWordStatus(ctx.currentNode());
+        setChapterWordStatus(currentChapter());
         updateIssueCounters();
         updateHistoryControls();
         updateTitle();
@@ -1478,7 +1511,7 @@ public class MainController {
         if (ctx.book() == null) {
             return 0;
         }
-        Resource current = ctx.currentNode() == null ? null : ctx.currentNode().resource();
+        Resource current = currentChapter() == null ? null : currentChapter().resource();
         int total = 0;
         for (Resource chapter : ctx.book().spineResources()) {
             if (chapter == current && !contentArea.isDisabled()) {
@@ -1502,13 +1535,13 @@ public class MainController {
     }
 
     private void updateTitle() {
-        if (ctx.stage() == null) {
+        if (stage == null) {
             return;
         }
         String name = ctx.currentFile() == null ? "新书籍" : ctx.currentFile().getFileName().toString();
         // dirty 标记用 ● / ○（U+25CF / U+25CB）放在最前——比藏在末尾的 * 显著得多
         String marker = ctx.dirty() ? "\u25CF " : "\u25CB ";
-        ctx.stage().setTitle(marker + EpubraApp.APP_NAME + " - " + name);
+        stage.setTitle(marker + EpubraApp.APP_NAME + " - " + name);
     }
 
     private void showError(String title, String message, Exception e) {
@@ -1516,7 +1549,7 @@ public class MainController {
         alert.setTitle(title);
         alert.setHeaderText(message);
         alert.setContentText(e.getMessage());
-        alert.initOwner(ctx.stage());
+        alert.initOwner(stage);
         alert.showAndWait();
     }
 

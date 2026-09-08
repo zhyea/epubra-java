@@ -15,6 +15,7 @@ import javafx.scene.control.TabPane;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
 import javafx.stage.FileChooser;
+import javafx.stage.Stage;
 
 import java.io.File;
 import java.io.IOException;
@@ -60,6 +61,13 @@ public class ResourceController {
     private ErrorReporter showError;
     private AsyncTasks.ProgressController progress;
     private Supplier<ChapterNode> currentNodeProvider = () -> null;
+
+    /** 主窗口 stage（FileChooser 的 owner）。由 {@link #setStage} 在 FXML 加载后补发。 */
+    private Stage stage;
+
+    public void setStage(Stage stage) {
+        this.stage = stage;
+    }
 
     /** FXML 加载后由父控制器注入运行时依赖；必须在任何 onAction 触发前完成。 */
     public void bind(BookContext ctx, TabPane editorTabs, TextArea contentArea,
@@ -146,7 +154,7 @@ public class ResourceController {
                         "*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.svg",
                         "*.css", "*.ttf", "*.otf", "*.woff", "*.woff2"),
                 new FileChooser.ExtensionFilter("所有文件", "*.*"));
-        List<File> files = chooser.showOpenMultipleDialog(ctx.stage());
+        List<File> files = chooser.showOpenMultipleDialog(stage);
         if (files == null || files.isEmpty()) {
             return;
         }
@@ -216,7 +224,7 @@ public class ResourceController {
         FileChooser chooser = new FileChooser();
         chooser.setTitle("导出资源");
         chooser.setInitialFileName(row.getName());
-        File file = chooser.showSaveDialog(ctx.stage());
+        File file = chooser.showSaveDialog(stage);
         if (file == null) {
             return;
         }

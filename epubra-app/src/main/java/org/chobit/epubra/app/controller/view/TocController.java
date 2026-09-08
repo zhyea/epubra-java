@@ -90,6 +90,14 @@ public class TocController {
         return currentNode;
     }
 
+    /**
+     * 由父控制器（{@code MainController.showChapter}）写入当前章节。
+     * 与树选中监听互为兜底：选中监听覆盖「用户点树」，这里覆盖「程序切换章节」。
+     */
+    public void setCurrentNode(ChapterNode node) {
+        this.currentNode = node;
+    }
+
     public void setStage(Stage stage) {
         this.stage = stage;
     }
