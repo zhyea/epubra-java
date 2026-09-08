@@ -51,6 +51,9 @@
                         <MenuItem text="新建" onAction="#onNew" accelerator="Ctrl+N"/>
                         <MenuItem text="打开…" onAction="#onOpen" accelerator="Ctrl+O"/>
                         <SeparatorMenuItem/>
+                        <MenuItem text="打开工作空间…" onAction="#onOpenWorkspace"/>
+                        <Menu fx:id="recentWorkspaceMenu" text="打开最近工作空间"/>
+                        <SeparatorMenuItem/>
                         <MenuItem text="保存" onAction="#onSave" accelerator="Ctrl+S"/>
                         <MenuItem text="另存为…" onAction="#onSaveAs" accelerator="Ctrl+Shift+S"/>
                         <SeparatorMenuItem/>
@@ -121,7 +124,7 @@
     </top>
 
     <left>
-        <VBox styleClass="activity-bar" prefWidth="48.0" minWidth="48.0" maxWidth="48.0" spacing="2.0">
+        <VBox fx:id="activityBar" styleClass="activity-bar" prefWidth="48.0" minWidth="48.0" maxWidth="48.0" spacing="2.0">
             <padding>
                 <Insets top="6.0" right="0.0" bottom="6.0" left="0.0"/>
             </padding>
@@ -186,7 +189,7 @@
     <center>
         <StackPane styleClass="main-center">
             <children>
-                <!-- 常规编辑面板：无项目时也保留，但被 welcome-page 覆盖 -->
+                <!-- 常规编辑面板：无图书时也保留，但被 welcome-page 覆盖 -->
                 <VBox>
                     <SplitPane fx:id="mainSplit" dividerPositions="0.22" VBox.vgrow="ALWAYS">
                         <items>
@@ -253,14 +256,14 @@
                     <fx:include fx:id="findBar" source="find-bar.fxml"/>
                 </VBox>
 
-                <!-- 欢迎页：覆盖在所有编辑面板之上，无项目时显示，BookLoadedEvent 触发时收起 -->
+                <!-- 欢迎页：覆盖在所有编辑面板之上，无图书时显示，BookLoadedEvent 触发时收起 -->
                 <fx:include fx:id="welcomePage" source="welcome-page.fxml"/>
             </children>
         </StackPane>
     </center>
 
     <bottom>
-        <HBox styleClass="status-bar" spacing="8.0" alignment="CENTER_LEFT">
+        <HBox fx:id="statusBar" styleClass="status-bar" spacing="8.0" alignment="CENTER_LEFT">
             <padding>
                 <Insets top="6.0" right="10.0" bottom="6.0" left="12.0"/>
             </padding>

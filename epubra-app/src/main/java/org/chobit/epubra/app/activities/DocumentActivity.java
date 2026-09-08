@@ -1,27 +1,24 @@
 package org.chobit.epubra.app.activities;
 
 import org.chobit.epubra.app.EpubraApp;
-import org.chobit.epubra.app.ui.dialog.NewProjectDialog;
-import org.chobit.epubra.app.ui.model.NewProjectResult;
-import org.chobit.epubra.app.ui.support.platform.AsyncTasks;
-import org.chobit.epubra.app.support.context.AppEventBus;
-import org.chobit.epubra.app.support.document.Autosave;
-import org.chobit.epubra.app.support.context.BookContext;
-import org.chobit.epubra.app.support.document.ProjectLayout;
-import org.chobit.epubra.app.support.workspace.RecentProjectsStore;
-import org.chobit.epubra.app.support.workspace.WorkspaceStore;
+import org.chobit.epubra.app.ui.dialog.NewDraftDialog;
+import org.chobit.epubra.app.ui.model.NewDraftResult;
+import org.chobit.epubra.app.platform.AsyncTasks;
+import org.chobit.epubra.app.context.AppEventBus;
+import org.chobit.epubra.app.document.Autosave;
+import org.chobit.epubra.app.context.BookContext;
+import org.chobit.epubra.app.workspace.WorkspaceStore;
 import org.chobit.epubra.lib.domain.Book;
+import org.chobit.epubra.lib.domain.BookFactory;
 import org.chobit.epubra.lib.io.EpubReader;
 import org.chobit.epubra.lib.io.EpubWriter;
 import javafx.scene.control.Alert;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
-import org.chobit.epubra.lib.domain.BookFactory;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Optional;
 
 /**
@@ -30,11 +27,11 @@ import java.util.Optional;
  * <p>持有 {@link BookContext}，对外只暴露语义清晰的方法；主窗口控制器在
  * FXML 回调里直接转发，不做业务判断。
  *
- * <p>打开和新建项目这类可能耗时的文件 IO 走 {@link AsyncTasks} 后台执行：
+ * <p>打开和新建图书草稿这类可能耗时的文件 IO 走 {@link AsyncTasks} 后台执行：
  * <ul>
  *   <li>UI 入口（菜单 / 欢迎页 / 拖放）调 {@code openFileAsync} /
- *       {@code newProjectAsync}，立即返回不阻塞 FX 线程；</li>
- *   <li>同步版 {@code openFile(Path)} / {@code newProject(Path, String, String)} 保留，
+ *       {@code newDraftAsync}，立即返回不阻塞 FX 线程；</li>
+ *   <li>同步版 {@code openFile(Path)} / {@code newDraft(Path, String, String)} 保留，
  *       仅供单元测试与「拖放 → 直接打开」之类的原子路径调用，自身仍然阻塞；</li>
  *   <li>保存和另存为保持同步，确保写盘与当前文档状态更新在同一条调用链中完成。</li>
  * </ul>
@@ -92,33 +89,28 @@ public class DocumentActivity {
         if (!discarder.confirmDiscard()) {
             return;
         }
-        // IDEA 风格的新建：工作空间 + 项目名 + 标题，三项校验通过后才落盘
         Autosave.discardFor(ctx);
-        Path initialWorkspace = MostRecentWorkspace(); // may be null
-        Optional<NewProjectResult> picked = NewProjectDialog.show(stage, initialWorkspace);
+        Path initialWorkspace = resolveInitialWorkspace();
+        Optional<NewDraftResult> picked = NewDraftDialog.show(stage, initialWorkspace);
         if (picked.isEmpty()) {
-            status.setStatus("已取消新建项目");
+            status.setStatus("已取消新建图书");
             return;
         }
-        NewProjectResult res = picked.get();
-        newProjectAsync(res.workspace(), res.name(), res.title());
+        NewDraftResult res = picked.get();
+        newDraftAsync(res.workspace(), res.name(), res.title());
     }
 
     /** 取最近一次访问的工作空间目录；没有或目录不存在时返回 null。 */
-    private static Path MostRecentWorkspace() {
-        List<String> recents = RecentProjectsStore.workspaces();
-        if (recents.isEmpty()) {
-            return null;
-        }
-        Path candidate = Path.of(recents.get(0));
-        return java.nio.file.Files.isDirectory(candidate) ? candidate : null;
+    private static Path resolveInitialWorkspace() {
+        return WorkspaceStore.last()
+                .or(() -> WorkspaceStore.recentExisting().stream().findFirst())
+                .orElse(null);
     }
 
     public void onOpen() {
         if (!discarder.confirmDiscard()) {
             return;
         }
-        // 同 onNew：用户主动放弃当前 in-memory 内容时，一并清理其草稿
         Autosave.discardFor(ctx);
         File file = dialogs.showOpenDialog();
         if (file == null) {
@@ -154,7 +146,7 @@ public class DocumentActivity {
         Alert alert = new Alert(Alert.AlertType.INFORMATION);
         alert.setTitle("关于 " + EpubraApp.APP_NAME);
         alert.setHeaderText(EpubraApp.APP_NAME + " - EPUB 编辑器");
-        alert.setContentText("JavaFX 前端 + 项目内自维护的 epublib 内核\n支持 EPUB 2/3 的读取、编辑与写出。");
+        alert.setContentText("JavaFX 前端 + epublib 内核\n支持 EPUB 2/3 的读取、编辑与写出。");
         if (stage != null) {
             alert.initOwner(stage);
         }
@@ -168,11 +160,15 @@ public class DocumentActivity {
      * 完成后切回 FX 线程写入 ctx、广播事件。
      */
     public void openFileAsync(Path file) {
+        Path target = workingDraftTarget(file);
         AsyncTasks.runIo(
-                "正在打开 " + file.getFileName(),
+                "正在打开 " + draftDisplayName(target),
                 () -> reader.read(file),
                 progress,
-                opened -> applyOpenedBook(opened, file),
+                opened -> {
+                    applyLoadedBook(opened, target, "已打开 " + draftDisplayName(target));
+                    rememberWorkspaceOf(target);
+                },
                 err -> errorReporter.accept("打开失败：无法读取 " + file.getFileName() + "（" + err.getMessage() + "）")
         );
     }
@@ -242,65 +238,54 @@ public class DocumentActivity {
     private static void rememberWorkspaceOf(Path draftFile) {
         Path parent = draftFile.getParent();
         if (parent != null) {
-            WorkspaceStore.setLast(parent);
+            WorkspaceStore.add(parent);
         }
     }
 
     /**
-     * 异步创建新项目：后台线程跑 {@code ProjectLayout.createProjectScaffolding} +
-     * {@code ProjectLayout.createInitialEpub}；完成后切回 FX 线程写入 ctx。
+     * 异步创建新图书草稿：后台线程创建并写入 {@code *.draft}；完成后切回 FX 线程写入 ctx。
      */
-    public void newProjectAsync(Path workspace, String name, String title) {
-        Path projectDir = ProjectLayout.projectDir(workspace, name);
-        // 已在 FX 线程，磁盘检查与后续后台的 ProjectLayout.exists 检查存在小竞态窗口
-        // （用户在异步过程中手工建同名目录）；此处先在 FX 线程预检给出明确错误，
-        // ProjectLayout.createProjectScaffolding 自身还有兜底。
-        if (java.nio.file.Files.exists(projectDir)) {
-            errorReporter.accept("创建项目失败：项目目录已存在 " + projectDir);
+    public void newDraftAsync(Path workspace, String name, String title) {
+        Path draftFile = draftFile(workspace, name);
+        if (java.nio.file.Files.exists(draftFile)) {
+            errorReporter.accept("创建图书失败：文件已存在 " + draftFile);
             return;
         }
         final String finalTitle = title == null || title.isBlank() ? name : title;
         AsyncTasks.runIo(
-                "正在创建项目 " + name,
+                "正在创建图书 " + name,
                 () -> {
-                    ProjectLayout.createProjectScaffolding(workspace, name);
-                    return ProjectLayout.createInitialEpub(workspace, name, finalTitle);
+                    Book created = BookFactory.createEmpty(finalTitle);
+                    created.setSource(draftFile);
+                    new EpubWriter().write(created, draftFile);
+                    return created;
                 },
                 progress,
                 created -> {
-                    Path target = ProjectLayout.epubFile(workspace, name);
-                    applyLoadedBook(created, target, "已创建项目 " + projectDir.getFileName());
-                    RecentProjectsStore.addWorkspace(workspace.toString());
-                    RecentProjectsStore.addProject(target.toString());
-                    ProjectLayout.touchLastOpened(projectDir);
+                    applyLoadedBook(created, draftFile, "已创建图书 " + draftFile.getFileName());
+                    WorkspaceStore.add(workspace);
                 },
-                err -> errorReporter.accept("创建项目失败：" + err.getMessage())
+                err -> errorReporter.accept("创建图书失败：" + err.getMessage())
         );
     }
 
     /**
-     * FX 线程跑的回调：把 {@code openFileAsync} 读到的 book 落到 ctx。
+     * FX 线程跑的回调：把读取到的 book 落到 ctx。
      *
-     * <p>openFileAsync 与 newProjectAsync 都需要把当前 ctx 重置到新书上——
+     * <p>openFileAsync 与 newDraftAsync 都需要把当前 ctx 重置到新书上——
      * 抽出 {@code applyLoadedBook} 让两条路径用同一份语义，避免一处改了别处忘改。
      */
     private void applyLoadedBook(Book book, Path file, String statusMessage) {
         ctx.setBook(book);
         ctx.setCurrentFile(file);
+        if (book != null) {
+            book.setSource(file);
+        }
         ctx.setDirty(false);
         ctx.history().reset();
         ctx.setEditCaptured(false);
         ctx.bus().publish(new AppEventBus.BookLoadedEvent());
         status.setStatus(statusMessage);
-    }
-
-    /**
-     * {@link #openFileAsync} 成功后的 FX 线程回调。
-     * 拆成独立方法仅为保留「已打开 X」与「已创建项目 X」两条不同状态文案——共用
-     * {@link #applyLoadedBook} 的 ctx 重置逻辑。
-     */
-    private void applyOpenedBook(Book opened, Path file) {
-        applyLoadedBook(opened, file, "已打开 " + file.getFileName());
     }
 
     // ---- 编程入口：用于单元测试 / 其它控制器复用 ----
@@ -320,29 +305,29 @@ public class DocumentActivity {
      * <p>生产 UI 入口走 {@link #openFileAsync(Path)}；本方法不再被 {@code onOpen} 调。
      */
     public void openFile(Path file) throws IOException {
+        Path target = workingDraftTarget(file);
         Book opened = reader.read(file);
-        applyOpenedBook(opened, file);
+        applyLoadedBook(opened, target, "已打开 " + draftDisplayName(target));
+        rememberWorkspaceOf(target);
     }
 
     /**
-     * 同步创建项目：测试使用，FX 线程会被阻塞。生产 UI 入口走
-     * {@link #newProjectAsync(Path, String, String)}。
+     * 同步创建图书草稿：测试使用，FX 线程会被阻塞。生产 UI 入口走
+     * {@link #newDraftAsync(Path, String, String)}。
      *
      * @throws IOException 任何目录 / 文件 IO 失败
      */
-    public Path newProject(Path workspace, String name, String title) throws IOException {
-        Path projectDir = ProjectLayout.projectDir(workspace, name);
-        if (java.nio.file.Files.exists(projectDir)) {
-            throw new IOException("项目目录已存在: " + projectDir);
+    public Path newDraft(Path workspace, String name, String title) throws IOException {
+        Path draftFile = draftFile(workspace, name);
+        if (java.nio.file.Files.exists(draftFile)) {
+            throw new IOException("图书文件已存在: " + draftFile);
         }
-        ProjectLayout.createProjectScaffolding(workspace, name);
-        Book created = ProjectLayout.createInitialEpub(workspace, name, title);
-        Path target = ProjectLayout.epubFile(workspace, name);
-        applyLoadedBook(created, target, "已创建项目 " + projectDir.getFileName());
-        RecentProjectsStore.addWorkspace(workspace.toString());
-        RecentProjectsStore.addProject(target.toString());
-        ProjectLayout.touchLastOpened(projectDir);
-        return target;
+        Book created = BookFactory.createEmpty(title == null || title.isBlank() ? name : title);
+        created.setSource(draftFile);
+        new EpubWriter().write(created, draftFile);
+        applyLoadedBook(created, draftFile, "已创建图书 " + draftFile.getFileName());
+        WorkspaceStore.add(workspace);
+        return draftFile;
     }
 
     /** 同步保存到指定路径；保存期间阻塞当前 UI 调用，完成后再更新文档状态。 */
@@ -374,16 +359,18 @@ public class DocumentActivity {
             @Override
             public File showOpenDialog() {
                 FileChooser chooser = new FileChooser();
-                chooser.setTitle("打开 EPUB 文件");
-                chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("EPUB 文件", "*.epub"));
+                chooser.setTitle("打开图书草稿");
+                chooser.getExtensionFilters().addAll(
+                        new FileChooser.ExtensionFilter("图书草稿", "*.draft"),
+                        new FileChooser.ExtensionFilter("EPUB 文件", "*.epub"));
                 return chooser.showOpenDialog(stage);
             }
 
             @Override
             public File showSaveDialog(String initialName) {
                 FileChooser chooser = new FileChooser();
-                chooser.setTitle("保存 EPUB 文件");
-                chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("EPUB 文件", "*.epub"));
+                chooser.setTitle("保存图书草稿");
+                chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("图书草稿", "*.draft"));
                 chooser.setInitialFileName(initialName);
                 return chooser.showSaveDialog(stage);
             }
@@ -392,6 +379,32 @@ public class DocumentActivity {
 
     private String defaultFileName() {
         String title = ctx.book().metadata().firstTitle().isBlank() ? "新书籍" : ctx.book().metadata().firstTitle();
-        return title.replaceAll("[\\\\/:*?\"<>|]", "_") + ".epub";
+        return title.replaceAll("[\\\\/:*?\"<>|]", "_") + Autosave.DRAFT_SUFFIX;
+    }
+
+    private static Path draftFile(Path workspace, String name) {
+        if (workspace == null) {
+            throw new IllegalArgumentException("workspace is null");
+        }
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("draft name is empty");
+        }
+        return workspace.resolve(name + Autosave.DRAFT_SUFFIX);
+    }
+
+    private static Path workingDraftTarget(Path file) {
+        if (file == null) {
+            return null;
+        }
+        String fileName = file.getFileName() == null ? "" : file.getFileName().toString();
+        if (fileName.endsWith(Autosave.DRAFT_SUFFIX)) {
+            return file;
+        }
+        String stem = fileName.endsWith(".epub")
+                ? fileName.substring(0, fileName.length() - ".epub".length())
+                : Autosave.stripDraftSuffix(fileName);
+        Path parent = file.getParent();
+        Path targetName = Path.of(stem + Autosave.DRAFT_SUFFIX);
+        return parent == null ? targetName : parent.resolve(targetName);
     }
 }

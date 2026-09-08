@@ -1,106 +1,67 @@
 package org.chobit.epubra.app.controller.view;
 
-import org.chobit.epubra.app.support.context.AppEventBus;
-import org.chobit.epubra.app.support.context.BookContext;
-import org.chobit.epubra.app.support.context.Unsubscriber;
-import org.chobit.epubra.app.support.workspace.RecentProjectsStore;
+import org.chobit.epubra.app.context.AppEventBus;
+import org.chobit.epubra.app.context.BookContext;
+import org.chobit.epubra.app.context.Unsubscriber;
+import org.chobit.epubra.app.document.DraftDocument;
+import org.chobit.epubra.app.platform.AsyncTasks;
+import org.chobit.epubra.app.workspace.WorkspaceScanner;
+import org.chobit.epubra.app.workspace.WorkspaceStore;
+import org.chobit.epubra.lib.domain.Book;
+import org.chobit.epubra.lib.domain.Resource;
+import org.chobit.epubra.lib.io.EpubReader;
 import javafx.fxml.FXML;
 import javafx.scene.Node;
-import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.Tooltip;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.scene.input.MouseEvent;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 
-import java.nio.file.Files;
+import java.io.ByteArrayInputStream;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
-/**
- * 启动欢迎页：用户首次进入应用看到的就是这一屏——「新建项目」「打开 EPUB」「最近的项目」。
- *
- * <p>来源 {@code welcome-page.fxml}，由 main-window.fxml 以 {@code <fx:include fx:id="welcomePage"/>}
- * 引入，覆盖在编辑区之上。父控制器 {@code MainController} 在 {@code initialize()} 内
- * 调本类的 {@link #bind} 注入运行时依赖。
- *
- * <h2>可见性协议</h2>
- * <ul>
- *   <li>FXML 启动时 {@code visible="true"}——欢迎页就是初始视图</li>
- *   <li>{@link #subscribeVisibility} 订阅 {@link AppEventBus.BookLoadedEvent}——
- *       一旦有书载入就 hide，让位给正常的编辑面板</li>
- * </ul>
- *
- * <p>本类不实现 {@code initialize()}——所有 setup 在父控制器 bind 时按需触发。
- */
+/** 启动首页：展示当前工作空间中的图书书架。 */
 public class WelcomePageController {
 
-    /**
-     * 最大展示的最近项目 / 工作空间条目数。
-     */
-    private static final int MAX_RECENTS = 6;
+    private static final double COVER_WIDTH = 132;
+    private static final double COVER_HEIGHT = 190;
 
     @FXML
     private StackPane welcomeRoot;
     @FXML
-    private VBox welcomePane;
+    private Label workspaceTitle;
     @FXML
-    private Button newProjectBtn;
+    private Label workspaceHint;
     @FXML
-    private Button openFileBtn;
-    @FXML
-    private VBox recentProjectsList;
-    @FXML
-    private VBox recentWorkspacesList;
-    @FXML
-    private Label recentEmptyHint;
-    @FXML
-    private Node recentSection;
+    private FlowPane bookShelf;
 
-    private Runnable onNewProject;
-    private Runnable onOpenFile;
-    private Consumer<Path> onOpenRecent;
+    private Runnable onNewBook;
+    private Consumer<Path> onOpenBook;
     private Runnable onExit;
-
+    private Path currentWorkspace;
+    private long rebuildGeneration;
     private Unsubscriber bookLoadedUnsubscriber;
 
-    /**
-     * 父控制器在 FXML 加载完成后注入回调：本类只负责把按钮事件转发出去。
-     * 任何非 null 的回调都必须设置后再调用展示/隐藏/重画。
-     */
-    public void bind(Runnable onNewProject, Runnable onOpenFile,
-                     Consumer<Path> onOpenRecent, Runnable onExit) {
-        this.onNewProject = onNewProject;
-        this.onOpenFile = onOpenFile;
-        this.onOpenRecent = onOpenRecent;
+    public void bind(Runnable onNewBook, Consumer<Path> onOpenBook, Runnable onExit) {
+        this.onNewBook = onNewBook;
+        this.onOpenBook = onOpenBook;
         this.onExit = onExit;
-        rebuildRecents(); // bind 时刷一次，确保第一次显示就有最新数据
+        showWorkspace(resolveInitialWorkspace());
     }
 
-    /**
-     * 订阅 {@link AppEventBus.BookLoadedEvent} 自动收起欢迎页。只能在 JavaFX 应用
-     * 线程上调用——{@code ctx.bus()} 是线程安全的，但欢迎页根节点的可见性是 JavaFX 控件树状态。
-     */
     public void subscribeVisibility(BookContext ctx) {
         if (bookLoadedUnsubscriber != null) {
             bookLoadedUnsubscriber.close();
         }
-        bookLoadedUnsubscriber = ctx.bus().subscribe(AppEventBus.BookLoadedEvent.class,
-                e -> hide());
-    }
-
-    @FXML
-    private void onNewProjectAction() {
-        if (onNewProject != null) {
-            onNewProject.run();
-        }
-    }
-
-    @FXML
-    private void onOpenFileAction() {
-        if (onOpenFile != null) {
-            onOpenFile.run();
-        }
+        bookLoadedUnsubscriber = ctx.bus().subscribe(AppEventBus.BookLoadedEvent.class, e -> hide());
     }
 
     @FXML
@@ -110,96 +71,150 @@ public class WelcomePageController {
         }
     }
 
-    /**
-     * 重新扫描两个 Recent 列表，刷新到 UI。
-     */
-    public void rebuildRecents() {
-        if (recentProjectsList == null || recentWorkspacesList == null) {
+    public void showWorkspace(Path workspace) {
+        currentWorkspace = workspace;
+        rebuildBookshelf();
+    }
+
+    public Path currentWorkspace() {
+        return currentWorkspace;
+    }
+
+    private Path resolveInitialWorkspace() {
+        Optional<Path> last = WorkspaceStore.last();
+        if (last.isPresent()) {
+            return last.get();
+        }
+        return WorkspaceStore.recentExisting().stream().findFirst().orElse(null);
+    }
+
+    private void rebuildBookshelf() {
+        if (bookShelf == null) {
             return;
         }
-        // 列表与「无记录时显示提示」的互斥显示——任何一边有内容就隐藏提示
-        List<Path> projs = RecentProjectsStore.projects().stream()
-                .map(this::tryPath)
-                .filter(p -> p != null)
-                .limit(MAX_RECENTS)
-                .collect(Collectors.toList());
-        List<Path> workspaces = RecentProjectsStore.workspaces().stream()
-                .map(this::tryPath)
-                .filter(p -> p != null)
-                .limit(MAX_RECENTS)
-                .collect(Collectors.toList());
-        populate(recentProjectsList, projs, true);
-        populate(recentWorkspacesList, workspaces, false);
-        boolean anyEntry = !projs.isEmpty() || !workspaces.isEmpty();
-        if (recentEmptyHint != null) {
-            recentEmptyHint.setVisible(!anyEntry);
-            recentEmptyHint.setManaged(!anyEntry);
+        long generation = ++rebuildGeneration;
+        bookShelf.getChildren().clear();
+        bookShelf.getChildren().add(newBookCard());
+
+        if (workspaceTitle != null) {
+            workspaceTitle.setText(currentWorkspace == null
+                    ? "未选择工作空间"
+                    : displayName(currentWorkspace));
         }
-        if (recentSection != null) {
-            recentSection.setVisible(anyEntry);
-            recentSection.setManaged(anyEntry);
+        if (workspaceHint != null) {
+            workspaceHint.setText(currentWorkspace == null
+                    ? "请从“文件 → 打开最近工作空间”切换，或点击“+”新建图书"
+                    : "双击图书打开编辑器");
         }
+        if (currentWorkspace == null) {
+            return;
+        }
+
+        List<DraftDocument> documents = WorkspaceScanner.scan(currentWorkspace);
+        if (documents.isEmpty()) {
+            return;
+        }
+        AsyncTasks.runIo(
+                "正在加载书架",
+                () -> loadShelfBooks(documents),
+                AsyncTasks.NOOP_PROGRESS,
+                books -> {
+                    if (generation != rebuildGeneration || bookShelf == null) {
+                        return;
+                    }
+                    for (ShelfBook book : books) {
+                        bookShelf.getChildren().add(bookCard(book));
+                    }
+                },
+                ignored -> {
+                    // 书架是辅助展示，单本文档损坏时仍保留新建入口。
+                });
     }
 
-    /**
-     * 把路径转 Path，路径有问题（删除 / 非目录）一律返回 null——让 rebuildRecents 自然过滤。
-     */
-    private Path tryPath(String s) {
-        if (s == null || s.isBlank()) {
-            return null;
-        }
-        try {
-            return Path.of(s);
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    /**
-     * 用一组条目填充 VBox 列表；{@code isProject} 决定条目是项目（.epub）还是工作空间（目录），
-     * 影响点击行为与图标。
-     */
-    private void populate(VBox list, List<Path> paths, boolean isProject) {
-        list.getChildren().clear();
-        for (Path p : paths) {
-            Button btn = new Button();
-            // 标题行：文件名 / 工作空间根目录名
-            btn.setText(p.getFileName() == null ? p.toString() : p.getFileName().toString());
-            String fullPath = p.toString();
-            String hint;
-            if (isProject) {
-                hint = p.getParent() == null ? "" : p.getParent().toString();
-                btn.getStyleClass().add("welcome-recent-project");
-            } else {
-                hint = isExistingDir(p) ? "工作空间" : "（目录不存在）";
-                btn.getStyleClass().add("welcome-recent-workspace");
-            }
-            // 完整路径/状态作为提示
-            if (!hint.isBlank()) {
-                btn.setTooltip(new javafx.scene.control.Tooltip(fullPath + "\n" + hint));
-            }
-            btn.setOnAction(e -> {
-                if (onOpenRecent != null) {
-                    onOpenRecent.accept(p);
+    private List<ShelfBook> loadShelfBooks(List<DraftDocument> documents) {
+        EpubReader reader = new EpubReader();
+        List<ShelfBook> books = new ArrayList<>(documents.size());
+        for (DraftDocument document : documents) {
+            String title = document.displayTitle();
+            byte[] cover = null;
+            try {
+                Book loaded = reader.read(document.path());
+                if (loaded.metadata().firstTitle() != null
+                        && !loaded.metadata().firstTitle().isBlank()) {
+                    title = loaded.metadata().firstTitle();
                 }
-            });
-            btn.setMaxWidth(Double.MAX_VALUE);
-            list.getChildren().add(btn);
+                Resource coverResource = loaded.coverResource().orElse(null);
+                if (coverResource != null && coverResource.data().length > 0) {
+                    cover = coverResource.data();
+                }
+            } catch (Exception ignored) {
+                // 文件可能是尚未完成写入的草稿，仍以文件名展示卡片。
+            }
+            books.add(new ShelfBook(document.path(), title,
+                    document.relativeTimeText(java.time.Instant.now()), cover));
+        }
+        return books;
+    }
+
+    private Node newBookCard() {
+        StackPane cover = new StackPane(new Label("+"));
+        cover.getStyleClass().addAll("book-cover", "book-cover-placeholder", "new-book-plus");
+
+        Label title = new Label("新建图书");
+        title.getStyleClass().add("book-title");
+        VBox card = new VBox(7, cover, title);
+        card.getStyleClass().addAll("book-card", "new-book-card");
+        card.setOnMouseClicked(event -> {
+            if (onNewBook != null) {
+                onNewBook.run();
+            }
+            event.consume();
+        });
+        Tooltip.install(card, new Tooltip("新建图书"));
+        return card;
+    }
+
+    private Node bookCard(ShelfBook book) {
+        StackPane cover = new StackPane();
+        cover.getStyleClass().add("book-cover");
+        if (book.coverBytes() != null) {
+            Image image = new Image(new ByteArrayInputStream(book.coverBytes()),
+                    COVER_WIDTH, COVER_HEIGHT, true, true);
+            if (!image.isError()) {
+                ImageView imageView = new ImageView(image);
+                imageView.setFitWidth(COVER_WIDTH);
+                imageView.setFitHeight(COVER_HEIGHT);
+                imageView.setPreserveRatio(true);
+                cover.getChildren().add(imageView);
+            }
+        }
+        if (cover.getChildren().isEmpty()) {
+            Label placeholder = new Label("暂无封面");
+            placeholder.getStyleClass().add("book-cover-placeholder");
+            cover.getChildren().add(placeholder);
+        }
+
+        Label title = new Label(book.title());
+        title.setWrapText(true);
+        title.setMaxWidth(COVER_WIDTH + 12);
+        title.getStyleClass().add("book-title");
+        Label meta = new Label(book.relativeTime());
+        meta.getStyleClass().add("book-meta");
+
+        VBox card = new VBox(7, cover, title, meta);
+        card.getStyleClass().add("book-card");
+        card.setOnMouseClicked(event -> openBookOnDoubleClick(event, book.path()));
+        Tooltip.install(card, new Tooltip(book.path().toString()));
+        return card;
+    }
+
+    private void openBookOnDoubleClick(MouseEvent event, Path path) {
+        if (event.getClickCount() == 2 && onOpenBook != null) {
+            onOpenBook.accept(path);
+            event.consume();
         }
     }
 
-    private boolean isExistingDir(Path p) {
-        return Files.isDirectory(p);
-    }
-
-    /**
-     * 显式收起欢迎页。
-     *
-     * <p>必须作用于 {@code fx:include} 的<b>根节点</b>（welcomeRoot StackPane），
-     * 不能只藏内层 {@code welcomePane} VBox——JavaFX 的鼠标命中测试只认 visible：
-     * 根 StackPane 保持 visible 时，其透明区域（pickOnBounds=true）仍会拦截整个
-     * 编辑区的点击，表现为「打开书后左侧按钮 / 编辑区全部无效」。2026-09-06 修复。
-     */
     public void hide() {
         if (welcomeRoot == null) {
             return;
@@ -208,32 +223,34 @@ public class WelcomePageController {
         welcomeRoot.setManaged(false);
     }
 
-    /**
-     * 显式展示欢迎页——为将来「关闭项目」场景预留。
-     */
     public void show() {
         if (welcomeRoot == null) {
             return;
         }
-        rebuildRecents();
+        rebuildBookshelf();
         welcomeRoot.setVisible(true);
         welcomeRoot.setManaged(true);
     }
 
-    /**
-     * 解绑——绑定过的 JavaFX 节点还在，但事件订阅已失效。MainController 关闭时调用。
-     */
     public void dispose() {
+        rebuildGeneration++;
         if (bookLoadedUnsubscriber != null) {
             bookLoadedUnsubscriber.close();
             bookLoadedUnsubscriber = null;
         }
     }
 
-    /**
-     * 给单元测试用：读最近面板的可见性状态。
-     */
     public boolean isVisible() {
         return welcomeRoot != null && welcomeRoot.isVisible();
+    }
+
+    private static String displayName(Path path) {
+        if (path == null || path.getFileName() == null) {
+            return path == null ? "" : path.toString();
+        }
+        return path.getFileName().toString();
+    }
+
+    private record ShelfBook(Path path, String title, String relativeTime, byte[] coverBytes) {
     }
 }

@@ -1,7 +1,7 @@
 package org.chobit.epubra.app.activities;
 
-import org.chobit.epubra.app.support.context.AppEventBus.BookRestoredEvent;
-import org.chobit.epubra.app.support.context.BookContext;
+import org.chobit.epubra.app.context.AppEventBus.BookRestoredEvent;
+import org.chobit.epubra.app.context.BookContext;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.BookFactory;
 import org.junit.jupiter.api.Test;

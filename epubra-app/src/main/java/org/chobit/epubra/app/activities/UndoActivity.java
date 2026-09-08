@@ -1,8 +1,8 @@
 package org.chobit.epubra.app.activities;
 
-import org.chobit.epubra.app.support.context.BookContext;
-import org.chobit.epubra.app.support.document.BookHistory;
-import org.chobit.epubra.app.support.context.AppEventBus;
+import org.chobit.epubra.app.context.BookContext;
+import org.chobit.epubra.app.document.BookHistory;
+import org.chobit.epubra.app.context.AppEventBus;
 import org.chobit.epubra.lib.domain.Book;
 import javafx.animation.PauseTransition;
 import javafx.util.Duration;

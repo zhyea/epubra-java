@@ -1,11 +1,11 @@
 package org.chobit.epubra.app.activities;
 
-import org.chobit.epubra.app.ui.support.platform.AsyncTasks;
-import org.chobit.epubra.app.support.context.AppEventBus;
-import org.chobit.epubra.app.support.document.Autosave;
-import org.chobit.epubra.app.support.context.BookContext;
-import org.chobit.epubra.app.support.platform.PreferenceNodes;
-import org.chobit.epubra.app.support.workspace.WorkspaceStore;
+import org.chobit.epubra.app.platform.AsyncTasks;
+import org.chobit.epubra.app.context.AppEventBus;
+import org.chobit.epubra.app.document.Autosave;
+import org.chobit.epubra.app.context.BookContext;
+import org.chobit.epubra.app.platform.PreferenceNodes;
+import org.chobit.epubra.app.workspace.WorkspaceStore;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.BookFactory;
 import org.chobit.epubra.lib.io.EpubWriter;

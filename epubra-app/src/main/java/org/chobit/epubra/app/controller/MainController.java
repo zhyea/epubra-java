@@ -10,18 +10,19 @@ import org.chobit.epubra.app.controller.view.ResourceController;
 import org.chobit.epubra.app.controller.view.TocController;
 import org.chobit.epubra.app.controller.view.ValidationController;
 import org.chobit.epubra.app.controller.view.WelcomePageController;
-import org.chobit.epubra.app.support.context.Unsubscriber;
+import org.chobit.epubra.app.context.Unsubscriber;
 import org.chobit.epubra.app.ui.model.ChapterNode;
-import org.chobit.epubra.app.support.context.AppEventBus;
-import org.chobit.epubra.app.support.context.BookContext;
-import org.chobit.epubra.app.support.document.Autosave;
-import org.chobit.epubra.app.support.document.AutosaveConfig;
-import org.chobit.epubra.app.ui.support.editor.PreviewHtml;
-import org.chobit.epubra.app.support.editor.TextSearch;
-import org.chobit.epubra.app.ui.support.editor.Theme;
-import org.chobit.epubra.app.ui.support.editor.ThemeManager;
-import org.chobit.epubra.app.support.platform.AppPaths;
-import org.chobit.epubra.app.ui.support.platform.AsyncTasks;
+import org.chobit.epubra.app.context.AppEventBus;
+import org.chobit.epubra.app.context.BookContext;
+import org.chobit.epubra.app.document.Autosave;
+import org.chobit.epubra.app.document.AutosaveConfig;
+import org.chobit.epubra.app.editor.PreviewHtml;
+import org.chobit.epubra.app.editor.TextSearch;
+import org.chobit.epubra.app.editor.Theme;
+import org.chobit.epubra.app.editor.ThemeManager;
+import org.chobit.epubra.app.platform.AppPaths;
+import org.chobit.epubra.app.platform.AsyncTasks;
+import org.chobit.epubra.app.workspace.WorkspaceStore;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.Resource;
 import org.chobit.epubra.lib.io.EpubReader;
@@ -37,6 +38,7 @@ import javafx.scene.control.ButtonType;
 import javafx.scene.control.IndexRange;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.Menu;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.RadioMenuItem;
 import javafx.scene.control.ScrollPane;
@@ -56,6 +58,7 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
+import javafx.stage.DirectoryChooser;
 import javafx.util.Duration;
 
 import java.io.File;
@@ -188,6 +191,12 @@ public class MainController {
     private RadioMenuItem themeDarkItem;
     @FXML
     private RadioMenuItem themeSepiaItem;
+    @FXML
+    private Menu recentWorkspaceMenu;
+    @FXML
+    private VBox activityBar;
+    @FXML
+    private HBox statusBar;
 
     /**
      * 跨控制器共享状态：原本散落的字段全部下沉到这里。
@@ -245,6 +254,7 @@ public class MainController {
         if (metadataViewController != null) {
             metadataViewController.setStage(stage);
         }
+        refreshRecentWorkspaceMenu();
     }
 
     /**
@@ -289,8 +299,7 @@ public class MainController {
 
         welcomePageController.bind(
                 this::onNew,
-                this::onOpen,
-                this::onOpenRecent,
+                this::openDraft,
                 this::onExit);
         // 订阅 BookLoadedEvent 自动收起欢迎页（新建 / 打开 / 自动暂存恢复 都触发）
         welcomePageController.subscribeVisibility(ctx);
@@ -336,11 +345,13 @@ public class MainController {
         wireFileDropWhenSceneReady();
 
         ensureDocumentActivity();
+        setEditorChromeVisible(false);
+        refreshRecentWorkspaceMenu();
         // 启动恢复扫描：必须在 newBook() 之前判断——否则新建的空书会覆盖 ctx，
         // findRecoverable(ctx) 看到的 currentFile 就是新建后的 null，找不到任何东西。
         promptRecoveryIfAny();
-        // 故意不在这里 newBook()：启动后欢迎页是初始视图，用户从欢迎页挑一个动作（新建项目 /
-        // 打开 EPUB / 打开最近项目）才落到 ctx.book() 上，避免一开始就凭空创建一本书造成
+        // 故意不在这里 newBook()：启动后欢迎页是初始视图，用户从欢迎页挑一个动作（新建图书 /
+        // 打开图书 / 切换工作空间）才落到 ctx.book() 上，避免一开始就凭空创建一本书造成
         // 「自动暂存里多出一份不会有人认领的临时草稿」的窘境。
     }
 
@@ -352,7 +363,10 @@ public class MainController {
         AppEventBus bus = ctx.bus();
         // 订阅句柄必须长期持有，不能用 try-with-resources —— 那会在方法返回时自动 close()，
         // 等于「注册完立刻退订」，之后发布的事件全部收不到。
-        busSubscribers.add(bus.subscribe(AppEventBus.BookLoadedEvent.class, e -> refreshAll()));
+        busSubscribers.add(bus.subscribe(AppEventBus.BookLoadedEvent.class, e -> {
+            setEditorChromeVisible(true);
+            refreshAll();
+        }));
         busSubscribers.add(bus.subscribe(AppEventBus.BookSavedEvent.class, e -> {
             updateTitleAndHistory();
             flashStatus("已保存");
@@ -395,61 +409,96 @@ public class MainController {
         documentActivity.onOpen();
     }
 
-    /**
-     * 欢迎页「最近」列表入口：把目录或 .epub 路径解析成可打开的 .epub 后走标准 open 流程。
-     * 工作空间目录会取它下面的第一个 .epub；项目 .epub 直接走原路径。任一步失败都打 warn。
-     */
-    private void onOpenRecent(java.nio.file.Path path) {
-        java.nio.file.Path target = resolveOpenTarget(path);
-        if (target == null) {
-            warn("无法打开：" + path + "（文件不存在或目录下没有 .epub）");
-            return;
+    @FXML
+    public void onOpenWorkspace() {
+        DirectoryChooser chooser = new DirectoryChooser();
+        chooser.setTitle("打开工作空间");
+        if (stage != null && WorkspaceStore.last().isPresent()
+                && java.nio.file.Files.isDirectory(WorkspaceStore.last().orElseThrow())) {
+            chooser.setInitialDirectory(WorkspaceStore.last().orElseThrow().toFile());
         }
-        openPath(target);
+        File selected = chooser.showDialog(stage);
+        if (selected != null) {
+            switchWorkspace(selected.toPath());
+        }
     }
 
-    /**
-     * 打开指定 .epub 的统一入口：确认丢弃未保存修改 → 清旧草稿 → 调
-     * {@code documentActivity.openFileAsync}（异步）→ 完成后由 AsyncTasks 的
-     * onSuccess 回调设置状态栏。
-     *
-     * <p>「最近」列表点击与文件拖放共用这一条路径，避免两处各写一遍确认与清理逻辑。
-     */
-    private void openPath(java.nio.file.Path epub) {
+    private void refreshRecentWorkspaceMenu() {
+        if (recentWorkspaceMenu == null) {
+            return;
+        }
+        recentWorkspaceMenu.getItems().clear();
+        List<Path> recent = WorkspaceStore.recentExisting();
+        if (recent.isEmpty()) {
+            MenuItem empty = new MenuItem("暂无最近工作空间");
+            empty.setDisable(true);
+            recentWorkspaceMenu.getItems().add(empty);
+            return;
+        }
+        for (Path workspace : recent) {
+            MenuItem item = new MenuItem(workspaceDisplayName(workspace));
+            item.setOnAction(event -> switchWorkspace(workspace));
+            item.setMnemonicParsing(false);
+            recentWorkspaceMenu.getItems().add(item);
+        }
+    }
+
+    private void switchWorkspace(Path workspace) {
+        if (workspace == null || !java.nio.file.Files.isDirectory(workspace)) {
+            warn("工作空间不存在：" + workspace);
+            refreshRecentWorkspaceMenu();
+            return;
+        }
+        if (ctx.book() != null && !confirmDiscardChanges()) {
+            return;
+        }
+        if (ctx.book() != null) {
+            Autosave.discardFor(ctx);
+            ctx.setBook(null);
+            ctx.setCurrentFile(null);
+            ctx.resetForNewBook();
+            setCurrentChapter(null);
+        }
+        WorkspaceStore.add(workspace);
+        welcomePageController.showWorkspace(workspace);
+        welcomePageController.show();
+        setEditorChromeVisible(false);
+        refreshRecentWorkspaceMenu();
+    }
+
+    private void openDraft(Path draftFile) {
+        if (draftFile == null || !java.nio.file.Files.isRegularFile(draftFile)) {
+            warn("图书文件不存在：" + draftFile);
+            return;
+        }
         if (!confirmDiscardChanges()) {
             return;
         }
         Autosave.discardFor(ctx);
         ensureDocumentActivity();
-        // 走异步：拖放打开大文件不卡 UI；状态栏「正在打开 X」由 progressSink 自动展示。
-        // 失败 / 打开完成 由 DocumentActivity.openFileAsync 内的 onSuccess / onError
-        // 处理（写到 statusLabel 与 errorReporter），这里不再写 flashStatus。
-        documentActivity.openFileAsync(epub);
+        documentActivity.openDraftAsync(draftFile);
     }
 
-    /**
-     * 解析「最近」点击的真实目标：直接 .epub → 原路径；目录 → 第一个 .epub；都不匹配 → null。
-     * 仅做磁盘 I/O，最多重读一层浅目录。
-     */
-    private static java.nio.file.Path resolveOpenTarget(java.nio.file.Path path) {
-        if (path == null) {
-            return null;
+    /** 打开拖放进来的图书文件。 */
+    private void openPath(java.nio.file.Path file) {
+        if (!confirmDiscardChanges()) {
+            return;
         }
-        if (java.nio.file.Files.isRegularFile(path) && path.toString().toLowerCase().endsWith(".epub")) {
-            return path;
+        Autosave.discardFor(ctx);
+        ensureDocumentActivity();
+        documentActivity.openFileAsync(file);
+    }
+
+    private static String workspaceDisplayName(Path workspace) {
+        if (workspace == null || workspace.getFileName() == null) {
+            return workspace == null ? "" : workspace.toString();
         }
-        if (java.nio.file.Files.isDirectory(path)) {
-            try (java.util.stream.Stream<java.nio.file.Path> stream = java.nio.file.Files.list(path)) {
-                return stream
-                        .filter(java.nio.file.Files::isRegularFile)
-                        .filter(p -> p.getFileName().toString().toLowerCase().endsWith(".epub"))
-                        .min((a, b) -> a.getFileName().toString().compareTo(b.getFileName().toString()))
-                        .orElse(null);
-            } catch (java.io.IOException e) {
-                return null;
-            }
-        }
-        return null;
+        return workspace.getFileName().toString();
+    }
+
+    private void setEditorChromeVisible(boolean visible) {
+        setVisibleManaged(activityBar, visible);
+        setVisibleManaged(statusBar, visible);
     }
 
     @FXML
@@ -705,7 +754,7 @@ public class MainController {
     // ------------------------------------------------------------------ 文件拖放
 
     /**
-     * 装配「拖 .epub 到窗口即打开」，兑现欢迎页文案里「拖一个 .epub 文件到此处」的承诺。
+     * 装配「拖图书文件到窗口即打开」。
      *
      * <p>挂在 Scene 上而不是欢迎页节点上——欢迎页在载入书籍后就隐藏了，挂在那里之后
      * 再也收不到拖放事件；而拖放打开应该是全流程可用的能力，不限于起始页。
@@ -730,28 +779,26 @@ public class MainController {
 
     private void wireFileDropTo(Scene scene) {
         scene.setOnDragOver(event -> {
-            if (firstEpub(event.getDragboard()) != null) {
+            if (firstBookFile(event.getDragboard()) != null) {
                 event.acceptTransferModes(TransferMode.COPY);
             }
             event.consume();
         });
         scene.setOnDragDropped(event -> {
-            Path epub = firstEpub(event.getDragboard());
-            if (epub == null) {
+            Path file = firstBookFile(event.getDragboard());
+            if (file == null) {
                 event.setDropCompleted(false);
                 event.consume();
                 return;
             }
             event.setDropCompleted(true);
             event.consume();
-            openPath(epub);
+            openPath(file);
         });
     }
 
-    /**
-     * 从拖放载体里挑第一个 .epub；没有则返回 null（此时不接受落点）。
-     */
-    private static Path firstEpub(Dragboard board) {
+    /** 从拖放载体里挑第一个图书文件；没有则返回 null。 */
+    private static Path firstBookFile(Dragboard board) {
         if (board == null || !board.hasFiles()) {
             return null;
         }
@@ -760,7 +807,8 @@ public class MainController {
             return null;
         }
         for (File file : files) {
-            if (file.isFile() && file.getName().toLowerCase().endsWith(".epub")) {
+            String lower = file.getName().toLowerCase();
+            if (file.isFile() && (lower.endsWith(".draft") || lower.endsWith(".epub"))) {
                 return file.toPath();
             }
         }

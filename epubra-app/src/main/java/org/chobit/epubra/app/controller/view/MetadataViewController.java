@@ -1,16 +1,16 @@
 package org.chobit.epubra.app.controller.view;
 
-import org.chobit.epubra.app.support.context.BookContext;
-import org.chobit.epubra.app.support.resource.CoverImageInfo;
-import org.chobit.epubra.app.support.resource.CoverOps;
-import org.chobit.epubra.app.support.resource.CoverOps.CoverState;
-import org.chobit.epubra.app.support.editor.MetadataDraft;
-import org.chobit.epubra.app.support.editor.MetadataOps;
+import org.chobit.epubra.app.context.BookContext;
+import org.chobit.epubra.app.resource.CoverImageInfo;
+import org.chobit.epubra.app.resource.CoverOps;
+import org.chobit.epubra.app.resource.CoverOps.CoverState;
+import org.chobit.epubra.app.editor.MetadataDraft;
+import org.chobit.epubra.app.editor.MetadataOps;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.MediaTypes;
 import org.chobit.epubra.lib.domain.Metadata;
 import org.chobit.epubra.lib.domain.Resource;
-import org.chobit.epubra.app.support.resource.CoverImageInfo.Dimension;
+import org.chobit.epubra.app.resource.CoverImageInfo.Dimension;
 import javafx.fxml.FXML;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
