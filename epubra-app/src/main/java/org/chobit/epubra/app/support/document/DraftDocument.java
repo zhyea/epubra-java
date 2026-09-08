@@ -1,6 +1,6 @@
 package org.chobit.epubra.app.support.document;
 
-import org.chobit.epubra.app.support.platform.AsyncTasks;
+import org.chobit.epubra.app.ui.support.platform.AsyncTasks;
 import org.chobit.epubra.app.support.platform.RelativeTime;
 
 import java.nio.file.Path;

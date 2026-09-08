@@ -20,6 +20,7 @@ import javafx.scene.input.Dragboard;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.TransferMode;
+import javafx.stage.Stage;
 
 import java.util.Collections;
 import java.util.Optional;
@@ -66,6 +67,8 @@ public class TocController {
 
     /** 标记「当前变更需要进入撤销栈」。 */
     private BookAction beginChange;
+    private Stage stage;
+    private ChapterNode currentNode;
 
     /** 正在被拖拽的目录节点；dragDone 时清空。 */
     private TOCReference dragSource;
@@ -80,6 +83,22 @@ public class TocController {
 
     public void setOnChapterSelected(Consumer<ChapterNode> onChapterSelected) {
         this.onChapterSelected = onChapterSelected == null ? node -> {} : onChapterSelected;
+    }
+
+    /** 当前目录选中项属于目录 UI 状态，不放入 BookContext。 */
+    public ChapterNode currentNode() {
+        return currentNode;
+    }
+
+    public void setStage(Stage stage) {
+        this.stage = stage;
+    }
+
+    public void clearSelection() {
+        currentNode = null;
+        if (tocTree != null) {
+            tocTree.getSelectionModel().clearSelection();
+        }
     }
 
     /** 初始化 cell factory + 拖拽 + 选中监听；在 FXML 加载完成后调用。 */
@@ -102,7 +121,8 @@ public class TocController {
         attachKeyboardShortcuts();
         tocTree.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, selected) -> {
             if (!ctx.loading()) {
-                onChapterSelected.accept(selected == null ? null : selected.getValue());
+                currentNode = selected == null ? null : selected.getValue();
+                onChapterSelected.accept(currentNode);
             }
         });
     }
@@ -120,7 +140,7 @@ public class TocController {
     }
 
     public void onDeleteChapter() {
-        ChapterNode node = ctx.currentNode();
+        ChapterNode node = currentNode;
         if (node == null || node.resource() == null) {
             warner.warn("请先在目录中选择要删除的章节");
             return;
@@ -132,7 +152,7 @@ public class TocController {
         // 自己按「资源解析结果」删目录是删不掉的——资源一旦先移除，解析结果就变成 null 了。
         ctx.book().removeResource(target);
 
-        ctx.setCurrentNode(null);
+        currentNode = null;
         markDirty();
         refresh();
         status.setStatus("已删除章节：" + title);
@@ -166,7 +186,7 @@ public class TocController {
                 root.getChildren().add(buildTreeItem(reference));
             }
             root.setExpanded(true);
-            ChapterNode previous = ctx.currentNode();
+            ChapterNode previous = currentNode;
             tocTree.setRoot(root);
 
             toSelect = previous == null || previous.resource() == null
@@ -179,10 +199,10 @@ public class TocController {
         }
         if (toSelect != null) {
             tocTree.getSelectionModel().select(toSelect);
-            if (ctx.currentNode() == null) {
-                onChapterSelected.accept(toSelect.getValue());
-            }
+            currentNode = toSelect.getValue();
+            onChapterSelected.accept(currentNode);
         } else {
+            currentNode = null;
             onChapterSelected.accept(null);
         }
     }
@@ -235,8 +255,8 @@ public class TocController {
         dialog.setTitle("重命名章节");
         dialog.setHeaderText(null);
         dialog.setContentText("章节标题：");
-        if (ctx.stage() != null) {
-            dialog.initOwner(ctx.stage());
+        if (stage != null) {
+            dialog.initOwner(stage);
         }
         Optional<String> result = dialog.showAndWait();
         if (result.isEmpty()) {
@@ -279,7 +299,7 @@ public class TocController {
      * 所在的兄弟列表里交换，顶层与嵌套层级行为一致。
      */
     private void moveChapter(int delta) {
-        ChapterNode node = ctx.currentNode();
+        ChapterNode node = currentNode;
         if (node == null || node.reference() == null) {
             warner.warn("请先在目录中选择要移动的章节");
             return;
@@ -450,7 +470,7 @@ public class TocController {
     /**
      * 给每个单元格挂一个 ContextMenu：添加 / 重命名 / 上移 / 下移 / 删除。
      *
-     * <p>关键细节：右键时先把单元格选中——若不预先选中，菜单操作的 {@code ctx.currentNode()}
+     * <p>关键细节：右键时先把单元格选中——若不预先选中，菜单操作的当前目录节点
      * 仍是旧选中节点，会出现「右键 B 实际删 A」的错位。JavaFX 的 MenuItem 没有「目标参数」
      * 概念，最简单的修正是先 select 再弹菜单。
      *

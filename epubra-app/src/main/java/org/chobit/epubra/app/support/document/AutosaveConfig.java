@@ -1,6 +1,6 @@
 package org.chobit.epubra.app.support.document;
 
-import org.chobit.epubra.app.support.editor.ThemeManager;
+import org.chobit.epubra.app.ui.support.editor.ThemeManager;
 import org.chobit.epubra.app.support.platform.PreferenceNodes;
 import org.chobit.epubra.app.support.platform.PreferencesMigrator;
 

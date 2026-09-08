@@ -2,7 +2,7 @@ package org.chobit.epubra.app.activities;
 
 import org.chobit.epubra.app.support.context.AppEventBus.BookLoadedEvent;
 import org.chobit.epubra.app.support.context.AppEventBus.BookSavedEvent;
-import org.chobit.epubra.app.support.platform.AsyncTasks;
+import org.chobit.epubra.app.ui.support.platform.AsyncTasks;
 import org.chobit.epubra.app.support.context.BookContext;
 import org.chobit.epubra.app.support.document.ProjectLayout;
 import org.chobit.epubra.app.support.workspace.RecentProjectsStore;

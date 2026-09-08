@@ -1,6 +1,6 @@
 package org.chobit.epubra.app.activities;
 
-import org.chobit.epubra.app.support.platform.AsyncTasks;
+import org.chobit.epubra.app.ui.support.platform.AsyncTasks;
 import org.chobit.epubra.app.support.context.AppEventBus;
 import org.chobit.epubra.app.support.document.Autosave;
 import org.chobit.epubra.app.support.context.BookContext;

@@ -2,7 +2,7 @@ package org.chobit.epubra.app.controller.view;
 
 import org.chobit.epubra.app.controller.layout.SidebarController;
 import org.chobit.epubra.app.ui.model.ValidationIssueRow;
-import org.chobit.epubra.app.support.platform.AsyncTasks;
+import org.chobit.epubra.app.ui.support.platform.AsyncTasks;
 import org.chobit.epubra.app.support.context.BookContext;
 import org.chobit.epubra.app.support.editor.TextSearch;
 import org.chobit.epubra.app.support.context.AppEventBus;

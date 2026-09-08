@@ -2,7 +2,7 @@ package org.chobit.epubra.app.controller.view;
 
 import org.chobit.epubra.app.ui.model.ChapterNode;
 import org.chobit.epubra.app.ui.model.ResourceRow;
-import org.chobit.epubra.app.support.platform.AsyncTasks;
+import org.chobit.epubra.app.ui.support.platform.AsyncTasks;
 import org.chobit.epubra.app.support.context.BookContext;
 import org.chobit.epubra.app.support.resource.CoverOps;
 import org.chobit.epubra.app.support.resource.ResourceOps;
@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * 资源面板控制器——导入 / 导出 / 删除 / 设为封面 / 插入图片正文 / 清理未引用资源。
@@ -58,6 +59,7 @@ public class ResourceController {
     private BooleanSupplier confirm;
     private ErrorReporter showError;
     private AsyncTasks.ProgressController progress;
+    private Supplier<ChapterNode> currentNodeProvider = () -> null;
 
     /** FXML 加载后由父控制器注入运行时依赖；必须在任何 onAction 触发前完成。 */
     public void bind(BookContext ctx, TabPane editorTabs, TextArea contentArea,
@@ -83,6 +85,10 @@ public class ResourceController {
         this.showError = showError;
         this.progress = progress;
         wireCoverButtonRefresh();
+    }
+
+    public void setCurrentNodeProvider(Supplier<ChapterNode> currentNodeProvider) {
+        this.currentNodeProvider = currentNodeProvider == null ? () -> null : currentNodeProvider;
     }
 
     /**
@@ -285,7 +291,7 @@ public class ResourceController {
             warn.accept("只能向正文插入图片资源");
             return;
         }
-        ChapterNode current = ctx.currentNode();
+        ChapterNode current = currentNodeProvider.get();
         if (current == null || current.resource() == null) {
             warn.accept("请先在左侧目录中选择要插入图片的章节");
             return;

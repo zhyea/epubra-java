@@ -1,4 +1,4 @@
-package org.chobit.epubra.app.support.platform;
+package org.chobit.epubra.app.ui.support.platform;
 
 import javafx.application.Platform;
 import javafx.concurrent.Task;

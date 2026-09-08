@@ -4,11 +4,9 @@ import org.chobit.epubra.app.EpubraLauncher;
 import org.chobit.epubra.app.support.document.AutosaveConfig;
 import org.chobit.epubra.app.support.document.BookHistory;
 import org.chobit.epubra.app.support.platform.AppPaths;
-import org.chobit.epubra.app.ui.model.ChapterNode;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.Resource;
 import org.chobit.epubra.lib.validation.ValidationReport;
-import javafx.stage.Stage;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -27,11 +25,10 @@ import java.util.Map;
  *
  * <h2>归类</h2>
  * <ul>
- *   <li><b>文档</b>：{@link #book()}、{@link #currentFile()}、{@link #dirty()}、{@link #currentNode()}、{@link #loading()}</li>
+ *   <li><b>文档</b>：{@link #book()}、{@link #currentFile()}、{@link #dirty()}、{@link #loading()}</li>
  *   <li><b>撤销栈</b>：{@link #history()}、{@link #editCaptured()}、{@link #editStepIdle()}</li>
  *   <li><b>校验</b>：{@link #lastReport()}</li>
  *   <li><b>字数缓存</b>：{@link #wordCounts()}</li>
- *   <li><b>阶段</b>：{@link #stage()}</li>
  * </ul>
  */
 public final class BookContext {
@@ -48,7 +45,6 @@ public final class BookContext {
     // ---- 文档 ----
     private Book book;
     private Path currentFile;
-    private ChapterNode currentNode;
     private boolean dirty;
     private boolean loading;
 
@@ -61,9 +57,6 @@ public final class BookContext {
 
     // ---- 字数缓存 ----
     private final Map<Resource, Integer> wordCounts = new IdentityHashMap<>();
-
-    // ---- 阶段 ----
-    private Stage stage;
 
     // ---- 自动暂存配置（autosave.enabled / autosave.debounceSeconds / autosave.dir）----
     private AutosaveConfig autosaveConfig;
@@ -90,14 +83,6 @@ public final class BookContext {
 
     public void setCurrentFile(Path currentFile) {
         this.currentFile = currentFile;
-    }
-
-    public ChapterNode currentNode() {
-        return currentNode;
-    }
-
-    public void setCurrentNode(ChapterNode currentNode) {
-        this.currentNode = currentNode;
     }
 
     public boolean dirty() {
@@ -154,16 +139,6 @@ public final class BookContext {
     /** 清空字数缓存：换书 / 章节内容被程序化改写后调用。 */
     public void invalidateWordCounts() {
         wordCounts.clear();
-    }
-
-    // ---- 阶段 ----
-
-    public Stage stage() {
-        return stage;
-    }
-
-    public void setStage(Stage stage) {
-        this.stage = stage;
     }
 
     // ---- 自动暂存 ----
@@ -229,13 +204,12 @@ public final class BookContext {
 
     /**
      * 换书前调用：清掉撤销栈、字数缓存、当前节点、校验结果。
-     * 不动 {@link #stage()}（窗口跨书复用）。
+     * UI 控制器持有的窗口和当前目录选中项不属于这里的文档状态，因此不在此重置。
      */
     public void resetForNewBook() {
         history.reset();
         editCaptured = false;
         wordCounts.clear();
-        currentNode = null;
         lastReport = ValidationReport.EMPTY;
         dirty = false;
     }

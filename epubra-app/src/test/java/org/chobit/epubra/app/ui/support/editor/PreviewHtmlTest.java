@@ -1,7 +1,7 @@
 package org.chobit.epubra.app.ui.support.editor;
 
-import org.chobit.epubra.app.support.editor.PreviewHtml;
-import org.chobit.epubra.app.support.editor.Theme;
+import org.chobit.epubra.app.ui.support.editor.PreviewHtml;
+import org.chobit.epubra.app.ui.support.editor.Theme;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

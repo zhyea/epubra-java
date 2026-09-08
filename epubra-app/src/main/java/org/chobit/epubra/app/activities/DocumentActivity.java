@@ -3,7 +3,7 @@ package org.chobit.epubra.app.activities;
 import org.chobit.epubra.app.EpubraApp;
 import org.chobit.epubra.app.ui.dialog.NewProjectDialog;
 import org.chobit.epubra.app.ui.model.NewProjectResult;
-import org.chobit.epubra.app.support.platform.AsyncTasks;
+import org.chobit.epubra.app.ui.support.platform.AsyncTasks;
 import org.chobit.epubra.app.support.context.AppEventBus;
 import org.chobit.epubra.app.support.document.Autosave;
 import org.chobit.epubra.app.support.context.BookContext;
@@ -15,6 +15,7 @@ import org.chobit.epubra.lib.io.EpubReader;
 import org.chobit.epubra.lib.io.EpubWriter;
 import javafx.scene.control.Alert;
 import javafx.stage.FileChooser;
+import javafx.stage.Stage;
 import org.chobit.epubra.lib.domain.BookFactory;
 
 import java.io.File;
@@ -66,6 +67,7 @@ public class DocumentActivity {
     private final AsyncTasks.ProgressController progress;
     private final FileChooserOpener dialogs;
     private final java.util.function.Consumer<String> errorReporter;
+    private Stage stage;
 
     public DocumentActivity(BookContext ctx, StatusSink status, DiscardConfirmation discarder,
                             FileChooserOpener dialogs,
@@ -79,6 +81,11 @@ public class DocumentActivity {
         this.errorReporter = errorReporter;
     }
 
+    /** 由前端 controller 注入窗口 owner；窗口不属于 BookContext。 */
+    public void setStage(Stage stage) {
+        this.stage = stage;
+    }
+
     // ---- FXML 入口（异步版本：B1 落地） ----
 
     public void onNew() {
@@ -88,7 +95,7 @@ public class DocumentActivity {
         // IDEA 风格的新建：工作空间 + 项目名 + 标题，三项校验通过后才落盘
         Autosave.discardFor(ctx);
         Path initialWorkspace = MostRecentWorkspace(); // may be null
-        Optional<NewProjectResult> picked = NewProjectDialog.show(ctx.stage(), initialWorkspace);
+        Optional<NewProjectResult> picked = NewProjectDialog.show(stage, initialWorkspace);
         if (picked.isEmpty()) {
             status.setStatus("已取消新建项目");
             return;
@@ -148,8 +155,8 @@ public class DocumentActivity {
         alert.setTitle("关于 " + EpubraApp.APP_NAME);
         alert.setHeaderText(EpubraApp.APP_NAME + " - EPUB 编辑器");
         alert.setContentText("JavaFX 前端 + 项目内自维护的 epublib 内核\n支持 EPUB 2/3 的读取、编辑与写出。");
-        if (ctx.stage() != null) {
-            alert.initOwner(ctx.stage());
+        if (stage != null) {
+            alert.initOwner(stage);
         }
         alert.showAndWait();
     }
@@ -280,7 +287,6 @@ public class DocumentActivity {
     private void applyLoadedBook(Book book, Path file, String statusMessage) {
         ctx.setBook(book);
         ctx.setCurrentFile(file);
-        ctx.setCurrentNode(null);
         ctx.setDirty(false);
         ctx.history().reset();
         ctx.setEditCaptured(false);
@@ -303,7 +309,6 @@ public class DocumentActivity {
         Book fresh = BookFactory.createEmpty("新书籍");
         ctx.setBook(fresh);
         ctx.setCurrentFile(null);
-        ctx.setCurrentNode(null);
         ctx.resetForNewBook();
         ctx.bus().publish(new AppEventBus.BookLoadedEvent());
         status.setStatus("已新建空白书籍");

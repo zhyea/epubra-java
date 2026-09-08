@@ -1,4 +1,4 @@
-package org.chobit.epubra.app.support.editor;
+package org.chobit.epubra.app.ui.support.editor;
 
 /**
  * 给预览用的章节 XHTML 注入主题样式。

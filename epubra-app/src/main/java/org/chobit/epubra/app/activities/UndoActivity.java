@@ -146,12 +146,11 @@ public class UndoActivity {
      * 把一个快照还原成当前书。
      *
      * <p>{@link BookHistory} 已重新构造 Book 实例，原先引用都不再有效，必须把
-     * {@code ctx.book} / {@code ctx.currentNode} / {@code ctx.dirty} 一起更新。
+     * {@code ctx.book} / {@code ctx.dirty} 一起更新；目录选中项由 UI controller 自己清理。
      */
     public void restore(BookHistory.Snapshot snapshot, String message) {
         ctx.setBook(snapshot.book());
         ctx.book().setSource(ctx.currentFile());
-        ctx.setCurrentNode(null);
         ctx.setDirty(snapshot.dirty());
         ctx.setEditCaptured(false);
         ctx.bus().publish(new AppEventBus.BookRestoredEvent());
