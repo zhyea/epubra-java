@@ -2,6 +2,7 @@
 
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ChoiceBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.TextField?>
 <?import javafx.scene.layout.ColumnConstraints?>
@@ -17,7 +18,7 @@
         <Insets top="14.0" right="20.0" bottom="6.0" left="20.0"/>
     </padding>
 
-    <Label text="在选定工作空间下创建 MyBook.draft"
+    <Label text="新建空白图书，或导入 EPUB / TXT，编辑态统一保存为 .draft"
            styleClass="muted-label" wrapText="true"/>
 
     <GridPane hgap="10.0" vgap="10.0">
@@ -33,13 +34,23 @@
         <Button fx:id="browseWorkspaceBtn" text="浏览…" styleClass="flat-button"
                 onAction="#onBrowseWorkspace" GridPane.rowIndex="0" GridPane.columnIndex="2"/>
 
-        <Label text="文件名" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
-        <TextField fx:id="nameField" promptText="作为 .draft 文件名主干"
-                   GridPane.rowIndex="1" GridPane.columnIndex="1" GridPane.columnSpan="2"/>
+        <Label text="操作" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+        <ChoiceBox fx:id="modeChoice" maxWidth="Infinity" GridPane.rowIndex="1"
+                   GridPane.columnIndex="1" GridPane.columnSpan="2"/>
 
-        <Label text="标题" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+        <Label fx:id="sourceLabel" text="导入文件" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+        <TextField fx:id="sourceField" promptText="选择 .epub 或 .txt 文件" GridPane.rowIndex="2"
+                   GridPane.columnIndex="1" HBox.hgrow="ALWAYS"/>
+        <Button fx:id="browseSourceBtn" text="浏览…" styleClass="flat-button"
+                onAction="#onBrowseSource" GridPane.rowIndex="2" GridPane.columnIndex="2"/>
+
+        <Label text="文件名" GridPane.rowIndex="3" GridPane.columnIndex="0"/>
+        <TextField fx:id="nameField" promptText="作为 .draft 文件名主干"
+                   GridPane.rowIndex="3" GridPane.columnIndex="1" GridPane.columnSpan="2"/>
+
+        <Label text="标题" GridPane.rowIndex="4" GridPane.columnIndex="0"/>
         <TextField fx:id="titleField" promptText="留空则与文件名相同"
-                   GridPane.rowIndex="2" GridPane.columnIndex="1" GridPane.columnSpan="2"/>
+                   GridPane.rowIndex="4" GridPane.columnIndex="1" GridPane.columnSpan="2"/>
     </GridPane>
 
     <Label fx:id="errorLabel" styleClass="dialog-error" wrapText="true"

@@ -679,6 +679,83 @@
     -fx-background-color: -epubra-pressed-bg;
 }
 
+/* 首页书架：真实封面与默认封面保持固定尺寸，避免异步加载时卡片跳动。 */
+.book-shelf {
+    -fx-padding: 12 4 24 4;
+}
+
+.book-card {
+    -fx-alignment: TOP_CENTER;
+    -fx-cursor: hand;
+    -fx-padding: 4;
+}
+
+.book-card:hover {
+    -fx-background-color: -epubra-hover-bg;
+    -fx-background-radius: 4;
+}
+
+.book-cover {
+    -fx-background-color: -epubra-panel-bg;
+    -fx-border-color: -epubra-border-input;
+    -fx-border-width: 1;
+    -fx-border-radius: 3;
+    -fx-background-radius: 3;
+}
+
+.book-cover-placeholder {
+    -fx-alignment: CENTER;
+}
+
+.new-book-plus {
+    -fx-background-color: -epubra-control-bg;
+    -fx-border-color: -epubra-accent;
+    -fx-border-style: dashed;
+}
+
+.new-book-plus > .label {
+    -fx-font-size: 32px;
+    -fx-text-fill: -epubra-accent;
+}
+
+.default-book-cover-content {
+    -fx-alignment: CENTER;
+    -fx-padding: 16 12 14 12;
+}
+
+.default-book-cover-mark {
+    -fx-background-color: -epubra-accent;
+    -fx-background-radius: 2;
+    -fx-padding: 4 8 4 8;
+    -fx-text-fill: -epubra-on-accent-fg;
+    -fx-font-size: 10px;
+    -fx-font-weight: bold;
+}
+
+.default-book-cover-title {
+    -fx-text-fill: -epubra-fg;
+    -fx-font-size: 15px;
+    -fx-font-weight: bold;
+    -fx-text-alignment: CENTER;
+}
+
+.default-book-cover-caption {
+    -fx-text-fill: -epubra-muted-fg;
+    -fx-font-size: 11px;
+}
+
+.book-title {
+    -fx-text-fill: -epubra-fg;
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+    -fx-text-alignment: CENTER;
+}
+
+.book-meta {
+    -fx-text-fill: -epubra-muted-fg;
+    -fx-font-size: 11px;
+}
+
 /* ---------------------------------------------------------------- 对话框错误 */
 .dialog-error {
     -fx-text-fill: -epubra-error-fg;

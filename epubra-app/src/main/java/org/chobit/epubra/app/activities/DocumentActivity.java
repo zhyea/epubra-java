@@ -1,6 +1,7 @@
 package org.chobit.epubra.app.activities;
 
 import org.chobit.epubra.app.EpubraApp;
+import org.chobit.epubra.app.components.TextChapterImporter;
 import org.chobit.epubra.app.ui.dialog.NewDraftDialog;
 import org.chobit.epubra.app.ui.model.NewDraftResult;
 import org.chobit.epubra.app.platform.AsyncTasks;
@@ -18,6 +19,13 @@ import javafx.stage.Stage;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 
@@ -97,7 +105,11 @@ public class DocumentActivity {
             return;
         }
         NewDraftResult res = picked.get();
-        newDraftAsync(res.workspace(), res.name(), res.title());
+        if (res.mode() == NewDraftResult.Mode.EMPTY) {
+            newDraftAsync(res.workspace(), res.name(), res.title());
+        } else {
+            importDraftAsync(res.workspace(), res.name(), res.title(), res.mode(), res.source());
+        }
     }
 
     /** 取最近一次访问的工作空间目录；没有或目录不存在时返回 null。 */
@@ -163,7 +175,7 @@ public class DocumentActivity {
         Path target = workingDraftTarget(file);
         AsyncTasks.runIo(
                 "正在打开 " + draftDisplayName(target),
-                () -> reader.read(file),
+                () -> readIntoDraft(file, target),
                 progress,
                 opened -> {
                     applyLoadedBook(opened, target, "已打开 " + draftDisplayName(target));
@@ -306,9 +318,150 @@ public class DocumentActivity {
      */
     public void openFile(Path file) throws IOException {
         Path target = workingDraftTarget(file);
-        Book opened = reader.read(file);
+        Book opened = readIntoDraft(file, target);
         applyLoadedBook(opened, target, "已打开 " + draftDisplayName(target));
         rememberWorkspaceOf(target);
+    }
+
+    /**
+     * 异步导入 EPUB 或 TXT，并把编辑中的副本统一写成工作空间下的 {@code .draft}。
+     */
+    public void importDraftAsync(Path workspace, String name, String title,
+                                 NewDraftResult.Mode mode, Path source) {
+        Path draftFile;
+        try {
+            draftFile = draftFile(workspace, name);
+        } catch (RuntimeException e) {
+            errorReporter.accept("导入图书失败：" + e.getMessage());
+            return;
+        }
+        if (source == null || mode == null || mode == NewDraftResult.Mode.EMPTY) {
+            errorReporter.accept("导入图书失败：导入方式或源文件为空");
+            return;
+        }
+        if (Files.exists(draftFile)) {
+            errorReporter.accept("导入图书失败：文件已存在 " + draftFile);
+            return;
+        }
+        AsyncTasks.runIo(
+                "正在导入 " + source.getFileName(),
+                () -> importToDraft(mode, source, title, draftFile),
+                progress,
+                imported -> {
+                    applyLoadedBook(imported, draftFile, "已导入图书 " + draftFile.getFileName());
+                    WorkspaceStore.add(workspace);
+                },
+                err -> errorReporter.accept("导入图书失败：" + messageOf(err))
+        );
+    }
+
+    /** 同步导入入口，供非 UI 调用和测试使用。 */
+    public Path importDraft(Path workspace, String name, String title,
+                            NewDraftResult.Mode mode, Path source) throws IOException {
+        Path draftFile = draftFile(workspace, name);
+        if (Files.exists(draftFile)) {
+            throw new IOException("图书文件已存在: " + draftFile);
+        }
+        Book imported = importToDraft(mode, source, title, draftFile);
+        applyLoadedBook(imported, draftFile, "已导入图书 " + draftFile.getFileName());
+        WorkspaceStore.add(workspace);
+        return draftFile;
+    }
+
+    private Book importToDraft(NewDraftResult.Mode mode, Path source,
+                               String title, Path draftFile) throws IOException {
+        if (mode == NewDraftResult.Mode.EPUB) {
+            Book imported = reader.read(source);
+            imported.setSource(draftFile);
+            writer.write(imported, draftFile);
+            return imported;
+        }
+        if (mode == NewDraftResult.Mode.TXT) {
+            String text = readText(source);
+            String finalTitle = title == null || title.isBlank()
+                    ? fileStem(source) : title.trim();
+            Book imported = bookFromText(finalTitle, text);
+            imported.setSource(draftFile);
+            writer.write(imported, draftFile);
+            return imported;
+        }
+        throw new IOException("不支持的导入方式: " + mode);
+    }
+
+    /** 读取 EPUB，并在源文件不是 .draft 时先落一份编辑副本。 */
+    private Book readIntoDraft(Path source, Path target) throws IOException {
+        if (isTextFile(source)) {
+            String text = readText(source);
+            Book imported = bookFromText(fileStem(source), text);
+            imported.setSource(target);
+            writer.write(imported, target);
+            return imported;
+        }
+        Book opened = reader.read(source);
+        if (!source.toAbsolutePath().normalize().equals(target.toAbsolutePath().normalize())) {
+            opened.setSource(target);
+            writer.write(opened, target);
+        }
+        return opened;
+    }
+
+    private static String readText(Path source) throws IOException {
+        byte[] data = Files.readAllBytes(source);
+        if (data.length >= 3
+                && (data[0] & 0xFF) == 0xEF
+                && (data[1] & 0xFF) == 0xBB
+                && (data[2] & 0xFF) == 0xBF) {
+            return new String(data, 3, data.length - 3, StandardCharsets.UTF_8);
+        }
+        if (data.length >= 2 && (data[0] & 0xFF) == 0xFF && (data[1] & 0xFF) == 0xFE) {
+            return new String(data, 2, data.length - 2, StandardCharsets.UTF_16LE);
+        }
+        if (data.length >= 2 && (data[0] & 0xFF) == 0xFE && (data[1] & 0xFF) == 0xFF) {
+            return new String(data, 2, data.length - 2, StandardCharsets.UTF_16BE);
+        }
+        try {
+            return decodeStrict(data, StandardCharsets.UTF_8);
+        } catch (CharacterCodingException ignored) {
+            // Windows 编辑器常把中文 TXT 保存为本地代码页；GB18030 兼容 GBK。
+            return new String(data, Charset.forName("GB18030"));
+        }
+    }
+
+    private static String decodeStrict(byte[] data, Charset charset)
+            throws CharacterCodingException {
+        CharBuffer decoded = charset.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(data));
+        return decoded.toString();
+    }
+
+    private static Book bookFromText(String title, String text) {
+        return TextChapterImporter.importBook(title, text);
+    }
+
+    private static String fileStem(Path source) {
+        if (source == null || source.getFileName() == null) {
+            return "导入图书";
+        }
+        String name = source.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        return dot > 0 ? name.substring(0, dot) : name;
+    }
+
+    private static boolean isTextFile(Path source) {
+        if (source == null || source.getFileName() == null) {
+            return false;
+        }
+        return source.getFileName().toString().toLowerCase().endsWith(".txt");
+    }
+
+    private static String messageOf(Throwable error) {
+        Throwable current = error;
+        while (current.getCause() != null && (current.getMessage() == null || current.getMessage().isBlank())) {
+            current = current.getCause();
+        }
+        return current.getMessage() == null ? current.getClass().getSimpleName() : current.getMessage();
     }
 
     /**
@@ -362,7 +515,8 @@ public class DocumentActivity {
                 chooser.setTitle("打开图书草稿");
                 chooser.getExtensionFilters().addAll(
                         new FileChooser.ExtensionFilter("图书草稿", "*.draft"),
-                        new FileChooser.ExtensionFilter("EPUB 文件", "*.epub"));
+                        new FileChooser.ExtensionFilter("EPUB 文件", "*.epub"),
+                        new FileChooser.ExtensionFilter("TXT 文件", "*.txt"));
                 return chooser.showOpenDialog(stage);
             }
 
@@ -400,8 +554,8 @@ public class DocumentActivity {
         if (fileName.endsWith(Autosave.DRAFT_SUFFIX)) {
             return file;
         }
-        String stem = fileName.endsWith(".epub")
-                ? fileName.substring(0, fileName.length() - ".epub".length())
+        String stem = fileName.endsWith(".epub") || fileName.endsWith(".txt")
+                ? fileName.substring(0, fileName.lastIndexOf('.'))
                 : Autosave.stripDraftSuffix(fileName);
         Path parent = file.getParent();
         Path targetName = Path.of(stem + Autosave.DRAFT_SUFFIX);

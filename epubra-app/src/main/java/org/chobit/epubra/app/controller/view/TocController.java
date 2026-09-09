@@ -129,8 +129,14 @@ public class TocController {
         attachKeyboardShortcuts();
         tocTree.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, selected) -> {
             if (!ctx.loading()) {
-                currentNode = selected == null ? null : selected.getValue();
-                onChapterSelected.accept(currentNode);
+                ChapterNode next = selected == null ? null : selected.getValue();
+                // 先回调父控制器，让它把旧章节内容写回并加载新章节；
+                // 回调内部会通过 setCurrentNode 更新当前节点。若调用方没有更新，
+                // 这里再补一次，避免 currentNode 与 TreeView 脱节。
+                onChapterSelected.accept(next);
+                if (currentNode != next) {
+                    currentNode = next;
+                }
             }
         });
     }
@@ -202,16 +208,27 @@ public class TocController {
             if (toSelect == null && !root.getChildren().isEmpty()) {
                 toSelect = root.getChildren().get(0);
             }
+            // 在 loading 状态下完成选择，避免 TreeView 监听器先覆盖 currentNode，
+            // 导致父控制器无法把旧编辑内容写回旧章节。
+            if (toSelect != null) {
+                tocTree.getSelectionModel().select(toSelect);
+            } else {
+                tocTree.getSelectionModel().clearSelection();
+            }
         } finally {
             ctx.setLoading(false);
         }
         if (toSelect != null) {
-            tocTree.getSelectionModel().select(toSelect);
-            currentNode = toSelect.getValue();
-            onChapterSelected.accept(currentNode);
+            ChapterNode next = toSelect.getValue();
+            // 不要在回调前覆盖 currentNode：MainController.showChapter 会先保存
+            // currentNode 对应的旧编辑内容，随后再切换到 next。
+            onChapterSelected.accept(next);
+            if (currentNode != next) {
+                currentNode = next;
+            }
         } else {
-            currentNode = null;
             onChapterSelected.accept(null);
+            currentNode = null;
         }
     }
 

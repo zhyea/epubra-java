@@ -4,9 +4,11 @@ import org.chobit.epubra.app.context.AppEventBus.BookLoadedEvent;
 import org.chobit.epubra.app.context.AppEventBus.BookSavedEvent;
 import org.chobit.epubra.app.context.BookContext;
 import org.chobit.epubra.app.platform.AsyncTasks;
+import org.chobit.epubra.app.ui.model.NewDraftResult;
 import org.chobit.epubra.app.workspace.WorkspaceStore;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.BookFactory;
+import org.chobit.epubra.lib.io.EpubReader;
 import org.chobit.epubra.lib.io.EpubWriter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -108,6 +110,84 @@ class DocumentActivityTest {
         assertEquals(workspace.resolve("Source.draft"), ctx.currentFile());
         assertEquals("已打开 Source", status.get());
         assertTrue(WorkspaceStore.recentExisting().contains(workspace));
+        assertTrue(Files.exists(workspace.resolve("Source.draft")));
+        assertEquals("Source", new EpubReader().read(workspace.resolve("Source.draft"))
+                .metadata().firstTitle());
+    }
+
+    @Test
+    void importEpubWritesAnEditableDraft() throws IOException {
+        Path source = workspace.resolve("原书.epub");
+        new EpubWriter().write(BookFactory.createEmpty("原书标题"), source);
+
+        BookContext ctx = new BookContext();
+        AtomicReference<String> status = new AtomicReference<>();
+        DocumentActivity doc = new DocumentActivity(ctx, status::set, () -> true,
+                noopDialogs(), AsyncTasks.NOOP_PROGRESS, s -> {});
+
+        Path draft = doc.importDraft(workspace, "导入副本", "导入副本标题",
+                NewDraftResult.Mode.EPUB, source);
+
+        assertEquals(workspace.resolve("导入副本.draft"), draft);
+        assertTrue(Files.exists(draft));
+        assertEquals(draft, ctx.currentFile());
+        assertEquals("原书标题", ctx.book().metadata().firstTitle(),
+                "导入 EPUB 时保留源书标题，避免文件名覆盖元数据");
+        assertEquals("原书标题", new EpubReader().read(draft).metadata().firstTitle());
+    }
+
+    @Test
+    void importTxtCreatesReadableDraftWithTextChapter() throws IOException {
+        Path source = workspace.resolve("notes.txt");
+        Files.writeString(source, "第一行\n第二行", java.nio.charset.StandardCharsets.UTF_8);
+
+        BookContext ctx = new BookContext();
+        AtomicReference<String> status = new AtomicReference<>();
+        DocumentActivity doc = new DocumentActivity(ctx, status::set, () -> true,
+                noopDialogs(), AsyncTasks.NOOP_PROGRESS, s -> {});
+
+        Path draft = doc.importDraft(workspace, "笔记", "TXT 笔记",
+                NewDraftResult.Mode.TXT, source);
+        Book loaded = new EpubReader().read(draft);
+
+        assertEquals(workspace.resolve("笔记.draft"), draft);
+        assertEquals("TXT 笔记", loaded.metadata().firstTitle());
+        assertEquals(1, loaded.spineResources().size());
+        assertTrue(loaded.spineResources().get(0).asString().contains("第一行"));
+        assertTrue(loaded.spineResources().get(0).asString().contains("第二行"));
+    }
+
+    @Test
+    void importTxtReadsCommonWindowsChineseEncoding() throws IOException {
+        Path source = workspace.resolve("notes-gbk.txt");
+        Files.write(source, "中文内容\n第二行".getBytes(java.nio.charset.Charset.forName("GB18030")));
+
+        BookContext ctx = new BookContext();
+        DocumentActivity doc = new DocumentActivity(ctx, s -> {}, () -> true,
+                noopDialogs(), AsyncTasks.NOOP_PROGRESS, s -> {});
+
+        Path draft = doc.importDraft(workspace, "GBK 笔记", "GBK 笔记",
+                NewDraftResult.Mode.TXT, source);
+        Book loaded = new EpubReader().read(draft);
+
+        assertTrue(loaded.spineResources().get(0).asString().contains("中文内容"));
+        assertTrue(loaded.spineResources().get(0).asString().contains("第二行"));
+    }
+
+    @Test
+    void openTxtAlsoCreatesDraftWithImportedText() throws IOException {
+        Path source = workspace.resolve("直接打开.txt");
+        Files.write(source, "通过打开入口导入".getBytes(java.nio.charset.Charset.forName("GB18030")));
+
+        BookContext ctx = new BookContext();
+        DocumentActivity doc = new DocumentActivity(ctx, s -> {}, () -> true,
+                noopDialogs(), AsyncTasks.NOOP_PROGRESS, s -> {});
+
+        doc.openFile(source);
+
+        assertEquals(workspace.resolve("直接打开.draft"), ctx.currentFile());
+        assertTrue(ctx.book().spineResources().get(0).asString().contains("通过打开入口导入"));
+        assertTrue(Files.exists(workspace.resolve("直接打开.draft")));
     }
 
     @Test

@@ -11,6 +11,7 @@ import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.Resource;
 import org.chobit.epubra.lib.io.EpubReader;
 import javafx.fxml.FXML;
+import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Label;
 import javafx.scene.control.Tooltip;
@@ -157,8 +158,9 @@ public class WelcomePageController {
     }
 
     private Node newBookCard() {
-        StackPane cover = new StackPane(new Label("+"));
-        cover.getStyleClass().addAll("book-cover", "book-cover-placeholder", "new-book-plus");
+        StackPane cover = coverContainer();
+        cover.getChildren().add(new Label("+"));
+        cover.getStyleClass().addAll("book-cover-placeholder", "new-book-plus");
 
         Label title = new Label("新建图书");
         title.getStyleClass().add("book-title");
@@ -175,8 +177,7 @@ public class WelcomePageController {
     }
 
     private Node bookCard(ShelfBook book) {
-        StackPane cover = new StackPane();
-        cover.getStyleClass().add("book-cover");
+        StackPane cover = coverContainer();
         if (book.coverBytes() != null) {
             Image image = new Image(new ByteArrayInputStream(book.coverBytes()),
                     COVER_WIDTH, COVER_HEIGHT, true, true);
@@ -189,9 +190,7 @@ public class WelcomePageController {
             }
         }
         if (cover.getChildren().isEmpty()) {
-            Label placeholder = new Label("暂无封面");
-            placeholder.getStyleClass().add("book-cover-placeholder");
-            cover.getChildren().add(placeholder);
+            cover.getChildren().add(defaultCoverContent(book.title()));
         }
 
         Label title = new Label(book.title());
@@ -206,6 +205,37 @@ public class WelcomePageController {
         card.setOnMouseClicked(event -> openBookOnDoubleClick(event, book.path()));
         Tooltip.install(card, new Tooltip(book.path().toString()));
         return card;
+    }
+
+    private static StackPane coverContainer() {
+        StackPane cover = new StackPane();
+        cover.setMinSize(COVER_WIDTH, COVER_HEIGHT);
+        cover.setPrefSize(COVER_WIDTH, COVER_HEIGHT);
+        cover.setMaxSize(COVER_WIDTH, COVER_HEIGHT);
+        cover.getStyleClass().add("book-cover");
+        return cover;
+    }
+
+    private static Node defaultCoverContent(String title) {
+        VBox content = new VBox(10);
+        content.setAlignment(Pos.CENTER);
+        content.setMaxWidth(COVER_WIDTH - 24);
+        content.getStyleClass().add("default-book-cover-content");
+
+        Label mark = new Label("EPUB");
+        mark.getStyleClass().add("default-book-cover-mark");
+
+        Label titleLabel = new Label(title == null || title.isBlank() ? "未命名图书" : title);
+        titleLabel.setWrapText(true);
+        titleLabel.setMaxWidth(COVER_WIDTH - 28);
+        titleLabel.setAlignment(Pos.CENTER);
+        titleLabel.getStyleClass().add("default-book-cover-title");
+
+        Label caption = new Label("暂无封面");
+        caption.getStyleClass().add("default-book-cover-caption");
+
+        content.getChildren().addAll(mark, titleLabel, caption);
+        return content;
     }
 
     private void openBookOnDoubleClick(MouseEvent event, Path path) {

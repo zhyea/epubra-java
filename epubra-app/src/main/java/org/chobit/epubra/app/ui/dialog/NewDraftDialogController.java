@@ -5,15 +5,19 @@ import org.chobit.epubra.app.workspace.WorkspaceStore;
 import javafx.fxml.FXML;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
+import javafx.scene.control.ChoiceBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
 import javafx.stage.DirectoryChooser;
+import javafx.stage.FileChooser;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
+
+import org.chobit.epubra.app.ui.model.NewDraftResult.Mode;
 
 /**
  * 「新建图书草稿」对话框的表单控制器。
@@ -26,6 +30,14 @@ public class NewDraftDialogController {
     private TextField workspaceField;
     @FXML
     private Button browseWorkspaceBtn;
+    @FXML
+    private ChoiceBox<Mode> modeChoice;
+    @FXML
+    private Label sourceLabel;
+    @FXML
+    private TextField sourceField;
+    @FXML
+    private Button browseSourceBtn;
     @FXML
     private TextField nameField;
     @FXML
@@ -47,6 +59,13 @@ public class NewDraftDialogController {
                 workspaceField.setText(recent.get(0).toString());
             }
         }
+        modeChoice.getItems().setAll(Mode.values());
+        modeChoice.setValue(Mode.EMPTY);
+        modeChoice.getSelectionModel().selectedItemProperty()
+                .addListener((o, a, b) -> {
+                    updateSourceControls();
+                    revalidate();
+                });
         revalidate();
         workspaceField.textProperty().addListener((o, a, b) -> revalidate());
         nameField.textProperty().addListener((o, a, b) -> revalidate());
@@ -56,6 +75,8 @@ public class NewDraftDialogController {
             }
         });
         titleField.textProperty().addListener((o, a, b) -> revalidate());
+        sourceField.textProperty().addListener((o, a, b) -> revalidate());
+        updateSourceControls();
     }
 
     @FXML
@@ -79,6 +100,38 @@ public class NewDraftDialogController {
         }
     }
 
+    @FXML
+    private void onBrowseSource() {
+        Mode mode = modeChoice.getValue();
+        if (mode == null || mode == Mode.EMPTY) {
+            return;
+        }
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(mode == Mode.EPUB ? "选择 EPUB 文件" : "选择 TXT 文件");
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(
+                mode == Mode.EPUB ? "EPUB 文件" : "TXT 文件",
+                mode == Mode.EPUB ? "*.epub" : "*.txt"));
+        Path current = pathFromField(sourceField.getText());
+        if (current != null) {
+            Path directory = Files.isDirectory(current) ? current : current.getParent();
+            if (directory != null && Files.isDirectory(directory)) {
+                chooser.setInitialDirectory(directory.toFile());
+            }
+        }
+        java.io.File chosen = chooser.showOpenDialog(browseSourceBtn.getScene().getWindow());
+        if (chosen == null) {
+            return;
+        }
+        Path source = Path.of(chosen.getAbsolutePath());
+        sourceField.setText(source.toString());
+        if (nameField.getText() == null || nameField.getText().isBlank()) {
+            nameField.setText(fileStem(source));
+        }
+        if (titleField.getText() == null || titleField.getText().isBlank()) {
+            titleField.setText(fileStem(source));
+        }
+    }
+
     public Optional<NewDraftResult> collectResult() {
         String workspaceText = workspaceField.getText() == null ? "" : workspaceField.getText().trim();
         String name = nameField.getText() == null ? "" : nameField.getText().trim();
@@ -86,7 +139,9 @@ public class NewDraftDialogController {
         if (title.isBlank()) {
             title = name;
         }
-        return Optional.of(new NewDraftResult(Path.of(workspaceText), name, title));
+        return Optional.of(new NewDraftResult(
+                Path.of(workspaceText), name, title, modeChoice.getValue(),
+                pathFromField(sourceField.getText())));
     }
 
     private void revalidate() {
@@ -117,6 +172,17 @@ public class NewDraftDialogController {
                 reason = "同名图书草稿已存在：" + target;
             }
         }
+        Mode mode = modeChoice == null ? Mode.EMPTY : modeChoice.getValue();
+        if (reason == null && mode != null && mode != Mode.EMPTY) {
+            Path source = pathFromField(sourceField.getText());
+            if (source == null) {
+                reason = "请选择要导入的文件";
+            } else if (!Files.isRegularFile(source)) {
+                reason = "导入文件不存在";
+            } else if (!hasExpectedExtension(source, mode)) {
+                reason = mode == Mode.EPUB ? "请选择 .epub 文件" : "请选择 .txt 文件";
+            }
+        }
         boolean ok = reason == null;
         if (okButton != null) {
             okButton.setDisable(!ok);
@@ -126,5 +192,40 @@ public class NewDraftDialogController {
             errorLabel.setVisible(reason != null);
             errorLabel.setManaged(reason != null);
         }
+    }
+
+    private void updateSourceControls() {
+        boolean visible = modeChoice.getValue() != null && modeChoice.getValue() != Mode.EMPTY;
+        sourceLabel.setVisible(visible);
+        sourceLabel.setManaged(visible);
+        sourceField.setVisible(visible);
+        sourceField.setManaged(visible);
+        browseSourceBtn.setVisible(visible);
+        browseSourceBtn.setManaged(visible);
+    }
+
+    private static Path pathFromField(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        try {
+            return Path.of(text.trim());
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private static boolean hasExpectedExtension(Path source, Mode mode) {
+        String fileName = source.getFileName() == null
+                ? "" : source.getFileName().toString().toLowerCase();
+        return mode == Mode.EPUB
+                ? fileName.endsWith(".epub")
+                : fileName.endsWith(".txt");
+    }
+
+    private static String fileStem(Path source) {
+        String fileName = source.getFileName() == null ? "" : source.getFileName().toString();
+        int dot = fileName.lastIndexOf('.');
+        return dot > 0 ? fileName.substring(0, dot) : fileName;
     }
 }
