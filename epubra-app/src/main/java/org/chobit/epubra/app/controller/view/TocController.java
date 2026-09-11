@@ -62,7 +62,7 @@ public class TocController {
         void run();
     }
 
-    /** 章节切换通知。{@link MainController#showChapter(ChapterNode)} 作为参数传入。 */
+
     private Consumer<ChapterNode> onChapterSelected = node -> {};
 
     /** 标记「当前变更需要进入撤销栈」。 */

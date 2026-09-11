@@ -27,8 +27,7 @@
 
         <Label fx:id="workspaceHint" styleClass="welcome-hint"/>
 
-        <ScrollPane fitToWidth="true" hbarPolicy="NEVER"
-                    styleClass="book-shelf-scroll" VBox.vgrow="ALWAYS">
+        <ScrollPane fitToWidth="true" hbarPolicy="NEVER" styleClass="book-shelf-scroll" VBox.vgrow="ALWAYS">
             <content>
                 <FlowPane fx:id="bookShelf" alignment="TOP_LEFT"
                           hgap="18.0" vgap="20.0" prefWrapLength="980.0"

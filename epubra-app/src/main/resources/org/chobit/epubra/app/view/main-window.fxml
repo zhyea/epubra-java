@@ -124,7 +124,8 @@
     </top>
 
     <left>
-        <VBox fx:id="activityBar" styleClass="activity-bar" prefWidth="48.0" minWidth="48.0" maxWidth="48.0" spacing="2.0">
+        <VBox fx:id="activityBar" styleClass="activity-bar" prefWidth="48.0" minWidth="48.0" maxWidth="48.0"
+              spacing="2.0">
             <padding>
                 <Insets top="6.0" right="0.0" bottom="6.0" left="0.0"/>
             </padding>
