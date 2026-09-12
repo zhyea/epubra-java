@@ -1077,6 +1077,17 @@ public class MainController {
         resourceViewController.insertSelectedImageIntoChapter();
     }
 
+    /**
+     * 编辑 tab 工具条「图片」按钮：从本机选图（可多选）→ 导入为书内资源 → 插入正文。
+     *
+     * <p>与 {@link #onInsertImage()}（插入资源列表里选中的图）是两条不同入口：
+     * 后者继续服务菜单栏与资源面板，本入口只服务编辑器工具条。
+     */
+    @FXML
+    public void onInsertImageFromDisk() {
+        resourceViewController.insertImagesFromDisk();
+    }
+
     // 工具条入口（段落 / 标题 / 加粗 / 斜体 / 列表）挂在「编辑」tab 的 WebView 上，
     // 优先作用于可视化编辑器；编辑器还没就绪时退回源码区的片段插入（InsertActivity），
     // 避免点击被吞掉。FXML 的 onAction 只能绑主控制器方法，故实现留在这里。

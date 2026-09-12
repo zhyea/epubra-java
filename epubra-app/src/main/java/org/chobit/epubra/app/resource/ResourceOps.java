@@ -57,6 +57,12 @@ public final class ResourceOps {
     /**
      * 生成本地引用图片的 {@code <img>} 标签：相对路径相对于章节所在目录。
      *
+     * <p>用 {@link Hrefs#relativePath(String, String)} 而不是只做前缀剥离的
+     * {@link Hrefs#relativize(String, String)}：外部 EPUB 的章节常位于 {@code OEBPS/text/} 这类
+     * 子目录，图片却在 {@code OEBPS/images/}，此时必须产出 {@code ../images/a.png}；
+     * 前缀剥离会写出 {@code OEBPS/images/a.png} 这条包内绝对路径，预览与阅读器都解析不到，
+     * 结构校验还会判为断链。
+     *
      * @param chapterHref 章节 href，用于计算相对路径
      * @param imageHref    图片 href
      * @param alt          作为 alt 文本
@@ -64,7 +70,34 @@ public final class ResourceOps {
      */
     public static String buildInsertImageTag(String chapterHref, String imageHref, String alt) {
         String chapterDir = Hrefs.parentDirectory(chapterHref);
-        String relative = Hrefs.relativize(chapterDir, imageHref);
-        return String.format("<img src=\"%s\" alt=\"%s\"/>", relative, alt);
+        String relative = Hrefs.relativePath(chapterDir, imageHref);
+        return String.format("<img src=\"%s\" alt=\"%s\"/>",
+                escapeXmlAttribute(relative), escapeXmlAttribute(alt));
+    }
+
+    /**
+     * 转义 XML 属性值里不能裸写的字符。
+     *
+     * <p>必须做：文件名属于用户数据，从本机选图时完全可能出现 {@code Tom & Jerry.png}
+     * 这类名字。不转义会拼出非法 XHTML —— 写进正文后整章解析失败，还会被结构校验
+     * 判为文档损坏。
+     */
+    private static String escapeXmlAttribute(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return "";
+        }
+        StringBuilder escaped = new StringBuilder(raw.length() + 16);
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            switch (c) {
+                case '&' -> escaped.append("&amp;");
+                case '<' -> escaped.append("&lt;");
+                case '>' -> escaped.append("&gt;");
+                case '"' -> escaped.append("&quot;");
+                case '\'' -> escaped.append("&apos;");
+                default -> escaped.append(c);
+            }
+        }
+        return escaped.toString();
     }
 }

@@ -1,5 +1,8 @@
 package org.chobit.epubra.lib.util;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * 容器内路径的解析与规范化，路径统一使用 {@code /} 分隔。
  */
@@ -77,7 +80,89 @@ public final class Hrefs {
         return out.toString();
     }
 
-    /** 把容器内路径转换为相对 baseDir 的路径，非 baseDir 前缀时原样返回。 */
+    /**
+     * 把容器内路径相对 {@code baseDir} 表示为<b>可回溯</b>的相对路径。
+     *
+     * <p>与 {@link #relativize(String, String)} 的区别是这里做真正的分段比对：当
+     * {@code path} 不在 {@code baseDir} 之下时，会产出 {@code ../} 前缀，而不是原样返回
+     * 一条包内绝对路径。
+     *
+     * <pre>
+     *   relativePath("OEBPS/",        "OEBPS/images/a.png")  → "images/a.png"
+     *   relativePath("OEBPS/text/",   "OEBPS/images/a.png")  → "../images/a.png"
+     *   relativePath("OEBPS/a/b/",    "OEBPS/images/a.png")  → "../../images/a.png"
+     *   relativePath("",              "OEBPS/images/a.png")  → "OEBPS/images/a.png"
+     * </pre>
+     *
+     * <p>最后一个路径段永远视作「文件名」参与输出、不参与公共前缀比对，因此不会出现
+     * 把文件名本身消解掉的退化结果。{@code baseDir} 位于根（空串）时等价于直接返回
+     * {@code path}。
+     *
+     * @param baseDir 基准目录（可带可不带结尾 {@code /}），空串表示容器根
+     * @param path    目标路径，容器内绝对；以 {@code /} 开头时按容器根处理
+     * @return 相对路径；{@code path} 为空时返回空串
+     */
+    public static String relativePath(String baseDir, String path) {
+        if (path == null || path.isBlank()) {
+            return "";
+        }
+        String target = path.replace('\\', '/');
+        if (target.startsWith("/")) {
+            target = target.substring(1);
+        }
+        List<String> base = segments(baseDir);
+        List<String> full = segments(target);
+        if (full.isEmpty()) {
+            return "";
+        }
+        int common = 0;
+        // 末段是文件名，不参与比对：否则 OEBPS/a.png 相对 OEBPS/ 会算出 "../a.png"
+        while (common < base.size() && common < full.size() - 1
+                && base.get(common).equals(full.get(common))) {
+            common++;
+        }
+        StringBuilder out = new StringBuilder();
+        for (int i = common; i < base.size(); i++) {
+            out.append("../");
+        }
+        for (int i = common; i < full.size(); i++) {
+            if (out.length() > 0 && out.charAt(out.length() - 1) != '/') {
+                out.append('/');
+            }
+            out.append(full.get(i));
+        }
+        return out.toString();
+    }
+
+    /** 按 {@code /} 切分并消解 {@code .} / {@code ..}；空段与首尾斜杠被丢弃。 */
+    private static List<String> segments(String path) {
+        List<String> out = new ArrayList<>();
+        if (path == null || path.isBlank()) {
+            return out;
+        }
+        for (String part : path.replace('\\', '/').split("/")) {
+            if (part.isEmpty() || ".".equals(part)) {
+                continue;
+            }
+            if ("..".equals(part)) {
+                if (!out.isEmpty()) {
+                    out.remove(out.size() - 1);
+                }
+                continue;
+            }
+            out.add(part);
+        }
+        return out;
+    }
+
+    /**
+     * 剥掉 {@code baseDir} 前缀，得到容器内路径相对它的写法。
+     *
+     * <p><b>只做前缀剥离，不消解 {@code ..}</b>：{@code path} 不在 {@code baseDir} 之下时
+     * 原样返回。这个语义正是清单 / NCX 生成需要的（资源都在 OPF 目录之下，前缀必然命中），
+     * 但<b>不能</b>用来给正文里的引用算相对路径——那种场景必须用
+     * {@link #relativePath(String, String)}，否则跨目录时会写出包内绝对路径。
+     */
     public static String relativize(String baseDir, String path) {
         if (baseDir == null || baseDir.isEmpty()) {
             return path;

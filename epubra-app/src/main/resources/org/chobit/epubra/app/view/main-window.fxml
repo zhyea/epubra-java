@@ -257,7 +257,7 @@
                                                         <!-- 图片与菜单「插入 → 插入图片」同一个入口（从已导入资源里选），
                                                              不另插一个裸 img 标签，避免两种不一致的行为 -->
                                                         <Button id="image" text="图片" styleClass="flat-button"
-                                                                onAction="#onInsertImage"/>
+                                                                onAction="#onInsertImageFromDisk"/>
                                                     </FlowPane>
                                                     <WebView fx:id="visualEditorView" VBox.vgrow="ALWAYS"/>
                                                 </VBox>

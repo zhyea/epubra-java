@@ -6,9 +6,14 @@ import org.chobit.epubra.lib.domain.BookFactory;
 import org.chobit.epubra.lib.domain.MediaTypes;
 import org.chobit.epubra.lib.domain.Resource;
 import org.junit.jupiter.api.Test;
+import org.xml.sax.InputSource;
+
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.StringReader;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -67,11 +72,59 @@ class ResourceOpsTest {
                 "OEBPS/chapter-1.xhtml",
                 "OEBPS/images/foo.png",
                 "foo.png");
-        // baseDir = "OEBPS/"：图片路径以 baseDir 开头 → 去掉前缀 → "images/foo.png"
+        // baseDir = "OEBPS/"：图片在同一父目录的子目录下 → "images/foo.png"
         assertEquals("<img src=\"images/foo.png\" alt=\"foo.png\"/>", tag);
 
         // 同目录 → 纯文件名
         assertEquals("<img src=\"foo.png\" alt=\"foo.png\"/>",
                 ResourceOps.buildInsertImageTag("OEBPS/foo.xhtml", "OEBPS/foo.png", "foo.png"));
+    }
+
+    @Test
+    void buildInsertImageTagBacktracksWhenChapterSitsInSubdirectory() {
+        // 外部 EPUB 的常见布局：章节在 OEBPS/text/，图片在 OEBPS/images/。
+        // 修复前这里会产出 "OEBPS/images/foo.png"（包内绝对路径），预览与阅读器都解析不到。
+        assertEquals("<img src=\"../images/foo.png\" alt=\"foo.png\"/>",
+                ResourceOps.buildInsertImageTag(
+                        "OEBPS/text/chapter-1.xhtml", "OEBPS/images/foo.png", "foo.png"));
+    }
+
+    @Test
+    void generatedRelativePathResolvesBackToImageHref() {
+        // 真正的不变量：生成的 src 经校验侧的引用解析必须还原成图片的容器内路径。
+        // 算错一步就会被 ReferenceRules 判为断链，或让图片在预览里静默消失。
+        String chapterHref = "OEBPS/text/part1/chapter-1.xhtml";
+        String imageHref = "OEBPS/images/foo.png";
+        String tag = ResourceOps.buildInsertImageTag(chapterHref, imageHref, "foo.png");
+        String src = tag.substring(tag.indexOf("src=\"") + 5, tag.indexOf("\" alt="));
+        assertEquals("../images/foo.png", src);
+        assertEquals(imageHref,
+                ResourceReferences.resolveTarget(Hrefs.parentDirectory(chapterHref), src));
+    }
+
+    @Test
+    void buildInsertImageTagEscapesXmlSpecialChars() {
+        // 文件名是用户数据：从本机选图时完全可能叫 "Tom & Jerry.png"。
+        // 不转义会拼出非法 XHTML，写进正文后整章解析失败。
+        String tag = ResourceOps.buildInsertImageTag(
+                "OEBPS/chapter-1.xhtml",
+                "OEBPS/images/Tom & Jerry \"1\".png",
+                "Tom & Jerry \"1\".png");
+        assertTrue(tag.contains("src=\"images/Tom &amp; Jerry &quot;1&quot;.png\""), tag);
+        assertTrue(tag.contains("alt=\"Tom &amp; Jerry &quot;1&quot;.png\""), tag);
+        assertFalse(tag.contains("Tom & Jerry"), "裸 & 必须被转义：" + tag);
+    }
+
+    @Test
+    void buildInsertImageTagOutputStaysParsableXml() throws Exception {
+        String tag = ResourceOps.buildInsertImageTag(
+                "OEBPS/chapter-1.xhtml", "OEBPS/images/a<b>c.png", "a<b>c.png");
+        assertTrue(tag.contains("&lt;b&gt;"), tag);
+        assertFalse(tag.contains("<b>"), "裸 < 必须被转义：" + tag);
+
+        // 能被 XML 解析器吃掉，才说明写回正文后不会破坏文档结构
+        String wrapped = "<div xmlns=\"http://www.w3.org/1999/xhtml\">" + tag + "</div>";
+        assertNotNull(DocumentBuilderFactory.newInstance().newDocumentBuilder()
+                .parse(new InputSource(new StringReader(wrapped))));
     }
 }

@@ -309,6 +309,117 @@ public class ResourceController {
         setStatus.accept("已在正文中插入：" + row.getName());
     }
 
+    /** 编辑 tab 工具条「图片」按钮支持的类型，与资源导入的图片部分保持一致。 */
+    private static final String[] IMAGE_EXTENSIONS =
+            {"*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.svg"};
+
+    private static boolean isImageFileName(String fileName) {
+        return MediaTypes.guessByExtension(fileName).startsWith("image/");
+    }
+
+    /**
+     * 「从计算机选择图片插入正文」——编辑 tab 工具条「图片」按钮的入口。
+     *
+     * <p>与 {@link #insertSelectedImageIntoChapter()}（插入资源列表里选中的图）并存：
+     * 后者服务资源面板与菜单栏，本方法服务编辑器工具条。
+     *
+     * <p><b>选中的图片会先导入为书内资源再插入</b>——EPUB 规定正文引用的图片必须位于包内，
+     * 直接写本机绝对路径会留下悬空引用，结构校验必然报错。导入走
+     * {@link Book#addResource(String, byte[])}，重名文件经 {@code Resources.uniqueHref}
+     * 自动改名，不会覆盖已有资源。
+     *
+     * <p>IO 在后台线程，{@code addResource} 与插入回 FX 线程——与 {@link #importResources()}
+     * 同一套「IO 后台 + mutation FX」模型，避免与 refreshResources / 自动暂存竞争。
+     * 导入与插入共用一次 {@code beginChange}，因此一次撤销即可整体回退。
+     */
+    public void insertImagesFromDisk() {
+        ChapterNode current = currentNodeProvider.get();
+        if (current == null || current.resource() == null) {
+            warn.accept("请先在左侧目录中选择要插入图片的章节");
+            return;
+        }
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("插入图片");
+        chooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("图片", IMAGE_EXTENSIONS));
+        List<File> picked = chooser.showOpenMultipleDialog(stage);
+        if (picked == null || picked.isEmpty()) {
+            return;
+        }
+        insertImagesFromPaths(picked.stream().map(File::toPath).toList(), current.resource().href());
+    }
+
+    /**
+     * {@link #insertImagesFromDisk()} 去掉「弹选择器」之后的部分：
+     * 过滤非图片 → 后台读字节 → 挂成书内资源 → 拼标签插入正文。
+     *
+     * <p>单独抽出来是为了能在无头测试里驱动整条流水线——{@code FileChooser} 在测试环境里弹不出来。
+     */
+    void insertImagesFromPaths(List<Path> paths, String chapterHref) {
+        if (paths == null || paths.isEmpty()) {
+            return;
+        }
+        // 选择器只列图片，但仍做一次防御：个别平台允许直接输入文件名绕过过滤。
+        List<Path> images = new ArrayList<>(paths.size());
+        List<String> rejected = new ArrayList<>();
+        for (Path path : paths) {
+            String fileName = path.getFileName() == null ? "" : path.getFileName().toString();
+            if (isImageFileName(fileName)) {
+                images.add(path);
+            } else {
+                rejected.add(fileName);
+            }
+        }
+        if (!rejected.isEmpty()) {
+            warn.accept("已跳过非图片文件：" + String.join("、", rejected));
+        }
+        if (images.isEmpty()) {
+            return;
+        }
+        AsyncTasks.runIo(
+                "正在插入 " + images.size() + " 张图片",
+                () -> readFilesInBackground(images),
+                progress != null ? progress : AsyncTasks.NOOP_PROGRESS,
+                loaded -> attachImagesAndInsert(chapterHref, loaded),
+                err -> showError.report("插入图片失败", "后台读取出错", (Exception) err)
+        );
+    }
+
+    /**
+     * FX 线程回调：把后台读到的图片挂成书内资源，拼成 {@code <img>} 标签交给父控制器插入。
+     *
+     * <p>顺序有讲究：{@code beginChange} 会置「编辑步已捕获」，紧随其后的插入（走编辑器输入
+     * 管线）因此不会再记一次快照——导入与插入合并成**一次**可撤销操作。
+     *
+     * <p>若一个文件都没读成功，直接返回：不开变更步、不打脏标记，避免留下一次空操作。
+     */
+    private void attachImagesAndInsert(String chapterHref, List<LoadedFile> loaded) {
+        List<LoadedFile> readable = new ArrayList<>(loaded.size());
+        for (LoadedFile lf : loaded) {
+            if (lf.error == null) {
+                readable.add(lf);
+            } else {
+                showError.report("插入图片失败", "无法读取 " + lf.fileName, lf.error);
+            }
+        }
+        if (readable.isEmpty()) {
+            return;
+        }
+        beginChange.run();
+        List<String> tags = new ArrayList<>(readable.size());
+        for (LoadedFile lf : readable) {
+            Resource image = ctx.book().addResource(lf.fileName, lf.data);
+            tags.add(ResourceOps.buildInsertImageTag(chapterHref, image.href(), lf.fileName));
+        }
+        markDirty.run();
+        insertXhtml.accept(String.join("", tags));
+        refreshResources.run();
+        updateStatus.run();
+        setStatus.accept(readable.size() == 1
+                ? "已插入图片：" + readable.get(0).fileName
+                : "已插入 " + readable.size() + " 张图片");
+    }
+
     public void cleanupUnused() {
         // 设计上保持同步：B1 评估时把 6 个操作都过了一遍，cleanupUnused 的三个 FX 线程
         // 步骤（计算 orphans / 弹确认 / forEach removeResource）都不涉及文件 IO，
