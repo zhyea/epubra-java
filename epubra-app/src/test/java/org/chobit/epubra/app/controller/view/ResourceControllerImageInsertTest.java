@@ -5,6 +5,9 @@ import org.chobit.epubra.app.context.BookContext;
 import org.chobit.epubra.app.platform.AsyncTasks;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.BookFactory;
+import org.chobit.epubra.lib.domain.Resource;
+import org.chobit.epubra.lib.util.Hrefs;
+import org.chobit.epubra.lib.util.ResourceReferences;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -139,6 +142,33 @@ class ResourceControllerImageInsertTest {
         assertEquals(1, h.warnings.size(), "应当告知用户跳过了什么：" + h.warnings);
         assertTrue(h.warnings.get(0).contains("notes.txt"), h.warnings.get(0));
         assertFalse(hasResourceNamed(h.book, "notes.txt"), "非图片不应进书");
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("章节位于子目录时相对路径回溯，且能被引用校验解析回图片路径")
+    void relativePathBacktracksForChapterInSubdirectory(@TempDir Path dir) throws Exception {
+        Path png = dir.resolve("pic.png");
+        Files.write(png, new byte[]{1, 2, 3, 4});
+
+        Harness h = new Harness();
+        // 外部 EPUB 的常见布局：章节在 OEBPS/text/part1/，图片被导入到 OEBPS/images/
+        String chapterHref = "OEBPS/text/part1/chapter-1.xhtml";
+        h.controller.insertImagesFromPaths(List.of(png), chapterHref);
+        awaitInsert(h);
+
+        String tag = h.inserted.get(0);
+        // 前缀剥离会写出 "OEBPS/images/pic.png"（包内绝对路径）→ 预览里静默消失
+        assertEquals("<img src=\"../../images/pic.png\" alt=\"pic.png\"/>", tag);
+
+        // 真正的不变量：引用经校验侧解析必须还原成图片的容器内路径，否则会被判为断链
+        Resource image = h.book.resources().all().stream()
+                .filter(r -> "pic.png".equals(r.fileName()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(image.href(),
+                ResourceReferences.resolveTarget(Hrefs.parentDirectory(chapterHref),
+                        "../../images/pic.png"));
     }
 
     // ---------------------------------------------------------------- 辅助

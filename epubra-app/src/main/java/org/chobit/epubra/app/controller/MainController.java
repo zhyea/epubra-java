@@ -23,6 +23,7 @@ import org.chobit.epubra.app.context.BookContext;
 import org.chobit.epubra.app.document.Autosave;
 import org.chobit.epubra.app.document.AutosaveConfig;
 import org.chobit.epubra.app.editor.PreviewHtml;
+import org.chobit.epubra.app.editor.PreviewMirror;
 import org.chobit.epubra.app.editor.TextSearch;
 import org.chobit.epubra.app.editor.Theme;
 import org.chobit.epubra.app.platform.AppPaths;
@@ -310,6 +311,10 @@ public class MainController {
                 installVisualEditorBridge();
             }
         });
+
+        // 资源镜像：预览 / 可视化编辑器里的相对引用（图片、字体、CSS）要靠它才有解析基准。
+        // 惰性同步，构造本身不碰磁盘；换书时自动清空重建。
+        previewMirror = PreviewMirror.forUserData();
 
         // status 必须先于任何 bind 构造：子控制器拿的是 status::set 这类方法引用，
         // 引用在求值时就要拿到非空实例，放到后面的 bind 之后再建会 NPE。
@@ -1374,7 +1379,7 @@ public class MainController {
                 : current.resource().asString();
         visualEditorLoaded = current != null && current.resource() != null;
         visualEditorView.getEngine().loadContent(
-                PreviewHtml.editableDocument(xhtml, themeActivity.current()),
+                PreviewHtml.editableDocument(xhtml, themeActivity.current(), previewBaseHref(current)),
                 "application/xhtml+xml");
     }
 
@@ -1590,16 +1595,41 @@ public class MainController {
      */
     private boolean visualEditorLoaded;
 
+    /**
+     * 预览 / 可视化编辑器的资源镜像（{@code ~/.Epubra/preview/}）。
+     *
+     * <p>存在意义：{@code loadContent} 的页面源是 {@code about:blank}，不注入 {@code <base>}
+     * 的话正文里的相对图片引用一个也加载不出来。
+     */
+    private PreviewMirror previewMirror;
+
     private void refreshPreview() {
         ChapterNode current = currentChapter();
         if (current == null || current.resource() == null) {
             previewView.getEngine().loadContent(PreviewHtml.emptyDocument(themeActivity.current()));
             return;
         }
-        // 预览区是 WebView，吃不到 -epubra-* 变量，改为往 XHTML 里注入一段内联主题样式
+        // 预览区是 WebView，吃不到 -epubra-* 变量，改为往 XHTML 里注入一段内联主题样式；
+        // 相对引用（图片等）则靠 <base> 指向资源镜像才解析得出来。
         previewView.getEngine().loadContent(
-                PreviewHtml.withTheme(current.resource().asString(), themeActivity.current()),
+                PreviewHtml.withBaseHref(
+                        PreviewHtml.withTheme(current.resource().asString(), themeActivity.current()),
+                        previewBaseHref(current)),
                 "application/xhtml+xml");
+    }
+
+    /**
+     * 预览 / 可视化编辑器里相对引用的解析基准：当前章节在资源镜像里的目录 URI。
+     *
+     * <p>WebView 走 {@code loadContent}，页面源是 {@code about:blank}，没有基准时正文里的
+     * {@code <img src="../images/a.png"/>} 会静默加载失败。返回 {@code null} 表示镜像不可用，
+     * 此时退回「不注入 base」的老行为——图片显示不出来，但正文一切照常。
+     */
+    private String previewBaseHref(ChapterNode current) {
+        if (previewMirror == null || current == null || current.resource() == null) {
+            return null;
+        }
+        return previewMirror.baseHrefFor(ctx.book(), current.resource().href());
     }
 
     /**

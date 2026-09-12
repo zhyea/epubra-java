@@ -17,6 +17,14 @@ public final class PreviewHtml {
     /** 注入样式与编辑脚本共用的标识：回写序列化时靠它把预览样式剥掉。 */
     static final String INJECTED_STYLE_ID = "epubra-preview-style";
 
+    /**
+     * 注入的 {@code <base>} 的元素 id。
+     *
+     * <p>可视化编辑器回写正文时同样要把它剥掉——镜像目录是运行期临时产物，
+     * 一旦写进书里就成了指向 {@code ~/.Epubra/} 的绝对路径，换台机器整章图片全断。
+     */
+    static final String INJECTED_BASE_ID = "epubra-preview-base";
+
     private PreviewHtml() {
     }
 
@@ -58,6 +66,39 @@ public final class PreviewHtml {
     }
 
     /**
+     * 注入解析基准：{@code <base href="…"/>}。
+     *
+     * <p>预览与可视化编辑器都走 {@code loadContent}，页面源是 {@code about:blank}，正文里
+     * {@code <img src="../images/a.png"/>} 这类相对引用没有基准可依附，一律加载不出来。
+     * 把基准指到资源镜像里当前章节的目录即可正常显示。
+     *
+     * <p>相比把 {@code src} 换成 {@code data:} URI，{@code <base>} 只影响解析、不改
+     * {@code src} 的属性值，因此可视化编辑器回写正文时零影响。
+     *
+     * <p>插在 {@code <head>} 开标签之后而不是 {@code </head>} 之前：HTML 规定
+     * {@code <base>} 必须先于其他引用 URL 的元素生效，排在 {@code <link>} 前面最稳妥。
+     * 文档没有 head 时退化为插在 {@code </head>} 之前；都没有则原样返回（无处可插）。
+     *
+     * @param xhtml    章节正文
+     * @param baseHref 基准地址（通常是 {@code file:} URI，以 {@code /} 结尾）；空则原样返回
+     */
+    public static String withBaseHref(String xhtml, String baseHref) {
+        if (xhtml == null || xhtml.isBlank() || baseHref == null || baseHref.isBlank()) {
+            return xhtml;
+        }
+        String tag = "<base id=\"" + INJECTED_BASE_ID + "\" href=\"" + escapeAttribute(baseHref) + "\"/>";
+        int headOpen = endOfHeadOpenTag(xhtml);
+        if (headOpen >= 0) {
+            return xhtml.substring(0, headOpen) + tag + xhtml.substring(headOpen);
+        }
+        int headClose = indexOfIgnoringCase(xhtml, "</head>");
+        if (headClose >= 0) {
+            return xhtml.substring(0, headClose) + tag + xhtml.substring(headClose);
+        }
+        return xhtml;
+    }
+
+    /**
      * 可视化编辑文档：在 {@link #withTheme(String, Theme)} 的基础上把 {@code <body>} 置为
      * {@code contenteditable}，并挂一段编辑脚本。
      *
@@ -87,8 +128,21 @@ public final class PreviewHtml {
      * {@code strong}），避免外部富文本污染正文。
      */
     public static String editableDocument(String xhtml, Theme theme) {
-        String base = withTheme(xhtml, theme);
-        String editable = addContentEditable(base);
+        return editableDocument(xhtml, theme, null);
+    }
+
+    /**
+     * 可视化编辑文档 + 解析基准：在 {@link #editableDocument(String, Theme)} 基础上注入
+     * {@link #withBaseHref(String, String)} 的 {@code <base>}，让正文里的相对图片引用能显示。
+     *
+     * <p>注入的 {@code <base>} 带 {@link #INJECTED_BASE_ID}，回写序列化时会被
+     * {@code EDIT_SCRIPT} 剥掉，不会污染正文。
+     *
+     * @param baseHref 章节在资源镜像里的目录 URI；为 {@code null} 时等价于两参重载
+     */
+    public static String editableDocument(String xhtml, Theme theme, String baseHref) {
+        String document = withBaseHref(withTheme(xhtml, theme), baseHref);
+        String editable = addContentEditable(document);
         int headClose = indexOfIgnoringCase(editable, "</head>");
         if (headClose < 0) {
             return editable;
@@ -116,11 +170,16 @@ public final class PreviewHtml {
     private static final String EDIT_SCRIPT = """
             <script type="text/javascript">//<![CDATA[
             (function () {
-              var INJECTED_ID = '%s';
+              var INJECTED_IDS = ['%s', '%s'];
+              function stripInjected(root) {
+                for (var i = 0; i < INJECTED_IDS.length; i++) {
+                  var el = root.querySelector('#' + INJECTED_IDS[i]);
+                  if (el && el.parentNode) { el.parentNode.removeChild(el); }
+                }
+              }
               function serialize() {
                 var clone = document.documentElement.cloneNode(true);
-                var injected = clone.querySelector('#' + INJECTED_ID);
-                if (injected && injected.parentNode) { injected.parentNode.removeChild(injected); }
+                stripInjected(clone);
                 var body = clone.querySelector('body');
                 if (body) { body.removeAttribute('contenteditable'); }
                 return '<?xml version="1.0" encoding="UTF-8"?>\\n' +
@@ -514,7 +573,7 @@ public final class PreviewHtml {
                 return true;
               }
             })();
-            //]]></script>""".formatted(INJECTED_STYLE_ID);
+            //]]></script>""".formatted(INJECTED_STYLE_ID, INJECTED_BASE_ID);
 
     private static String styleTag(Theme theme) {
         return "<style id=\"" + INJECTED_STYLE_ID + "\" type=\"text/css\">\n"
@@ -523,6 +582,50 @@ public final class PreviewHtml {
 
     private static int indexOfIgnoringCase(String text, String token) {
         return text.toLowerCase().indexOf(token.toLowerCase());
+    }
+
+    /**
+     * 返回 {@code <head ...>} 开标签结束位置（即 {@code >} 之后的下标）；未找到返回 -1。
+     *
+     * <p>不能用通用的 {@link #endOfOpenTag(String, String)} 找 {@code <head}：它会把
+     * {@code <header>} 也算进去。
+     */
+    private static int endOfHeadOpenTag(String text) {
+        int from = 0;
+        while (from < text.length()) {
+            int found = indexOfIgnoringCase(text.substring(from), "<head");
+            if (found < 0) {
+                return -1;
+            }
+            int start = from + found;
+            int after = start + 5;
+            if (after < text.length()) {
+                char next = text.charAt(after);
+                if (next == '>' || Character.isWhitespace(next)) {
+                    int end = text.indexOf('>', after);
+                    return end < 0 ? -1 : end + 1;
+                }
+            }
+            from = after;
+        }
+        return -1;
+    }
+
+    /** XML 属性值转义：镜像目录可能带 {@code &} 这类字符（用户目录名）。 */
+    private static String escapeAttribute(String raw) {
+        StringBuilder escaped = new StringBuilder(raw.length() + 16);
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            switch (c) {
+                case '&' -> escaped.append("&amp;");
+                case '<' -> escaped.append("&lt;");
+                case '>' -> escaped.append("&gt;");
+                case '"' -> escaped.append("&quot;");
+                case '\'' -> escaped.append("&apos;");
+                default -> escaped.append(c);
+            }
+        }
+        return escaped.toString();
     }
 
     /** 返回 {@code <html ...>} 这类开标签结束位置（即 {@code >} 之后的下标）；未找到返回 -1。 */

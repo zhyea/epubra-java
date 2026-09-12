@@ -19,6 +19,7 @@ import java.util.stream.Stream;
  *     └── Epubra/
  *         ├── autosave/          ← 未保存新书的草稿（{@link Autosave} 落点）
  *         ├── webview/           ← JavaFX WebView 缓存（由 user.home 重定向派生）
+ *         ├── preview/           ← 预览用资源镜像（{@code editor.PreviewMirror} 落点，可随时丢弃）
  *         └── drafts/            ← （预留）项目级草稿（暂未启用）
  * </pre>
  *
@@ -50,6 +51,16 @@ public final class AppPaths {
 
     /** JavaFX WebView 本地缓存（由 user.home 重定向派生，本类也提供显式预创建）。 */
     public static final String WEBVIEW_SUBDIR = "webview";
+
+    /**
+     * 预览资源镜像目录。
+     *
+     * <p>WebView 用 {@code loadContent} 加载时页面源是 {@code about:blank}，正文里的相对引用
+     * 没有解析基准；把书内资源按容器结构镜像到这里，再给文档注入指向镜像目录的
+     * {@code <base href>} 就能正常显示图片。内容是<b>可随时丢弃的派生数据</b>，
+     * 每次启动 / 换书都会清空重写。
+     */
+    public static final String PREVIEW_SUBDIR = "preview";
 
     /** 旧版本使用的全局 autosave 目录名（已弃用，迁移用）。 */
     public static final String LEGACY_AUTOSAVE_NAME = "epubra-autosave";
@@ -102,6 +113,16 @@ public final class AppPaths {
     }
 
     /**
+     * 预览资源镜像目录：{@code <user.home>/.Epubra/preview/}。
+     *
+     * <p>由 {@code editor.PreviewMirror} 独占使用；目录内全是可再生的派生文件，
+     * 删除不会丢任何用户数据。
+     */
+    public static Path previewDir() {
+        return userDataDir().resolve(PREVIEW_SUBDIR);
+    }
+
+    /**
      * 测试 hook：清掉 {@link #REDIRECTED} 标记与派生属性，使后续断言可以重新走
      * "user.home 未被重定向"分支。仅供单元测试调用，生产代码不应触碰。
      */
@@ -136,6 +157,7 @@ public final class AppPaths {
             ensureDirectory(target);
             ensureDirectory(target.resolve(AUTOSAVE_SUBDIR));
             ensureDirectory(target.resolve(WEBVIEW_SUBDIR));
+            ensureDirectory(target.resolve(PREVIEW_SUBDIR));
             String absolute = target.toAbsolutePath().toString();
             // 把目标路径写到独立属性,userDataDir() 优先用它,避免二次拼接
             System.setProperty(REDIRECTED_PATH_PROPERTY, absolute);

@@ -74,6 +74,7 @@ class AppPathsTest {
         assertEquals(".Epubra", AppPaths.APP_DIR_NAME);
         assertEquals("autosave", AppPaths.AUTOSAVE_SUBDIR);
         assertEquals("webview", AppPaths.WEBVIEW_SUBDIR);
+        assertEquals("preview", AppPaths.PREVIEW_SUBDIR);
         assertEquals("epubra-autosave", AppPaths.LEGACY_AUTOSAVE_NAME);
     }
 
@@ -96,6 +97,20 @@ class AppPathsTest {
     void webviewCacheDirIsUnderUserDataDir(@TempDir Path home) {
         System.setProperty("user.home", home.toAbsolutePath().toString());
         assertEquals(home.resolve(".Epubra/webview"), AppPaths.webviewCacheDir());
+    }
+
+    @Test
+    void previewDirIsUnderUserDataDir(@TempDir Path home) {
+        System.setProperty("user.home", home.toAbsolutePath().toString());
+        assertEquals(home.resolve(".Epubra/preview"), AppPaths.previewDir());
+    }
+
+    @Test
+    void redirectCreatesPreviewDir(@TempDir Path home) throws IOException {
+        pointAt(home);
+        AppPaths.redirectUserHome();
+        assertTrue(Files.isDirectory(AppPaths.previewDir()),
+                "预览镜像目录应当在启动重定向时就建好，避免首次预览时才落盘");
     }
 
     @Test

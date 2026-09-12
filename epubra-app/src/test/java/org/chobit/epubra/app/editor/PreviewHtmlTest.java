@@ -5,6 +5,9 @@ import org.chobit.epubra.app.editor.Theme;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -138,5 +141,69 @@ class PreviewHtmlTest {
         assertTrue(doc.contains("onSelectionChanged"), "选区状态要经桥回传");
         assertTrue(doc.contains("onUndo") && doc.contains("onRedo"),
                 "Ctrl+Z/Ctrl+Y 要交给应用的快照撤销，不能留两套栈");
+    }
+
+    // ------------------------------------------------------------------ 解析基准（<base>）
+
+    @Test
+    @DisplayName("<base> 插在 head 开标签之后，早于其它引用 URL 的元素")
+    void baseHrefGoesRightAfterHeadOpenTag() {
+        String doc = PreviewHtml.withBaseHref(FULL_DOC, "file:///tmp/preview/OEBPS/text/");
+
+        int headOpen = doc.indexOf("<head>");
+        int baseAt = doc.indexOf("<base");
+        assertTrue(headOpen >= 0 && baseAt >= 0, doc);
+        assertTrue(baseAt > headOpen, "base 必须在 head 内：" + doc);
+        assertTrue(baseAt < doc.indexOf("</head>"), "base 必须在 head 内：" + doc);
+        assertTrue(doc.contains("href=\"file:///tmp/preview/OEBPS/text/\""), doc);
+        assertTrue(doc.contains("<p>正文</p>"), "原有正文不能被改动");
+    }
+
+    @Test
+    @DisplayName("文档里出现 <header> 不会把 base 插错位置")
+    void headDetectionIsNotConfusedByHeaderElement() {
+        String withHeader = "<html xmlns=\"http://www.w3.org/1999/xhtml\">"
+                + "<header>不应被当成 head</header>"
+                + "<head><title>t</title></head><body><p>正文</p></body></html>";
+
+        String doc = PreviewHtml.withBaseHref(withHeader, "file:///tmp/x/");
+
+        int baseAt = doc.indexOf("<base");
+        assertTrue(baseAt > doc.indexOf("<head>"), doc);
+        assertTrue(baseAt < doc.indexOf("</head>"), doc);
+        assertFalse(doc.contains("</header><base"), "插到 <header> 后面就白注入了：" + doc);
+    }
+
+    @Test
+    @DisplayName("可视化编辑文档带 base，且序列化脚本按 id 把它剥掉")
+    void editableDocumentCarriesBaseAndStripsItOnSerialize() {
+        String doc = PreviewHtml.editableDocument(FULL_DOC, Theme.LIGHT, "file:///tmp/x/OEBPS/");
+
+        assertTrue(doc.contains("id=\"" + PreviewHtml.INJECTED_BASE_ID + "\""), doc);
+        assertTrue(doc.contains("href=\"file:///tmp/x/OEBPS/\""), doc);
+        // 回写正文时必须剥掉：镜像目录是临时产物，写进书里就成了一条指向本机 /.Epubra 的绝对路径
+        assertTrue(doc.contains("'" + PreviewHtml.INJECTED_BASE_ID + "'"),
+                "脚本要按 id 定位注入的 base：" + doc);
+        assertTrue(doc.contains("<![CDATA["), "脚本必须仍在 CDATA 内");
+        // 两参重载不注入 base——没有镜像时行为必须保持原样
+        assertFalse(PreviewHtml.editableDocument(FULL_DOC, Theme.LIGHT).contains("<base"));
+    }
+
+    @Test
+    @DisplayName("base 缺失或文档无处可插时原样返回")
+    void baseHrefIsSkippedWhenMissing() {
+        assertEquals(FULL_DOC, PreviewHtml.withBaseHref(FULL_DOC, null));
+        assertEquals(FULL_DOC, PreviewHtml.withBaseHref(FULL_DOC, "   "));
+        assertEquals("<p>x</p>", PreviewHtml.withBaseHref("<p>x</p>", "file:///tmp/x/"));
+        assertNull(PreviewHtml.withBaseHref(null, "file:///tmp/x/"));
+    }
+
+    @Test
+    @DisplayName("base 里的 & 会被转义（镜像路径可能落在含 & 的目录下）")
+    void baseHrefEscapesXmlSpecialChars() {
+        String doc = PreviewHtml.withBaseHref(FULL_DOC, "file:///tmp/a&b/OEBPS/");
+
+        assertTrue(doc.contains("href=\"file:///tmp/a&amp;b/OEBPS/\""), doc);
+        assertFalse(doc.contains("a&b"), "裸 & 会破坏 XML 解析：" + doc);
     }
 }

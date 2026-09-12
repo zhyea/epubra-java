@@ -5,6 +5,8 @@ import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.BookFactory;
 import org.chobit.epubra.lib.domain.MediaTypes;
 import org.chobit.epubra.lib.domain.Resource;
+import org.chobit.epubra.lib.util.Hrefs;
+import org.chobit.epubra.lib.util.ResourceReferences;
 import org.junit.jupiter.api.Test;
 import org.xml.sax.InputSource;
 
@@ -97,7 +99,7 @@ class ResourceOpsTest {
         String imageHref = "OEBPS/images/foo.png";
         String tag = ResourceOps.buildInsertImageTag(chapterHref, imageHref, "foo.png");
         String src = tag.substring(tag.indexOf("src=\"") + 5, tag.indexOf("\" alt="));
-        assertEquals("../images/foo.png", src);
+        assertEquals("../../images/foo.png", src);
         assertEquals(imageHref,
                 ResourceReferences.resolveTarget(Hrefs.parentDirectory(chapterHref), src));
     }
