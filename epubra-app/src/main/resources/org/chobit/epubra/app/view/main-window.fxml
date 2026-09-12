@@ -240,6 +240,8 @@
                                                                 onAction="#onInsertQuote"/>
                                                         <Button id="list" text="列表" styleClass="flat-button"
                                                                 onAction="#onInsertList"/>
+                                                        <Button id="ol" text="编号" styleClass="flat-button"
+                                                                onAction="#onInsertOrderedList"/>
                                                         <Button id="rule" text="分隔线" styleClass="flat-button"
                                                                 onAction="#onInsertRule"/>
                                                         <Button id="bold" text="加粗" styleClass="flat-button"

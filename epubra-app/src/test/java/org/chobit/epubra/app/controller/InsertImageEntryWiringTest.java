@@ -50,7 +50,7 @@ class InsertImageEntryWiringTest {
         XPath xpath = XPathFactory.newInstance().newXPath();
         NodeList buttons = (NodeList) xpath.evaluate(
                 "//FlowPane[@styleClass='editor-toolbar']//Button", fxml, XPathConstants.NODESET);
-        assertEquals(12, buttons.getLength(), "工具条应有 12 个按钮");
+        assertEquals(13, buttons.getLength(), "工具条应有 13 个按钮");
         for (int i = 0; i < buttons.getLength(); i++) {
             String id = ((Element) buttons.item(i)).getAttribute("id");
             assertTrue(ToolbarIcons.covers(id),

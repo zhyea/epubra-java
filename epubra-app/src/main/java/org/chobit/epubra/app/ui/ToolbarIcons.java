@@ -40,6 +40,10 @@ public final class ToolbarIcons {
             Map.entry("heading", "M6 5v14 M18 5v14 M6 12h12"),
             Map.entry("quote", "M5 11h4v5H5z M5 11c0-3 2-5.5 4.5-6.5 M14 11h4v5h-4z M14 11c0-3 2-5.5 4.5-6.5"),
             Map.entry("list", "M9 6h11 M9 12h11 M9 18h11 M4.5 6h.01 M4.5 12h.01 M4.5 18h.01"),
+            Map.entry("ol", "M11 6h9 M11 12h9 M11 18h9 "
+                    + "M6.5 4 5 5 M6.5 4v5 "
+                    + "M4.5 11c.2-.8 1-1.2 1.8-1 .8.2 1.2 1 .6 1.7L4.5 15h2.8 "
+                    + "M4.5 15.8h2.8L5.6 18c.9-.2 2 .4 2 1.5 0 1.1-1 1.7-2.1 1.7-.7 0-1.4-.3-1.8-.7"),
             Map.entry("rule", "M4 12h16"),
             Map.entry("bold", "M7 4h5.5a3.5 3.5 0 0 1 0 7H7V4 M7 11h6.5a3.5 3.5 0 0 1 0 7H7V11"),
             Map.entry("italic", "M10 4h9 M5 20h9 M14 4l-4 16"),
@@ -57,6 +61,7 @@ public final class ToolbarIcons {
             Map.entry("heading", "标题"),
             Map.entry("quote", "引用"),
             Map.entry("list", "列表"),
+            Map.entry("ol", "编号列表"),
             Map.entry("rule", "分隔线"),
             Map.entry("bold", "加粗"),
             Map.entry("italic", "斜体"),

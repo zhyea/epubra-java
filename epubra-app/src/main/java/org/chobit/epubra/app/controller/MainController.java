@@ -44,7 +44,9 @@ import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.Dialog;
 import javafx.scene.control.IndexRange;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
@@ -55,9 +57,11 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
-import javafx.scene.control.TextInputDialog;
+import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.control.ToggleGroup;
+import javafx.geometry.Insets;
+import javafx.scene.layout.VBox;
 import javafx.scene.input.Dragboard;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
@@ -1199,6 +1203,14 @@ public class MainController {
         }
     }
 
+    /** 编号列表：可视化编辑器内切换 ol；源码视图则插入一段带编号列表的 XHTML 片段。 */
+    @FXML
+    public void onInsertOrderedList() {
+        if (!applyVisualFormat("ol")) {
+            insertActivity.orderedList();
+        }
+    }
+
     @FXML
     public void onInsertQuote() {
         applyVisualFormat("quote");
@@ -1224,31 +1236,87 @@ public class MainController {
         applyVisualFormat("code");
     }
 
-    /** 链接：先问一句网址，再交给可视化编辑器把选区（或空选区）包成 {@code <a href>}。 */
+    /**
+     * 链接弹窗：输入框占整行（标签放输入框上方，而不是 TextInputDialog 的「标签： 输入框」
+     * 同行布局），光标已在链接里时回填现有地址，并提供「取消链接」按钮拆掉
+     * {@code <a>} 保留文字。确认后交给可视化编辑器把选区（或空选区）包成 {@code <a href>}。
+     */
     @FXML
     public void onInsertLink() {
         if (!visualEditorReady()) {
             status.set("编辑视图尚未就绪，请稍后重试");
             return;
         }
-        TextInputDialog dialog = new TextInputDialog();
+        Dialog<String> dialog = new Dialog<>();
         dialog.setTitle("插入链接");
-        dialog.setHeaderText(null);
-        dialog.setContentText("链接地址：");
+        dialog.setHeaderText("输入链接地址；选中的文字将成为链接。光标在链接内时可直接改地址或取消链接。");
+        Label label = new Label("链接地址：");
+        TextField input = new TextField();
+        input.setPromptText("https://example.com/page");
+        input.setMaxWidth(Double.MAX_VALUE);
+        VBox content = new VBox(6, label, input);
+        content.setPadding(new Insets(4, 8, 4, 8));
+        dialog.getDialogPane().setContent(content);
+        dialog.getDialogPane().setPrefWidth(420);
         if (stage != null) {
             dialog.initOwner(stage);
         }
-        Optional<String> input = dialog.showAndWait();
-        if (input.isEmpty()) {
+        ButtonType unlinkType = new ButtonType("取消链接", ButtonBar.ButtonData.LEFT);
+        dialog.getDialogPane().getButtonTypes().addAll(unlinkType, ButtonType.OK, ButtonType.CANCEL);
+        // 回填：光标已在链接内时，把现有 href 放进输入框方便直接改
+        String currentHref = queryLinkHref();
+        if (currentHref != null && !currentHref.isEmpty()) {
+            input.setText(currentHref);
+        }
+        dialog.setResultConverter(type -> {
+            if (type == unlinkType) {
+                return UNLINK_RESULT;
+            }
+            if (type.getButtonData() == ButtonBar.ButtonData.OK_DONE) {
+                return input.getText();
+            }
+            return null;
+        });
+        // 链接地址要随输入可用才点亮 OK：空地址点确认按「地址为空」处理
+        input.textProperty().addListener((obs, oldV, newV) ->
+                dialog.getDialogPane().lookupButton(ButtonType.OK)
+                        .setDisable(newV == null || newV.isBlank()));
+        dialog.getDialogPane().lookupButton(ButtonType.OK).setDisable(true);
+        Platform.runLater(input::requestFocus);
+
+        Optional<String> result = dialog.showAndWait();
+        if (result.isEmpty()) {
             return;
         }
-        String href = input.get().trim();
+        String value = result.get();
+        if (UNLINK_RESULT.equals(value)) {
+            if (applyVisualFormat("unlink")) {
+                status.set("已取消链接");
+            } else {
+                status.set("光标不在链接内，无法取消链接");
+            }
+            return;
+        }
+        String href = value.trim();
         if (href.isEmpty()) {
             status.set("链接地址为空，已取消");
             return;
         }
         if (!applyVisualFormat("link", href)) {
             status.set("链接地址无法使用（不支持 javascript: / data: 这类地址）");
+        }
+    }
+
+    /** {@link #onInsertLink()} 结果转换里「取消链接」按钮的哨兵值。 */
+    private static final String UNLINK_RESULT = "\u0000unlink";
+
+    /** 读取可视化编辑器里光标所在链接的 href；编辑器未就绪或不在链接内返回空串。 */
+    private String queryLinkHref() {
+        try {
+            Object href = visualEditorView.getEngine().executeScript("window.epubraQueryLink()");
+            return href instanceof String s ? s : "";
+        } catch (RuntimeException notLoadedYet) {
+            return "";
         }
     }
 

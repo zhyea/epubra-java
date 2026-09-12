@@ -50,6 +50,11 @@ public class InsertActivity {
         insertFragment("<ul>\n<li></li>\n</ul>", "<ul>\n<li>".length());
     }
 
+    /** 编号列表骨架（ol）；与无序列表同款骨架，仅标签不同。 */
+    public void orderedList() {
+        insertFragment("<ol>\n<li></li>\n</ol>", "<ol>\n<li>".length());
+    }
+
     /**
      * 通用片段插入助手。选区非空时把 {@code fragment} 视作「左右两侧开闭标记 + 选区内容」
      * 重写；选区为空时把 {@code fragment} 插到光标处。光标停在 {@code caretOffset}

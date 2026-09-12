@@ -302,6 +302,128 @@ class VisualEditorFormatTest {
         assertTrue(out.contains("段落"), "段落文字不能丢：" + out);
     }
 
+    @Test
+    @Timeout(60)
+    @DisplayName("行内格式（加粗/斜体/下划线/删除线）再点一次取消包裹，不再嵌套")
+    void inlineFormatsToggleOff() throws Exception {
+        String[][] cases = {{"bold", "strong"}, {"italic", "em"},
+                {"underline", "u"}, {"strike", "del"}};
+        for (String[] c : cases) {
+            loadEditableDocument();
+            selectParagraphContents();
+            assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('" + c[0] + "')")),
+                    c[0] + " 第一次应用应成功");
+            Object active = runScript("window.epubraQuery()");
+            assertTrue(active instanceof String && ((String) active).contains(c[0]),
+                    "刚应用 " + c[0] + " 应报告激活态（工具条靠它点亮），实际：" + active);
+
+            // wrapInline 之后选区落在包裹层内容上，第二次应用走的是「拆层」路径
+            assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('" + c[0] + "')")),
+                    c[0] + " 第二次应用应取消包裹");
+
+            String xhtml = serialized();
+            assertFalse(bodyHasTag(c[1]),
+                    c[0] + " 取消后不应残留 <" + c[1] + ">：" + xhtml);
+            assertTrue(xhtml.contains("正文"), "取消包裹不能丢文字：" + xhtml);
+            assertWellFormedXhtml(xhtml);
+        }
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("编号列表：ol 产出 <ol> 并点亮 ol 态；再点退回段落；ul 可直接换型")
+    void orderedListConvertsAndToggles() throws Exception {
+        caretIntoParagraph();
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('ol')")));
+        assertTrue(bodyHasTag("ol"), "应包出 ol：" + serialized());
+        assertFalse(bodyHasTag("ul"), "点编号列表不应误产出 ul：" + serialized());
+        assertWellFormedXhtml(serialized());
+        Object active = runScript("window.epubraQuery()");
+        assertTrue(active instanceof String && ((String) active).contains("ol"),
+                "有序列表应报告 ol，实际：" + active);
+
+        caretIntoParagraph();
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('ol')")),
+                "已在 ol 里再点一次应退回段落");
+        assertFalse(bodyHasTag("ol"), "退回后不应残留 ol：" + serialized());
+        assertTrue(serialized().contains("<p"), "应恢复成段落：" + serialized());
+        assertWellFormedXhtml(serialized());
+
+        // ul → ol 直接换型，不必先退回段落
+        caretIntoParagraph();
+        runScript("window.epubraFormat('list')");
+        caretIntoParagraph();
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('ol')")),
+                "在 ul 上点编号列表应换型为 ol");
+        assertTrue(bodyHasTag("ol"), "应换成 ol：" + serialized());
+        assertFalse(bodyHasTag("ul"), "换型后不应残留 ul：" + serialized());
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("列表内 Tab 缩进成子列表，Shift+Tab 降级还原")
+    void listTabIndentsAndShiftTabOutdents() throws Exception {
+        caretIntoParagraph();
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('list')")));
+        // 造第二个列表项；光标收进它，Tab 才有「前一项」可挂子列表（第一项缩不了）
+        runScript("(function () {"
+                + " var ul = document.body.querySelector('ul');"
+                + " var li = document.createElementNS('http://www.w3.org/1999/xhtml', 'li');"
+                + " li.textContent = '第二条';"
+                + " ul.appendChild(li);"
+                + " var r = document.createRange(); r.selectNodeContents(li); r.collapse(true);"
+                + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+                + " return true; })()");
+
+        // 合成 Tab 键盘事件，走 document 上的捕获监听器
+        runScript("document.dispatchEvent(new KeyboardEvent('keydown',"
+                + " {key: 'Tab', bubbles: true, cancelable: true}))");
+        assertTrue(Boolean.TRUE.equals(runScript(
+                "(function () {"
+                + " var sub = document.querySelector('ul > li > ul > li');"
+                + " return !!sub && sub.textContent === '第二条'; })()")),
+                "Tab 应把当前项缩进成前一项内的子列表：" + serialized());
+        assertWellFormedXhtml(serialized());
+
+        // 缩进后光标仍留在被挪动的 li 里，Shift+Tab 直接降级
+        runScript("document.dispatchEvent(new KeyboardEvent('keydown',"
+                + " {key: 'Tab', shiftKey: true, bubbles: true, cancelable: true}))");
+        assertTrue(Boolean.TRUE.equals(runScript(
+                "(function () {"
+                + " var lis = document.querySelectorAll('ul > li');"
+                + " return lis.length === 2 && !document.querySelector('ul li ul'); })()")),
+                "Shift+Tab 应把子列表降级回顶层并删掉空子列表：" + serialized());
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("取消链接：拆掉 <a> 保留文字；queryLink 可回填当前链接地址")
+    void unlinkRemovesAnchorKeepsText() throws Exception {
+        selectParagraphContents();
+        assertTrue(Boolean.TRUE.equals(
+                runScript("window.epubraFormat('link', 'https://example.com/x')")));
+        Object href = runScript("window.epubraQueryLink()");
+        assertTrue(String.valueOf(href).equals("https://example.com/x"),
+                "包裹后选区在链接内，queryLink 应回填地址，实际：" + href);
+
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('unlink')")),
+                "取消链接应成功");
+        String xhtml = serialized();
+        assertFalse(bodyHasTag("a"), "取消后不应残留 <a>：" + xhtml);
+        assertTrue(xhtml.contains("正文"), "链接里的文字要保留：" + xhtml);
+        assertTrue(String.valueOf(runScript("window.epubraQueryLink()")).isEmpty(),
+                "取消后 queryLink 应为空串");
+        assertWellFormedXhtml(xhtml);
+
+        // 光标不在链接里时取消链接是无操作
+        loadEditableDocument();
+        selectParagraphContents();
+        assertFalse(Boolean.TRUE.equals(runScript("window.epubraFormat('unlink')")),
+                "不在链接内时 unlink 应返回 false");
+    }
+
     // ------------------------------------------------------------------ 脚本与断言助手
 
     /** 选中正文段落里的文字（模拟用户划选一段后点工具条）。 */
@@ -351,6 +473,15 @@ class VisualEditorFormatTest {
         Object result = runScript("window.epubraSerialize()");
         assertTrue(result instanceof String, "serialize 应返回字符串，实际：" + result);
         return (String) result;
+    }
+
+    /**
+     * 只查 body 里有没有某标签。负向断言必须走这里而不是对整篇序列化文本做
+     * 子串匹配——head 里内嵌的编辑器脚本源码本身含有 &lt;strong&gt;、&lt;a&gt; 等字样，
+     * 会把「已取消」误判成「仍残留」。
+     */
+    private boolean bodyHasTag(String tag) throws Exception {
+        return Boolean.TRUE.equals(runScript("!!document.body.querySelector('" + tag + "')"));
     }
 
     private static void assertWellFormedXhtml(String xhtml) {

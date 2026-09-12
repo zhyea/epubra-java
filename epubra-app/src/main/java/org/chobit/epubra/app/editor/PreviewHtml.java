@@ -126,10 +126,12 @@ public final class PreviewHtml {
      * </ul>
      * Java 侧可调用的入口：
      * <ul>
-     *   <li>{@code window.epubraFormat(kind[, value])} —— 段落/标题/引用/列表/分隔线/
-     *       加粗/斜体/下划线/删除线/行内代码/链接</li>
+     *   <li>{@code window.epubraFormat(kind[, value])} —— 段落/标题/引用/列表/编号列表/
+     *       分隔线/加粗/斜体/下划线/删除线/行内代码/链接/取消链接。行内格式与列表均为
+     *       切换语义：已生效再调一次即取消；列表内 Tab / Shift+Tab 调层级</li>
      *   <li>{@code window.epubraInsertHtml(html)} —— 片段插到光标处（图片等）</li>
      *   <li>{@code window.epubraQuery()} —— 当前生效格式名（空格分隔）</li>
+     *   <li>{@code window.epubraQueryLink()} —— 光标所在链接的 href（不在链接内为空串）</li>
      *   <li>{@code window.epubraSerialize()} —— 主动拉取当前正文</li>
      * </ul>
      *
@@ -294,20 +296,109 @@ public final class PreviewHtml {
                 return true;
               }
 
-              // 段落 / 标题 / 列表 三者互转；已经是列表了再点一次退回段落
-              function toggleList() {
+              // 段落 / 标题 / 列表 三者互转；已经是列表了再点一次退回段落；
+              // ul 与 ol 互相点则直接换列表类型，不必先退回段落。
+              function toggleList(kind) {
                 var s = activeSelection();
-                if (!s) { return false; }
+                if (!s || !s.rangeCount) { return false; }
                 var block = topBlock(s.getRangeAt(0).startContainer);
                 if (!block) { return false; }
-                if (isList(block)) { return formatBlock('p'); }
+                if (isList(block)) {
+                  if (tagOf(block) === kind) { return formatBlock('p'); }
+                  var converted = makeTag(kind);
+                  moveChildren(block, converted);
+                  block.parentNode.replaceChild(converted, block);
+                  return true;
+                }
 
-                var list = makeTag('ul');
+                var list = makeTag(kind);
                 var item = makeTag('li');
                 moveChildren(block, item);
                 list.appendChild(item);
                 block.parentNode.replaceChild(list, block);
                 collapseInto(item);
+                return true;
+              }
+
+              // ---- 列表层级：Tab 缩进 / Shift+Tab 降级 ------------------------
+              function closestListItem(node) {
+                var n = (node && node.nodeType === 1) ? node : (node ? node.parentNode : null);
+                while (n && n !== document.body) {
+                  if (tagOf(n) === 'li') { return n; }
+                  n = n.parentNode;
+                }
+                return null;
+              }
+
+              // Tab：把当前 li 挪进前一项里的同类型子列表（第一项没有前项，缩不了）
+              function indentListItem(li) {
+                var list = li.parentNode;
+                if (!list || (tagOf(list) !== 'ul' && tagOf(list) !== 'ol')) { return false; }
+                var prev = li.previousSibling;
+                while (prev && tagOf(prev) !== 'li') { prev = prev.previousSibling; }
+                if (!prev) { return false; }
+                var sub = makeTag(tagOf(list));
+                prev.appendChild(sub);
+                sub.appendChild(li);
+                collapseInto(li);
+                return true;
+              }
+
+              // Shift+Tab：把当前 li（连同它后面的兄弟项）提出来放到宿主 li 之后；
+              // 已经是顶层列表的项没有层级可降，维持原状。
+              function outdentListItem(li) {
+                var list = li.parentNode;
+                if (!list || (tagOf(list) !== 'ul' && tagOf(list) !== 'ol')) { return false; }
+                var hostLi = list.parentNode;
+                if (tagOf(hostLi) !== 'li') { return false; }
+                var moved = document.createDocumentFragment();
+                var n = li;
+                while (n) { var next = n.nextSibling; moved.appendChild(n); n = next; }
+                hostLi.parentNode.insertBefore(moved, hostLi.nextSibling);
+                if (!list.querySelector('li')) { list.parentNode.removeChild(list); }
+                collapseInto(li);
+                return true;
+              }
+
+              // 行内格式切换：光标/选区已在包裹层内则拆掉（含嵌套同名层），否则包上。
+              // 拆掉后选区落在原被包裹内容上——用户可以直接再点一次重新包上。
+              // 旧实现只会往上包：再点一次变成嵌套 <strong><strong>，永远取消不掉。
+              function findWrap(node, tag) {
+                var n = (node && node.nodeType === 1) ? node : (node ? node.parentNode : null);
+                while (n && n !== document.body) {
+                  if (tagOf(n) === tag) { return n; }
+                  n = n.parentNode;
+                }
+                return null;
+              }
+
+              function unwrapEl(el) {
+                var parent = el.parentNode;
+                if (!parent) { return null; }
+                var first = el.firstChild;
+                var last = el.lastChild;
+                while (el.firstChild) { parent.insertBefore(el.firstChild, el); }
+                var range = null;
+                if (first) {
+                  range = document.createRange();
+                  range.setStartBefore(first);
+                  range.setEndAfter(last);
+                }
+                parent.removeChild(el);
+                return range;
+              }
+
+              function toggleInline(tag) {
+                var s = activeSelection();
+                if (!s || !s.rangeCount) { return false; }
+                var existing = findWrap(s.getRangeAt(0).startContainer, tag);
+                if (!existing) { return wrapInline(tag); }
+                var last = null;
+                while (existing) {
+                  last = unwrapEl(existing);
+                  existing = last ? findWrap(last.startContainer, tag) : null;
+                }
+                if (last) { s.removeAllRanges(); s.addRange(last); }
                 return true;
               }
 
@@ -339,14 +430,16 @@ public final class PreviewHtml {
                 if (kind === 'paragraph') { ok = formatBlock('p'); }
                 else if (kind === 'heading') { ok = formatBlock('h2'); }
                 else if (kind === 'quote') { ok = toggleQuote(); }
-                else if (kind === 'list') { ok = toggleList(); }
+                else if (kind === 'list') { ok = toggleList('ul'); }
+                else if (kind === 'ol') { ok = toggleList('ol'); }
                 else if (kind === 'rule') { ok = insertRule(); }
-                else if (kind === 'bold') { ok = wrapInline('strong'); }
-                else if (kind === 'italic') { ok = wrapInline('em'); }
-                else if (kind === 'underline') { ok = wrapInline('u'); }
-                else if (kind === 'strike') { ok = wrapInline('del'); }
-                else if (kind === 'code') { ok = wrapInline('code'); }
+                else if (kind === 'bold') { ok = toggleInline('strong'); }
+                else if (kind === 'italic') { ok = toggleInline('em'); }
+                else if (kind === 'underline') { ok = toggleInline('u'); }
+                else if (kind === 'strike') { ok = toggleInline('del'); }
+                else if (kind === 'code') { ok = toggleInline('code'); }
                 else if (kind === 'link') { ok = wrapLink(value); }
+                else if (kind === 'unlink') { ok = unwrapLink(); }
                 if (ok) { push(); }
                 return ok;
               };
@@ -373,13 +466,20 @@ public final class PreviewHtml {
                 return true;
               }
 
-              // 链接：选区包成 <a href>；空选区插一对空 <a> 并把光标落在中间
+              // 链接：选区包成 <a href>；空选区插一对空 <a> 并把光标落在中间。
+              // 光标已在链接内时（epubraQueryLink 返回非空），wrapLink 不再嵌套，
+              // 直接改写现有链接的 href——「编辑链接」语义。
               function wrapLink(href) {
                 var safe = safeUrl(href, false);
                 if (!safe) { return false; }
                 var s = activeSelection();
-                if (!s) { return false; }
+                if (!s || !s.rangeCount) { return false; }
                 var range = s.getRangeAt(0);
+                var existing = findWrap(range.startContainer, 'a');
+                if (existing) {
+                  existing.setAttribute('href', safe);
+                  return true;
+                }
                 var el = makeTag('a');
                 el.setAttribute('href', safe);
                 if (range.collapsed) {
@@ -394,6 +494,21 @@ public final class PreviewHtml {
                   range.insertNode(el);
                 }
                 selectContents(el);
+                return true;
+              }
+
+              // 取消链接：拆掉光标/选区所在的 <a>，保留里面的文字
+              function unwrapLink() {
+                var s = activeSelection();
+                if (!s || !s.rangeCount) { return false; }
+                var wrapped = findWrap(s.getRangeAt(0).startContainer, 'a');
+                if (!wrapped) { return false; }
+                var last = null;
+                while (wrapped) {
+                  last = unwrapEl(wrapped);
+                  wrapped = last ? findWrap(last.startContainer, 'a') : null;
+                }
+                if (last) { s.removeAllRanges(); s.addRange(last); }
                 return true;
               }
 
@@ -426,11 +541,23 @@ public final class PreviewHtml {
                 }
                 var block = closestBlock(range.startContainer);
                 var bt = tagOf(block);
-                if (bt === 'li') { out.push('list'); }
+                if (bt === 'li') {
+                  // 无序列表报 'list'（点「列表」按钮退回段落），有序列表报 'ol'
+                  var ln = block.parentNode;
+                  out.push(ln && tagOf(ln) === 'ol' ? 'ol' : 'list');
+                }
                 else if (bt === 'h1' || bt === 'h2' || bt === 'h3') { out.push('heading'); }
                 else if (bt === 'blockquote') { out.push('quote'); }
                 else if (bt === 'p') { out.push('paragraph'); }
                 return out.join(' ');
+              };
+
+              // 光标所在链接的 href；不在链接里返回空串（供「插入链接」弹窗回填地址）
+              window.epubraQueryLink = function () {
+                var s = activeSelection();
+                if (!s || !s.rangeCount) { return ''; }
+                var found = findWrap(s.getRangeAt(0).startContainer, 'a');
+                return found ? (found.getAttribute('href') || '') : '';
               };
 
               function notifySelection() {
@@ -445,6 +572,18 @@ public final class PreviewHtml {
               // 用捕获阶段：编辑器的默认处理在目标元素上，冒泡阶段拦不住。
               // Ctrl+Z / Ctrl+Y 交给 Java 的应用级快照撤销，避免两套撤销栈打架。
               document.addEventListener('keydown', function (e) {
+                // 列表里的 Tab / Shift+Tab = 多层级缩进 / 降级；不在列表里交给默认行为
+                if ((e.key || '') === 'Tab' && !(e.ctrlKey || e.metaKey)) {
+                  var s = activeSelection();
+                  var li = (s && s.rangeCount) ? closestListItem(s.getRangeAt(0).startContainer) : null;
+                  if (li) {
+                    var done = e.shiftKey ? outdentListItem(li) : indentListItem(li);
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (done) { push(); }
+                  }
+                  return;
+                }
                 if (!(e.ctrlKey || e.metaKey)) { return; }
                 var k = (e.key || '').toLowerCase();
                 var handled = true;

@@ -103,8 +103,8 @@ class VisualEditorTabUiTest {
             TabPane tabs = field(mainController, "editorTabs");
             FlowPane toolbar = field(mainController, "editorToolbar");
             assertNotNull(toolbar, "editorToolbar 字段应被 FXML 注入");
-            assertEquals(12, toolbar.getChildren().size(),
-                    "工具条应有 段落/标题/引用/列表/分隔线/加粗/斜体/下划线/删除线/行内代码/链接/图片 十二个按钮");
+            assertEquals(13, toolbar.getChildren().size(),
+                    "工具条应有 段落/标题/引用/列表/编号/分隔线/加粗/斜体/下划线/删除线/行内代码/链接/图片 十三个按钮");
 
             Node tabContent = tabs.getTabs().get(0).getContent();
             assertSame(tabContent, toolbar.getParent(),
@@ -140,7 +140,7 @@ class VisualEditorTabUiTest {
                         "Tooltip 显示延迟必须压到 300ms 内，实际："
                                 + button.getTooltip().getShowDelay() + "（" + button.getId() + "）");
             }
-            assertEquals(java.util.List.of("paragraph", "heading", "quote", "list", "rule",
+            assertEquals(java.util.List.of("paragraph", "heading", "quote", "list", "ol", "rule",
                             "bold", "italic", "underline", "strike", "code", "link", "image"),
                     ids, "按钮 id（= 格式名）与顺序必须与 window.epubraQuery() 的返回值一致");
 
