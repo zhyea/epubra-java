@@ -10,10 +10,18 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * 资源面板的纯逻辑：行构建、被正文中其它资源引用判定、插入正文图片模板生成。
+ * 插图 / 资源相关的纯逻辑集合，不依赖 JavaFX：
+ * <ul>
+ *   <li>资源面板的行过滤（{@link #userVisible}）与删除前引用提示判定
+ *       （{@link #isReferencedByChapters}）；</li>
+ *   <li>编辑器工具条「图片」按钮的插图流水线：等价资源查找（{@link #findEquivalent}）、
+ *       {@code <img>} 标签生成（{@link #buildInsertImageTag}）、多图片段拼接
+ *       （{@link #joinInsertFragments}）。</li>
+ * </ul>
  *
  * <p>UI 操作（选行、文件选择器、确认对话框等）在 {@code ResourceController} 里组装，
- * 这里只做不依赖 JavaFX 的判定与渲染。这样可以在单元测试里直接覆盖筛选/引用判定。
+ * 这里只做判定与渲染，方便在单元测试里直接覆盖。最初只为资源面板服务，
+ * P1/P2 轮次后编辑器工具条的插图链路也走这里。
  */
 public final class ResourceOps {
 

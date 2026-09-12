@@ -65,6 +65,10 @@ public class ResourceController {
      */
     private XhtmlInserter insertXhtml = xhtml -> false;
 
+    /** 编辑 tab 工具条「图片」按钮支持的扩展名，与资源导入的图片部分保持一致。 */
+    private static final List<String> IMAGE_EXTENSIONS =
+            List.of("*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.svg");
+
     /** 主窗口 stage（FileChooser 的 owner）。由 {@link #setStage} 在 FXML 加载后补发。 */
     private Stage stage;
 
@@ -168,7 +172,7 @@ public class ResourceController {
                 () -> readFilesInBackground(paths),
                 progress != null ? progress : AsyncTasks.NOOP_PROGRESS,
                 loaded -> attachLoadedFiles(loaded),
-                err -> showError.report("导入失败", "后台读取出错", (Exception) err)
+                err -> showError.report("导入失败", "后台读取出错", err)
         );
     }
 
@@ -318,10 +322,6 @@ public class ResourceController {
         }
     }
 
-    /** 编辑 tab 工具条「图片」按钮支持的类型，与资源导入的图片部分保持一致。 */
-    private static final String[] IMAGE_EXTENSIONS =
-            {"*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.svg"};
-
     private static boolean isImageFileName(String fileName) {
         return MediaTypes.guessByExtension(fileName).startsWith("image/");
     }
@@ -349,8 +349,10 @@ public class ResourceController {
         }
         FileChooser chooser = new FileChooser();
         chooser.setTitle("插入图片");
+        // toArray 每次产出新数组：ExtensionFilter 会持有传入的数组引用，
+        // 不能让它直接共享本类的静态状态（旧实现是可变静态数组，正是踩了这个坑）。
         chooser.getExtensionFilters().add(
-                new FileChooser.ExtensionFilter("图片", IMAGE_EXTENSIONS));
+                new FileChooser.ExtensionFilter("图片", IMAGE_EXTENSIONS.toArray(new String[0])));
         List<File> picked = chooser.showOpenMultipleDialog(stage);
         if (picked == null || picked.isEmpty()) {
             return;
@@ -390,7 +392,7 @@ public class ResourceController {
                 () -> readFilesInBackground(images),
                 progress != null ? progress : AsyncTasks.NOOP_PROGRESS,
                 loaded -> attachImagesAndInsert(chapterHref, loaded),
-                err -> showError.report("插入图片失败", "后台读取出错", (Exception) err)
+                err -> showError.report("插入图片失败", "后台读取出错", err)
         );
     }
 
@@ -485,10 +487,16 @@ public class ResourceController {
         return resourceTable.getSelectionModel().getSelectedItem();
     }
 
-    /** 文件/导入类异常走 MainController 的 showError 通道——本地定义为函数式接口避免依赖 Alert。 */
+    /**
+     * 文件/导入类异常走 MainController 的 showError 通道——本地定义为函数式接口避免依赖 Alert。
+     *
+     * <p>参数是 {@link Throwable}：{@code AsyncTasks.runIo} 的 onError 拿到的就是
+     * {@code Throwable}，签名对齐后调用方直接透传，不再需要 {@code (Exception)} 强转
+     * （Error 场景强转会 CCE，把真正的故障吞掉）。
+     */
     @FunctionalInterface
     public interface ErrorReporter {
-        void report(String title, String message, Exception e);
+        void report(String title, String message, Throwable e);
     }
 
     /**

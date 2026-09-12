@@ -1592,6 +1592,9 @@ public class MainController {
     /** 工具条按钮「当前格式生效」时挂的样式类，见 app.css 的 {@code .flat-button.active}。 */
     private static final String TOOLBAR_ACTIVE_CLASS = "active";
 
+    /** 动作按钮的标记样式类（如「图片」）：没有「光标处格式生效」状态，不参与点亮。 */
+    private static final String TOOLBAR_ACTION_CLASS = "toolbar-action";
+
     /**
      * 按 {@code window.epubraQuery()} 的返回值点亮工具条。
      *
@@ -1609,6 +1612,11 @@ public class MainController {
                 : new HashSet<>(List.of(active.trim().split("\\s+")));
         for (Node child : editorToolbar.getChildren()) {
             if (!(child instanceof Button button) || button.getId() == null) {
+                continue;
+            }
+            // 动作按钮（如「图片」= 弹文件选择器）没有「生效格式」状态，
+            // epubraQuery 永远不会返回它的 id；不跳过的话它只是一个永不点亮的摆设。
+            if (button.getStyleClass().contains(TOOLBAR_ACTION_CLASS)) {
                 continue;
             }
             boolean shouldBeOn = on.contains(button.getId());

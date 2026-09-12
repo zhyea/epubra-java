@@ -244,7 +244,14 @@ public class StatusCoordinator {
         };
     }
 
-    public void showError(String title, String message, Exception e) {
+    /**
+     * 错误弹窗。参数是 {@link Throwable} 而非 {@link Exception}：
+     * {@code AsyncTasks.runIo} 的 onError 拿到的是 {@code Throwable}
+     * （{@code onSuccess} 回调自身抛出的 {@link Error} 也会被 routed 进来），
+     * 签名放宽后调用方直接透传，不需要强转——强转 {@code (Exception)} 在
+     * Error 场景会抛 ClassCastException，把真正的故障吞掉。
+     */
+    public void showError(String title, String message, Throwable e) {
         javafx.scene.control.Alert alert = new javafx.scene.control.Alert(javafx.scene.control.Alert.AlertType.ERROR);
         alert.setTitle(title);
         alert.setHeaderText(message);

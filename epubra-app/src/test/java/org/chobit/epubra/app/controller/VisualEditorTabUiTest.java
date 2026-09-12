@@ -132,6 +132,17 @@ class VisualEditorTabUiTest {
             assertEquals(java.util.List.of("paragraph", "heading", "quote", "list", "rule",
                             "bold", "italic", "underline", "strike", "code", "link", "image"),
                     ids, "按钮 id（= 格式名）与顺序必须与 window.epubraQuery() 的返回值一致");
+
+            // 「图片」是动作按钮（弹文件选择器），不是格式状态：必须带 toolbar-action 标记，
+            // 否则 updateToolbarState 会把它当格式按钮参与点亮——而 epubraQuery 永远不会
+            // 返回它的 id，它就只是一个永不点亮的摆设（P3 修复的回归守卫）。
+            for (Node child : toolbar.getChildren()) {
+                Button button = (Button) child;
+                boolean isAction = button.getStyleClass().contains("toolbar-action");
+                assertEquals("image".equals(button.getId()), isAction,
+                        "只有「图片」应是动作按钮，实际：" + button.getId()
+                                + " styleClass=" + button.getStyleClass());
+            }
         });
     }
 

@@ -255,8 +255,12 @@
                                                         <Button id="link" text="链接" styleClass="flat-button"
                                                                 onAction="#onInsertLink"/>
                                                         <!-- 图片与菜单「插入 → 插入图片」同一个入口（从已导入资源里选），
-                                                             不另插一个裸 img 标签，避免两种不一致的行为 -->
-                                                        <Button id="image" text="图片" styleClass="flat-button"
+                                                             不另插一个裸 img 标签，避免两种不一致的行为。
+                                                             toolbar-action 样式类 = 动作按钮：它没有「当前光标处
+                                                             格式已生效」的状态，updateToolbarState 会跳过它，
+                                                             不会被错误地点亮。 -->
+                                                        <Button id="image" text="图片"
+                                                                styleClass="flat-button, toolbar-action"
                                                                 onAction="#onInsertImageFromDisk"/>
                                                     </FlowPane>
                                                     <WebView fx:id="visualEditorView" VBox.vgrow="ALWAYS"/>

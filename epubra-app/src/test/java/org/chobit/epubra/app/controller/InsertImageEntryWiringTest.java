@@ -12,6 +12,7 @@ import javax.xml.xpath.XPathFactory;
 import java.io.InputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * 两个「插入图片」入口的分工契约。
@@ -51,7 +52,7 @@ class InsertImageEntryWiringTest {
         XPath xpath = XPathFactory.newInstance().newXPath();
         Element element = (Element) xpath.evaluate(expression, doc, XPathConstants.NODE);
         if (element == null) {
-            throw new AssertionError("FXML 里找不到元素：" + expression);
+            fail("FXML 里找不到元素：" + expression);
         }
         return element.getAttribute(attribute);
     }
