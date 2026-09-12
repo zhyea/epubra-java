@@ -254,7 +254,9 @@ class ResourceControllerImageInsertTest {
                     xhtml -> {
                         inserted.add(xhtml);
                         return insertSucceeds;
-                    });
+                    },
+                    // 用例直接驱动 insertImagesFromPaths（跳过入口章节检查），provider 给空实现即可
+                    () -> null);
         }
 
         /** 同一 harness 上再跑一次流水线前，重新准备完成信号。 */

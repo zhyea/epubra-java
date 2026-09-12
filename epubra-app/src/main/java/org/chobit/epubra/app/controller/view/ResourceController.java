@@ -55,7 +55,13 @@ public class ResourceController {
     private BooleanSupplier confirm;
     private ErrorReporter showError;
     private AsyncTasks.ProgressController progress;
+    /**
+     * 「当前章节」provider：插入图片要拿章节 href 作基准算相对路径。由 {@link #bind}
+     * 必传注入（曾以 setter 形式存在，结果从未被调用、恒为默认空实现，工具条/资源面板
+     * 插图全部误报「请先选择章节」——必须走 bind 编译期强制接线）。
+     */
     private Supplier<ChapterNode> currentNodeProvider = () -> null;
+
     /**
      * 把一段 XHTML 片段插到当前激活的编辑器（编辑 tab → 可视化编辑器，否则源码区）。
      *
@@ -76,7 +82,14 @@ public class ResourceController {
         this.stage = stage;
     }
 
-    /** FXML 加载后由父控制器注入运行时依赖；必须在任何 onAction 触发前完成。 */
+    /**
+     * FXML 加载后由父控制器注入运行时依赖；必须在任何 onAction 触发前完成。
+     *
+     * <p>{@code currentNodeProvider} 是<b>必传</b>依赖而非可选 setter：插入图片需要
+     * 当前章节的 href 作相对路径基准，而本类不持有目录树状态。它曾以
+     * {@code setCurrentNodeProvider} setter 形式存在，结果从未被接线、恒为空实现，
+     * 两个插图入口全部误报「请先在左侧目录中选择章节」——收进 bind 后漏装会直接编译失败。
+     */
     public void bind(BookContext ctx,
                      Runnable beginChange, Runnable markDirty,
                      Runnable refreshAll, Runnable refreshResources,
@@ -85,7 +98,8 @@ public class ResourceController {
                      Consumer<String> warn, BooleanSupplier confirm,
                      ErrorReporter showError,
                      AsyncTasks.ProgressController progress,
-                     XhtmlInserter insertXhtml) {
+                     XhtmlInserter insertXhtml,
+                     Supplier<ChapterNode> currentNodeProvider) {
         this.ctx = ctx;
         this.beginChange = beginChange;
         this.markDirty = markDirty;
@@ -99,11 +113,8 @@ public class ResourceController {
         this.showError = showError;
         this.progress = progress;
         this.insertXhtml = insertXhtml;
-        wireCoverButtonRefresh();
-    }
-
-    public void setCurrentNodeProvider(Supplier<ChapterNode> currentNodeProvider) {
         this.currentNodeProvider = currentNodeProvider == null ? () -> null : currentNodeProvider;
+        wireCoverButtonRefresh();
     }
 
     /**

@@ -407,7 +407,10 @@ public class MainController {
                 () -> metadataViewController.refreshCoverCard(),
                 status::refresh, status::set, this::warn,
                 this::confirmDiscardChanges, status::showError,
-                status.progressSink(), this::insertXhtmlIntoActiveEditor);
+                status.progressSink(), this::insertXhtmlIntoActiveEditor,
+                // 插图要拿章节 href 算相对路径；这里必须接目录树的「当前章节」，
+                // 漏接会让工具条/资源面板插图恒报「请先选择章节」（曾真实发生）
+                this::currentChapter);
 
         findBarController.bind(ctx, contentArea,
                 this::beginChange, this::markDirty,

@@ -11,6 +11,9 @@ import javafx.scene.control.TextArea;
 import javafx.scene.layout.FlowPane;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
+import org.chobit.epubra.app.controller.view.ResourceController;
+import org.chobit.epubra.app.controller.view.TocController;
+import org.chobit.epubra.app.ui.model.ChapterNode;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,6 +23,7 @@ import java.lang.reflect.Field;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -153,6 +157,27 @@ class VisualEditorTabUiTest {
                 assertEquals("image".equals(button.getId()), isAction,
                         "只有「图片」应是动作按钮，实际：" + button.getId()
                                 + " styleClass=" + button.getStyleClass());
+            }
+        });
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("资源控制器的章节 provider 已接线：目录选中谁它就给谁")
+    void resourceControllerChapterProviderFollowsTocSelection() throws Exception {
+        runOnFx(() -> {
+            TocController tocController = field(mainController, "tocViewController");
+            ResourceController resourceController = field(mainController, "resourceViewController");
+            Supplier<ChapterNode> provider = field(resourceController, "currentNodeProvider");
+
+            ChapterNode node = new ChapterNode("第一章", null, null);
+            tocController.setCurrentNode(node);
+            try {
+                assertSame(node, provider.get(),
+                        "章节 provider 必须接目录树状态——漏接时插入图片恒报「请先在左侧目录中选择章节」"
+                                + "（曾以从未被调用的 setter 形式存在，工具条插图全被拦）");
+            } finally {
+                tocController.setCurrentNode(null);
             }
         });
     }
