@@ -169,7 +169,8 @@ class VisualEditorFormatTest {
 
         String xhtml = serialized();
         assertTrue(xhtml.contains("images/cover.png"), "图片地址应在正文里：" + xhtml);
-        assertTrue(xhtml.contains("/>"), "img 必须自闭合，否则回写正文会校验失败：" + xhtml);
+        assertTrue(xhtml.matches("(?s).*<img[^>]*\\s*/>.*"),
+                "img 必须自闭合，否则回写正文会校验失败：" + xhtml);
         assertWellFormedXhtml(xhtml);
     }
 
@@ -184,6 +185,123 @@ class VisualEditorFormatTest {
         assertTrue(before.equals(serialized()), "失败的命令不应改动文档");
     }
 
+    @Test
+    @Timeout(60)
+    @DisplayName("下划线 / 删除线 / 行内代码分别产出 <u> / <del> / <code>")
+    void inlineCommandsProduceSemanticTags() throws Exception {
+        selectParagraphContents();
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('underline')")));
+        assertTrue(serialized().matches("(?s).*<u[\\s>].*"),
+                "下划线应产出 <u>（不是 <ul>）：" + serialized());
+        assertWellFormedXhtml(serialized());
+
+        loadEditableDocument();
+        selectParagraphContents();
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('strike')")));
+        assertTrue(serialized().contains("<del"), "删除线应产出 <del> 而非 <s>/<strike>：" + serialized());
+        assertWellFormedXhtml(serialized());
+
+        loadEditableDocument();
+        selectParagraphContents();
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('code')")));
+        assertTrue(serialized().contains("<code"), "行内代码应产出 <code>：" + serialized());
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("引用在段落与 <blockquote> 之间可逆切换")
+    void quoteTogglesWithParagraph() throws Exception {
+        caretIntoParagraph();
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('quote')")));
+        assertTrue(serialized().contains("<blockquote"), "应变成引用：" + serialized());
+        assertWellFormedXhtml(serialized());
+
+        caretIntoParagraph();
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('quote')")));
+        String xhtml = serialized();
+        assertFalse(xhtml.contains("<blockquote"), "再点一次应退回段落：" + xhtml);
+        assertWellFormedXhtml(xhtml);
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("分隔线插在段落之后并补一个空段落，序列化为 <hr/>")
+    void ruleInsertsHrAndTrailingParagraph() throws Exception {
+        caretIntoParagraph();
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('rule')")));
+
+        String xhtml = serialized();
+        // XMLSerializer 会写成 <hr />（带空格），两种写法都合法，别只认一种
+        assertTrue(xhtml.matches("(?s).*<hr\\s*/>.*"), "分隔线必须自闭合：" + xhtml);
+        // 分隔线之后要有落点，否则光标无处可去
+        assertTrue(xhtml.indexOf("<hr") < xhtml.lastIndexOf("<p"), "hr 之后应有空段落：" + xhtml);
+        assertWellFormedXhtml(xhtml);
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("链接包成 <a href>；javascript: 这类地址被拒绝且不改文档")
+    void linkWrapsSelectionAndRejectsUnsafeUrl() throws Exception {
+        selectParagraphContents();
+        assertTrue(Boolean.TRUE.equals(
+                runScript("window.epubraFormat('link', 'https://example.com/a?b=1')")));
+        String xhtml = serialized();
+        assertTrue(xhtml.contains("<a href=\"https://example.com/a?b=1\""),
+                "选区应被包成带 href 的链接：" + xhtml);
+        assertWellFormedXhtml(xhtml);
+
+        loadEditableDocument();
+        selectParagraphContents();
+        String before = serialized();
+        assertFalse(Boolean.TRUE.equals(
+                        runScript("window.epubraFormat('link', 'javascript:alert(1)')")),
+                "javascript: 地址必须被拒绝");
+        assertTrue(before.equals(serialized()), "被拒绝的链接不应改动文档");
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("光标状态查询：报告当前生效的格式名，供工具条点亮")
+    void queryReportsActiveFormats() throws Exception {
+        selectParagraphContents();
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraQuery().indexOf('paragraph') >= 0")),
+                "光标在段落里应报告 paragraph");
+
+        runScript("window.epubraFormat('bold')");
+        Object active = runScript("window.epubraQuery()");
+        assertTrue(active instanceof String && ((String) active).contains("bold"),
+                "刚加粗过，应报告 bold，实际：" + active);
+        assertTrue(((String) active).contains("paragraph"),
+                "块级状态也应一起报告，实际：" + active);
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("粘贴净化：剥掉危险标签/事件属性/内联样式，b 归并成 strong")
+    void pasteSanitizerKeepsOnlyWhitelistedMarkup() throws Exception {
+        String dirty = "<div style=\"color:red\"><b>粗体</b>"
+                + "<script>evil()</script>"
+                + "<span onclick=\"steal()\">普通</span></div>"
+                + "<p class=\"x\" style=\"margin:0\">段落</p>"
+                + "<img src=\"a.png\" onerror=\"boom()\"/>"
+                + "<a href=\"javascript:alert(1)\">坏链</a>";
+        Object cleaned = sanitize(dirty);
+        assertTrue(cleaned instanceof String, "净化器应返回序列化后的片段");
+        String out = (String) cleaned;
+
+        assertFalse(out.contains("<script"), "脚本必须被丢掉：" + out);
+        assertFalse(out.contains("onclick"), "事件属性必须被丢掉：" + out);
+        assertFalse(out.contains("onerror"), "事件属性必须被丢掉：" + out);
+        assertFalse(out.contains("style="), "内联样式必须被丢掉：" + out);
+        assertFalse(out.contains("class="), "外来 class 必须被丢掉：" + out);
+        assertTrue(out.contains("<strong>粗体</strong>"), "b 应归并成 strong：" + out);
+        assertTrue(out.contains("普通"), "未知标签要拆掉但保留文字：" + out);
+        assertTrue(out.contains("src=\"a.png\""), "img 的 src 应保留：" + out);
+        assertFalse(out.contains("javascript:"), "危险 href 必须被丢掉：" + out);
+        assertTrue(out.contains("段落"), "段落文字不能丢：" + out);
+    }
+
     // ------------------------------------------------------------------ 脚本与断言助手
 
     /** 选中正文段落里的文字（模拟用户划选一段后点工具条）。 */
@@ -196,10 +314,10 @@ class VisualEditorFormatTest {
                 + " return true; })()");
     }
 
-    /** 把光标收进正文段落（模拟用户点进某一句话里）。 */
+    /** 把光标收进正文块（模拟用户点进某一句话里）。块可能是段落、列表项、引用或标题。 */
     private void caretIntoParagraph() throws Exception {
         runScript("(function () {"
-                + " var p = document.body.querySelector('p, li');"
+                + " var p = document.body.querySelector('p, li, blockquote, h2');"
                 + " var r = document.createRange();"
                 + " r.selectNodeContents(p); r.collapse(true);"
                 + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
@@ -208,14 +326,23 @@ class VisualEditorFormatTest {
 
     /** 走 Java 侧同样的通道：片段经 window 上的临时成员传入，不拼脚本字符串。 */
     private Object insertHtml(String html) throws Exception {
+        return withMember("__testHtml", html, "window.epubraInsertHtml(window.__testHtml)");
+    }
+
+    /** 同上，调粘贴净化器（净化入口同样不把 HTML 拼进脚本文本）。 */
+    private Object sanitize(String html) throws Exception {
+        return withMember("__testHtml", html, "window.epubraSanitize(window.__testHtml)");
+    }
+
+    private Object withMember(String member, String value, String script) throws Exception {
         AtomicReference<Object> out = new AtomicReference<>();
         runOnFx(() -> {
             WebEngine engine = webView.getEngine();
             netscape.javascript.JSObject window =
                     (netscape.javascript.JSObject) engine.executeScript("window");
-            window.setMember("__testHtml", html);
-            out.set(engine.executeScript("window.epubraInsertHtml(window.__testHtml)"));
-            window.setMember("__testHtml", null);
+            window.setMember(member, value);
+            out.set(engine.executeScript(script));
+            window.setMember(member, null);
         });
         return out.get();
     }

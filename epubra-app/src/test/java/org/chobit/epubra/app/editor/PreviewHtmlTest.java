@@ -118,10 +118,25 @@ class PreviewHtmlTest {
 
         assertTrue(doc.contains("window.epubraFormat"), "工具条的格式化入口");
         assertTrue(doc.contains("window.epubraInsertHtml"), "图片等片段插入入口");
+        assertTrue(doc.contains("window.epubraQuery"), "光标状态查询入口（驱动工具条点亮）");
+        assertTrue(doc.contains("window.epubraSanitize"), "粘贴净化入口");
         // 刻意不用 execCommand：它产出的标签随引擎而异（<b>/<span style>），
         // 而回写正文必须是确定的 XHTML。（注释里提到它没关系，不能有调用）
         assertTrue(!doc.contains("document.execCommand("), "不应调用 execCommand");
         assertTrue(doc.indexOf("window.epubraFormat") < doc.indexOf("</head>"),
                 "入口必须在 head 内定义，且先于 body 解析完成");
+    }
+
+    @Test
+    @DisplayName("脚本带了富文本编辑必备的挂钩：快捷键、选区上报、粘贴拦截")
+    void editableDocumentWiresRichTextHooks() {
+        String doc = PreviewHtml.editableDocument(FULL_DOC, Theme.LIGHT);
+
+        assertTrue(doc.contains("'keydown'"), "Ctrl+B/I/U 与 Ctrl+Z 需要 keydown 挂钩");
+        assertTrue(doc.contains("'selectionchange'"), "工具条点亮需要选区变化上报");
+        assertTrue(doc.contains("'paste'"), "粘贴必须被拦截，否则外部 HTML 会污染正文");
+        assertTrue(doc.contains("onSelectionChanged"), "选区状态要经桥回传");
+        assertTrue(doc.contains("onUndo") && doc.contains("onRedo"),
+                "Ctrl+Z/Ctrl+Y 要交给应用的快照撤销，不能留两套栈");
     }
 }

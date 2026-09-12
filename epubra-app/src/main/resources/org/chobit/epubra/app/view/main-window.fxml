@@ -17,6 +17,7 @@
 <?import javafx.scene.control.ToggleGroup?>
 <?import javafx.scene.control.Tooltip?>
 <?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.FlowPane?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.StackPane?>
@@ -220,30 +221,44 @@
                                     <TabPane fx:id="editorTabs" tabClosingPolicy="UNAVAILABLE">
                                         <tabs>
                                             <Tab text="编辑">
-                                                <!-- 「编辑」tab 自带一排格式化按钮，直接作用于可视化编辑器
-                                                     （加粗 / 斜体包裹选中内容，段落 / 标题 / 列表做块级转换）。
-                                                     源码 tab 不再提供片段插入按钮——需要手写标签时直接敲即可。 -->
+                                                <!-- 「编辑」tab 自带格式化工具条，直接作用于可视化编辑器。
+                                                     按钮用 id 标注格式名（与 window.epubraQuery() 的返回值对应），
+                                                     MainController 据此把「当前生效的格式」点亮。
+                                                     FlowPane 而非 HBox：窗口变窄时按钮换行而不是被挤没。
+                                                     源码 tab 不提供这些按钮——手写标签本来就比按钮快。 -->
                                                 <VBox maxWidth="Infinity" maxHeight="Infinity">
-                                                    <HBox fx:id="editorToolbar" styleClass="editor-toolbar"
-                                                         spacing="4.0" alignment="CENTER_LEFT">
+                                                    <FlowPane fx:id="editorToolbar" styleClass="editor-toolbar"
+                                                              hgap="4.0" vgap="4.0" alignment="CENTER_LEFT">
                                                         <padding>
                                                             <Insets top="4.0" right="8.0" bottom="4.0" left="8.0"/>
                                                         </padding>
-                                                        <Button text="段落" styleClass="flat-button"
+                                                        <Button id="paragraph" text="段落" styleClass="flat-button"
                                                                 onAction="#onInsertParagraph"/>
-                                                        <Button text="标题" styleClass="flat-button"
+                                                        <Button id="heading" text="标题" styleClass="flat-button"
                                                                 onAction="#onInsertHeading"/>
-                                                        <Button text="加粗" styleClass="flat-button"
-                                                                onAction="#onInsertBold"/>
-                                                        <Button text="斜体" styleClass="flat-button"
-                                                                onAction="#onInsertItalic"/>
-                                                        <Button text="列表" styleClass="flat-button"
+                                                        <Button id="quote" text="引用" styleClass="flat-button"
+                                                                onAction="#onInsertQuote"/>
+                                                        <Button id="list" text="列表" styleClass="flat-button"
                                                                 onAction="#onInsertList"/>
+                                                        <Button id="rule" text="分隔线" styleClass="flat-button"
+                                                                onAction="#onInsertRule"/>
+                                                        <Button id="bold" text="加粗" styleClass="flat-button"
+                                                                onAction="#onInsertBold"/>
+                                                        <Button id="italic" text="斜体" styleClass="flat-button"
+                                                                onAction="#onInsertItalic"/>
+                                                        <Button id="underline" text="下划线" styleClass="flat-button"
+                                                                onAction="#onInsertUnderline"/>
+                                                        <Button id="strike" text="删除线" styleClass="flat-button"
+                                                                onAction="#onInsertStrike"/>
+                                                        <Button id="code" text="行内代码" styleClass="flat-button"
+                                                                onAction="#onInsertCode"/>
+                                                        <Button id="link" text="链接" styleClass="flat-button"
+                                                                onAction="#onInsertLink"/>
                                                         <!-- 图片与菜单「插入 → 插入图片」同一个入口（从已导入资源里选），
                                                              不另插一个裸 img 标签，避免两种不一致的行为 -->
-                                                        <Button text="图片" styleClass="flat-button"
+                                                        <Button id="image" text="图片" styleClass="flat-button"
                                                                 onAction="#onInsertImage"/>
-                                                    </HBox>
+                                                    </FlowPane>
                                                     <WebView fx:id="visualEditorView" VBox.vgrow="ALWAYS"/>
                                                 </VBox>
                                             </Tab>

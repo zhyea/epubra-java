@@ -34,11 +34,14 @@ import org.chobit.epubra.lib.io.EpubReader;
 import org.chobit.epubra.lib.io.EpubWriter;
 import org.chobit.epubra.lib.validation.EpubValidator;
 import javafx.animation.PauseTransition;
+import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 import javafx.fxml.FXML;
+import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
+import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.IndexRange;
 import javafx.scene.control.Label;
@@ -50,6 +53,7 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
+import javafx.scene.control.TextInputDialog;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.input.Dragboard;
@@ -57,6 +61,7 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.TransferMode;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
@@ -71,8 +76,10 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 主窗口控制器：目录浏览、章节编辑、元数据维护与 EPUB 存取。
@@ -91,7 +98,7 @@ public class MainController {
     private WebView visualEditorView;
     /** 格式化工具条：只挂在「编辑」tab 内，作用于 {@link #visualEditorView}。 */
     @FXML
-    private HBox editorToolbar;
+    private FlowPane editorToolbar;
     @FXML
     private TabPane editorTabs;
     /**
@@ -429,6 +436,15 @@ public class MainController {
             status.flash("已保存");
         }));
         busSubscribers.add(bus.subscribe(AppEventBus.BookDirtyChangedEvent.class, e -> updateTitleAndHistory()));
+        // 撤销 / 重做把整个 Book 换成了新实例，界面上的旧节点全部失效：必须重新灌一遍。
+        // 没有这个订阅时，撤销只改模型不改界面——用户看不到任何变化，而且下一次
+        // flushCurrentChapter 会把界面上的旧文本写回去，等于把撤销悄悄抹掉。
+        // refreshAll() 内部经 refreshToc() → 章节选中回调 → showChapter() 重载编辑区，
+        // 因此这里不需要再手工刷新编辑器。
+        busSubscribers.add(bus.subscribe(AppEventBus.BookRestoredEvent.class, e -> {
+            refreshAll();
+            updateTitleAndHistory();
+        }));
     }
 
     /**
@@ -1100,6 +1116,59 @@ public class MainController {
         }
     }
 
+    @FXML
+    public void onInsertQuote() {
+        applyVisualFormat("quote");
+    }
+
+    @FXML
+    public void onInsertRule() {
+        applyVisualFormat("rule");
+    }
+
+    @FXML
+    public void onInsertUnderline() {
+        applyVisualFormat("underline");
+    }
+
+    @FXML
+    public void onInsertStrike() {
+        applyVisualFormat("strike");
+    }
+
+    @FXML
+    public void onInsertCode() {
+        applyVisualFormat("code");
+    }
+
+    /** 链接：先问一句网址，再交给可视化编辑器把选区（或空选区）包成 {@code <a href>}。 */
+    @FXML
+    public void onInsertLink() {
+        if (!visualEditorReady()) {
+            status.set("编辑视图尚未就绪，请稍后重试");
+            return;
+        }
+        TextInputDialog dialog = new TextInputDialog();
+        dialog.setTitle("插入链接");
+        dialog.setHeaderText(null);
+        dialog.setContentText("链接地址：");
+        if (stage != null) {
+            dialog.initOwner(stage);
+        }
+        Optional<String> input = dialog.showAndWait();
+        if (input.isEmpty()) {
+            return;
+        }
+        String href = input.get().trim();
+        if (href.isEmpty()) {
+            status.set("链接地址为空，已取消");
+            return;
+        }
+        if (!applyVisualFormat("link", href)) {
+            status.set("链接地址无法使用（不支持 javascript: / data: 这类地址）");
+        }
+    }
+
     // ------------------------------------------------------------------
     // 资源维护（清理未引用资源 / 刷新资源列表）
 
@@ -1230,6 +1299,37 @@ public class MainController {
             syncSourceFromVisualEditor(xhtml);
             status.refresh();
         }
+
+        /**
+         * 光标 / 选区变化：把当前生效的格式名传给 Java，点亮工具条。
+         *
+         * <p>页面在 {@code selectionchange} / {@code keyup} / {@code mouseup} 时主动上报，
+         * 不需要 Java 轮询。
+         */
+        public void onSelectionChanged(String activeFormats) {
+            updateToolbarState(activeFormats);
+        }
+
+        /**
+         * Ctrl+Z / Ctrl+Y：走应用级快照撤销，与菜单、源码区共用一本账。
+         *
+         * <p>必须挪到下一个脉冲执行——此刻还在 JS 调用栈里，而撤销会重载整个编辑视图
+         * （{@code loadContent}），在 {@code executeScript} 中途换页面是不安全的。
+         */
+        public void onUndo() {
+            Platform.runLater(() -> {
+                ensureUndoActivity();
+                undoActivity.undo();
+            });
+        }
+
+        /** Ctrl+Y / Ctrl+Shift+Z：同 {@link #onUndo()}，只是反转方向。 */
+        public void onRedo() {
+            Platform.runLater(() -> {
+                ensureUndoActivity();
+                undoActivity.redo();
+            });
+        }
     }
 
     /** 把可视化编辑的结果同步到源码 tab，避免两个 tab 显示的内容不一致。 */
@@ -1313,11 +1413,14 @@ public class MainController {
             if (oldIdx != null && oldIdx.intValue() == VISUAL_TAB_INDEX && index != VISUAL_TAB_INDEX) {
                 flushVisualEditor();
                 visualEditorLoaded = false;
+                clearToolbarState();
             }
             if (index < 0 || currentChapter() == null) {
                 return;
             }
             if (index == VISUAL_TAB_INDEX) {
+                // 新文档是全新的一棵树，旧的高亮不再成立
+                clearToolbarState();
                 reloadVisualEditor();
             } else if (index == PREVIEW_TAB_INDEX) {
                 refreshPreview();
@@ -1340,22 +1443,45 @@ public class MainController {
     /**
      * 对可视化编辑器施加一次富文本操作。
      *
-     * <p>kind 取值：{@code paragraph} / {@code heading} / {@code bold} / {@code italic} /
-     * {@code list}，全部是硬编码的 ASCII 字面量，可直接拼进脚本，无需转义。
+     * <p>kind 取值：{@code paragraph} / {@code heading} / {@code quote} / {@code list} /
+     * {@code rule} / {@code bold} / {@code italic} / {@code underline} / {@code strike} /
+     * {@code code} / {@code link}，全部是硬编码的 ASCII 字面量，可直接拼进脚本，无需转义。
      *
-     * @return 是否真的改了内容；false 表示编辑视图还没就绪，调用方应走降级路径
+     * @return 是否真的改了内容；false 表示编辑视图还没就绪或命令被拒绝
      */
     private boolean applyVisualFormat(String kind) {
-        if (visualEditorView == null || !visualEditorLoaded) {
+        return applyVisualFormat(kind, null);
+    }
+
+    /**
+     * 带参数的格式化命令（目前只有 {@code link} 需要 href）。
+     *
+     * <p>参数经 {@code window} 上的临时成员传入，不拼进脚本——URL 里可能有引号与反斜杠。
+     */
+    private boolean applyVisualFormat(String kind, String value) {
+        if (!visualEditorReady()) {
             return false;
         }
+        WebEngine engine = visualEditorView.getEngine();
         try {
-            Object ok = visualEditorView.getEngine()
-                    .executeScript("window.epubraFormat('" + kind + "')");
+            if (value == null) {
+                Object ok = engine.executeScript("window.epubraFormat('" + kind + "')");
+                return Boolean.TRUE.equals(ok);
+            }
+            JSObject window = (JSObject) engine.executeScript("window");
+            window.setMember(PENDING_VALUE_MEMBER, value);
+            Object ok = engine.executeScript(
+                    "window.epubraFormat('" + kind + "', window." + PENDING_VALUE_MEMBER + ")");
+            window.setMember(PENDING_VALUE_MEMBER, null);
             return Boolean.TRUE.equals(ok);
         } catch (RuntimeException notLoadedYet) {
             return false;
         }
+    }
+
+    /** 可视化编辑器是否可用于施加上下文命令（已加载完成且内容对应当前章节）。 */
+    private boolean visualEditorReady() {
+        return visualEditorView != null && visualEditorLoaded;
     }
 
     /**
@@ -1365,7 +1491,7 @@ public class MainController {
      * 标签里带引号，手工转义容易出错。
      */
     private boolean insertHtmlIntoVisualEditor(String xhtml) {
-        if (visualEditorView == null || !visualEditorLoaded || xhtml == null) {
+        if (!visualEditorReady() || xhtml == null) {
             return false;
         }
         WebEngine engine = visualEditorView.getEngine();
@@ -1379,6 +1505,46 @@ public class MainController {
         } catch (RuntimeException notLoadedYet) {
             return false;
         }
+    }
+
+    /** {@link #applyVisualFormat(String, String)} 传参用的临时成员名。 */
+    private static final String PENDING_VALUE_MEMBER = "__epubraPendingValue";
+
+    /** 工具条按钮「当前格式生效」时挂的样式类，见 app.css 的 {@code .flat-button.active}。 */
+    private static final String TOOLBAR_ACTIVE_CLASS = "active";
+
+    /**
+     * 按 {@code window.epubraQuery()} 的返回值点亮工具条。
+     *
+     * <p>按钮的 {@code id} 就是格式名（见 main-window.fxml），所以这里不用为每个按钮
+     * 维护一个字段——遍历子节点读 id 即可，加按钮时不必改 Java。
+     *
+     * @param active 空格分隔的生效格式名，如 {@code "bold italic"}；空串表示无
+     */
+    private void updateToolbarState(String active) {
+        if (editorToolbar == null) {
+            return;
+        }
+        Set<String> on = active == null || active.isBlank()
+                ? Set.of()
+                : new HashSet<>(List.of(active.trim().split("\\s+")));
+        for (Node child : editorToolbar.getChildren()) {
+            if (!(child instanceof Button button) || button.getId() == null) {
+                continue;
+            }
+            boolean shouldBeOn = on.contains(button.getId());
+            boolean isOn = button.getStyleClass().contains(TOOLBAR_ACTIVE_CLASS);
+            if (shouldBeOn && !isOn) {
+                button.getStyleClass().add(TOOLBAR_ACTIVE_CLASS);
+            } else if (!shouldBeOn && isOn) {
+                button.getStyleClass().remove(TOOLBAR_ACTIVE_CLASS);
+            }
+        }
+    }
+
+    /** 离开编辑 tab 时清掉工具条的高亮，避免切回来还留着上一章的状态。 */
+    private void clearToolbarState() {
+        updateToolbarState("");
     }
 
     /** {@link #insertHtmlIntoVisualEditor} 传片段用的临时成员名。 */

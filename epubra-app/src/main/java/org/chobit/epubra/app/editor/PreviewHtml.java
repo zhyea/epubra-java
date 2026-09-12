@@ -66,9 +66,25 @@ public final class PreviewHtml {
      * 序列化天然得到合法 XHTML（空元素自闭合）；{@code HTMLEditor} 产的是 HTML
      * （{@code <br>} 非自闭合 + 行内 style），写回正文前还得自写 HTML→XHTML 转换。
      *
-     * <p>脚本通过 {@code window.epubraBridge.onEdited(xhtml)} 把结果推回 Java；回写前会先
-     * 克隆一份 DOM 并剥掉注入的样式与 {@code contenteditable} 属性，保证推回去的是
-     * <b>干净的正文</b>而不是带预览配色的副本。
+     * <p>脚本通过 {@code window.epubraBridge} 与 Java 双向通信：
+     * <ul>
+     *   <li>{@code onEdited(xhtml)} —— 编辑结果回写（input 600ms 节流 + blur 主动推）</li>
+     *   <li>{@code onSelectionChanged(formats)} —— 光标处生效的格式名，供工具条点亮</li>
+     *   <li>{@code onUndo()} / {@code onRedo()} —— Ctrl+Z / Ctrl+Y 交给应用的快照撤销</li>
+     * </ul>
+     * Java 侧可调用的入口：
+     * <ul>
+     *   <li>{@code window.epubraFormat(kind[, value])} —— 段落/标题/引用/列表/分隔线/
+     *       加粗/斜体/下划线/删除线/行内代码/链接</li>
+     *   <li>{@code window.epubraInsertHtml(html)} —— 片段插到光标处（图片等）</li>
+     *   <li>{@code window.epubraQuery()} —— 当前生效格式名（空格分隔）</li>
+     *   <li>{@code window.epubraSerialize()} —— 主动拉取当前正文</li>
+     * </ul>
+     *
+     * <p>所有命令都是手工 Range/DOM 操作，<b>不用 {@code document.execCommand}</b>：后者
+     * 产出的标签随引擎而异（{@code <b>} / {@code <span style>}），而回写正文必须是确定的
+     * XHTML。粘贴走白名单净化（剥掉 script/事件属性/内联样式，{@code b} 归并成
+     * {@code strong}），避免外部富文本污染正文。
      */
     public static String editableDocument(String xhtml, Theme theme) {
         String base = withTheme(xhtml, theme);
@@ -247,40 +263,256 @@ public final class PreviewHtml {
                 return true;
               }
 
-              window.epubraFormat = function (kind) {
+              // ---- 命令表（工具条 / 快捷键共用） ------------------------------
+              window.epubraFormat = function (kind, value) {
                 var ok = false;
                 if (kind === 'paragraph') { ok = formatBlock('p'); }
                 else if (kind === 'heading') { ok = formatBlock('h2'); }
+                else if (kind === 'quote') { ok = toggleQuote(); }
+                else if (kind === 'list') { ok = toggleList(); }
+                else if (kind === 'rule') { ok = insertRule(); }
                 else if (kind === 'bold') { ok = wrapInline('strong'); }
                 else if (kind === 'italic') { ok = wrapInline('em'); }
-                else if (kind === 'list') { ok = toggleList(); }
+                else if (kind === 'underline') { ok = wrapInline('u'); }
+                else if (kind === 'strike') { ok = wrapInline('del'); }
+                else if (kind === 'code') { ok = wrapInline('code'); }
+                else if (kind === 'link') { ok = wrapLink(value); }
                 if (ok) { push(); }
                 return ok;
               };
 
+              // 引用：与段落互转（再点一次退回段落）
+              function toggleQuote() {
+                var s = activeSelection();
+                if (!s) { return false; }
+                var block = topBlock(s.getRangeAt(0).startContainer);
+                if (!block) { return false; }
+                return formatBlock(tagOf(block) === 'blockquote' ? 'p' : 'blockquote');
+              }
+
+              // 分隔线：插在当前块之后，并在它下面补一个空段落让光标有落点
+              function insertRule() {
+                var s = activeSelection();
+                if (!s) { return false; }
+                var block = topBlock(s.getRangeAt(0).startContainer);
+                if (!block) { return false; }
+                var p = makeTag('p');
+                block.parentNode.insertBefore(makeTag('hr'), block.nextSibling);
+                block.parentNode.insertBefore(p, block.nextSibling.nextSibling);
+                collapseInto(p);
+                return true;
+              }
+
+              // 链接：选区包成 <a href>；空选区插一对空 <a> 并把光标落在中间
+              function wrapLink(href) {
+                var safe = safeUrl(href, false);
+                if (!safe) { return false; }
+                var s = activeSelection();
+                if (!s) { return false; }
+                var range = s.getRangeAt(0);
+                var el = makeTag('a');
+                el.setAttribute('href', safe);
+                if (range.collapsed) {
+                  range.insertNode(el);
+                  collapseInto(el);
+                  return true;
+                }
+                try {
+                  range.surroundContents(el);
+                } catch (err) {
+                  el.appendChild(range.extractContents());
+                  range.insertNode(el);
+                }
+                selectContents(el);
+                return true;
+              }
+
+              // ---- 光标状态查询：驱动工具条的「按下」态 -----------------------
+              var INLINE_FMT = { strong: 'bold', em: 'italic', u: 'underline',
+                                 del: 'strike', code: 'code', a: 'link' };
+              var BLOCK_NAMES = { p: 1, h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1,
+                                  li: 1, blockquote: 1, pre: 1, div: 1 };
+
+              function closestBlock(node) {
+                var n = (node && node.nodeType === 1) ? node : (node ? node.parentNode : null);
+                while (n && n !== document.body) {
+                  if (BLOCK_NAMES[tagOf(n)]) { return n; }
+                  n = n.parentNode;
+                }
+                return null;
+              }
+
+              window.epubraQuery = function () {
+                var s = activeSelection();
+                if (!s) { return ''; }
+                var range = s.getRangeAt(0);
+                var out = [];
+                var n = (range.startContainer.nodeType === 1)
+                        ? range.startContainer : range.startContainer.parentNode;
+                while (n && n !== document.body) {
+                  var name = INLINE_FMT[tagOf(n)];
+                  if (name && out.indexOf(name) < 0) { out.push(name); }
+                  n = n.parentNode;
+                }
+                var block = closestBlock(range.startContainer);
+                var bt = tagOf(block);
+                if (bt === 'li') { out.push('list'); }
+                else if (bt === 'h1' || bt === 'h2' || bt === 'h3') { out.push('heading'); }
+                else if (bt === 'blockquote') { out.push('quote'); }
+                else if (bt === 'p') { out.push('paragraph'); }
+                return out.join(' ');
+              };
+
+              function notifySelection() {
+                if (!window.epubraBridge || !window.epubraBridge.onSelectionChanged) { return; }
+                window.epubraBridge.onSelectionChanged(window.epubraQuery());
+              }
+              document.addEventListener('selectionchange', notifySelection);
+              document.addEventListener('keyup', notifySelection);
+              document.addEventListener('mouseup', notifySelection);
+
+              // ---- 快捷键 ----------------------------------------------------
+              // 用捕获阶段：编辑器的默认处理在目标元素上，冒泡阶段拦不住。
+              // Ctrl+Z / Ctrl+Y 交给 Java 的应用级快照撤销，避免两套撤销栈打架。
+              document.addEventListener('keydown', function (e) {
+                if (!(e.ctrlKey || e.metaKey)) { return; }
+                var k = (e.key || '').toLowerCase();
+                var handled = true;
+                if (k === 'b') { window.epubraFormat('bold'); }
+                else if (k === 'i') { window.epubraFormat('italic'); }
+                else if (k === 'u') { window.epubraFormat('underline'); }
+                else if (k === 'z' && !e.shiftKey) { bridgeCall('onUndo'); }
+                else if (k === 'y' || (k === 'z' && e.shiftKey)) { bridgeCall('onRedo'); }
+                else { handled = false; }
+                if (handled) { e.preventDefault(); e.stopPropagation(); }
+              }, true);
+
+              function bridgeCall(name) {
+                if (window.epubraBridge && window.epubraBridge[name]) { window.epubraBridge[name](); }
+              }
+
+              // ---- 粘贴净化 --------------------------------------------------
+              // 外部富文本带着任意标签 / 内联样式进来，直接落进正文会让产出的
+              // EPUB 带上非法结构。这里只放行白名单标签，其余拆掉标签保留文字。
+              var ALLOWED = { p: 1, h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1,
+                              ul: 1, ol: 1, li: 1, blockquote: 1, pre: 1, hr: 1, br: 1,
+                              strong: 1, em: 1, u: 1, del: 1, code: 1, a: 1, img: 1 };
+              var ALIAS = { b: 'strong', i: 'em', strike: 'del', s: 'del', ins: 'u' };
+              var KEEP_ATTRS = { a: ['href'], img: ['src', 'alt'] };
+              var DROPPED = { script: 1, style: 1, head: 1, meta: 1, link: 1, title: 1,
+                              iframe: 1, object: 1, embed: 1, form: 1, input: 1, svg: 1 };
+
+              // 挡掉 javascript: / vbscript:；data: 只允许出现在 img 上
+              function safeUrl(value, allowData) {
+                if (!value) { return null; }
+                var probe = value.replace(/[\\u0000-\\u0020]/g, '').toLowerCase();
+                if (probe.indexOf('javascript:') === 0) { return null; }
+                if (probe.indexOf('vbscript:') === 0) { return null; }
+                if (!allowData && probe.indexOf('data:') === 0) { return null; }
+                return value;
+              }
+
+              function copySanitized(from, to) {
+                var kids = from.childNodes;
+                for (var i = 0; i < kids.length; i++) {
+                  var n = kids[i];
+                  if (n.nodeType === 3) {
+                    to.appendChild(document.createTextNode(n.nodeValue));
+                    continue;
+                  }
+                  if (n.nodeType !== 1) { continue; }
+                  var name = n.tagName.toLowerCase();
+                  if (DROPPED[name]) { continue; }
+                  if (!ALLOWED[name] && !ALIAS[name]) { copySanitized(n, to); continue; }
+                  var mapped = ALIAS[name] ? ALIAS[name] : name;
+                  var el = makeTag(mapped);
+                  var keep = KEEP_ATTRS[mapped] || [];
+                  for (var j = 0; j < keep.length; j++) {
+                    var raw = n.getAttribute(keep[j]);
+                    var ok = safeUrl(raw, mapped === 'img');
+                    if (ok) { el.setAttribute(keep[j], ok); }
+                  }
+                  copySanitized(n, el);
+                  to.appendChild(el);
+                }
+              }
+
+              function sanitize(html) {
+                var out = document.createDocumentFragment();
+                var parsed = new DOMParser().parseFromString(html, 'text/html');
+                if (!parsed || !parsed.body) { return out; }
+                copySanitized(parsed.body, out);
+                return out;
+              }
+
+              // 供测试与 Java 侧复用：返回净化结果的序列化文本
+              window.epubraSanitize = function (html) {
+                var box = makeTag('div');
+                box.appendChild(sanitize(html));
+                return new XMLSerializer().serializeToString(box);
+              };
+
+              document.addEventListener('paste', function (e) {
+                var dt = e.clipboardData;
+                if (!dt) { return; }
+                e.preventDefault();
+                e.stopPropagation();
+                var html = dt.getData('text/html');
+                var text = dt.getData('text/plain');
+                if (html) { insertFragment(sanitize(html)); }
+                else { insertPlainText(text); }
+              }, true);
+
+              function insertPlainText(text) {
+                if (!text) { return; }
+                var lines = text.split('\\n');
+                if (lines.length === 1) {
+                  var only = document.createDocumentFragment();
+                  only.appendChild(document.createTextNode(text));
+                  insertFragment(only);
+                  return;
+                }
+                var frag = document.createDocumentFragment();
+                for (var i = 0; i < lines.length; i++) {
+                  var line = lines[i].replace('\\r', '');
+                  if (!line.length) { continue; }
+                  var p = makeTag('p');
+                  p.appendChild(document.createTextNode(line));
+                  frag.appendChild(p);
+                }
+                insertFragment(frag);
+              }
+
               // 把一段 XHTML 片段插到光标处（图片等），成功返回 true
               window.epubraInsertHtml = function (html) {
-                var s = activeSelection();
-                if (!s || !html) { return false; }
+                if (!html) { return false; }
                 try {
-                  var range = s.getRangeAt(0);
-                  var frag = range.createContextualFragment(html);
-                  var last = frag.lastChild;
-                  range.deleteContents();
-                  range.insertNode(frag);
-                  if (last) {
-                    var after = document.createRange();
-                    after.setStartAfter(last);
-                    after.collapse(true);
-                    s.removeAllRanges();
-                    s.addRange(after);
-                  }
-                  push();
-                  return true;
+                  var range = activeSelection().getRangeAt(0);
+                  return insertFragment(range.createContextualFragment(html));
                 } catch (err) {
                   return false;
                 }
               };
+
+              // 公共插入：片段落在光标处，光标移到片段之后
+              function insertFragment(frag) {
+                var s = activeSelection();
+                if (!s || !frag) { return false; }
+                var range = s.getRangeAt(0);
+                var last = frag.lastChild;
+                range.deleteContents();
+                range.insertNode(frag);
+                if (last) {
+                  var after = document.createRange();
+                  after.setStartAfter(last);
+                  after.collapse(true);
+                  s.removeAllRanges();
+                  s.addRange(after);
+                }
+                push();
+                notifySelection();
+                return true;
+              }
             })();
             //]]></script>""".formatted(INJECTED_STYLE_ID);
 

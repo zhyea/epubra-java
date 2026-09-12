@@ -5,9 +5,10 @@ import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
+import javafx.scene.control.Button;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
-import javafx.scene.layout.HBox;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.BeforeAll;
@@ -21,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -98,10 +100,10 @@ class VisualEditorTabUiTest {
     void toolbarLivesInsideVisualTab() throws Exception {
         runOnFx(() -> {
             TabPane tabs = field(mainController, "editorTabs");
-            HBox toolbar = field(mainController, "editorToolbar");
+            FlowPane toolbar = field(mainController, "editorToolbar");
             assertNotNull(toolbar, "editorToolbar 字段应被 FXML 注入");
-            assertEquals(6, toolbar.getChildren().size(),
-                    "工具条应有 段落/标题/加粗/斜体/列表/图片 六个按钮");
+            assertEquals(12, toolbar.getChildren().size(),
+                    "工具条应有 段落/标题/引用/列表/分隔线/加粗/斜体/下划线/删除线/行内代码/链接/图片 十二个按钮");
 
             Node tabContent = tabs.getTabs().get(0).getContent();
             assertSame(tabContent, toolbar.getParent(),
@@ -110,6 +112,26 @@ class VisualEditorTabUiTest {
             // 回归守卫：曾经它横在 TabPane 上方，三个 tab 都能看到
             assertNotSame(tabs.getParent(), toolbar.getParent(),
                     "工具条不应再与 TabPane 同级（那意味着它又回到了内容区上方）");
+        });
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("每个按钮的 id 就是格式名，且与上报表一一对应")
+    void toolbarButtonsCarryFormatNamesAsIds() throws Exception {
+        runOnFx(() -> {
+            FlowPane toolbar = field(mainController, "editorToolbar");
+            java.util.List<String> ids = new java.util.ArrayList<>();
+            for (Node child : toolbar.getChildren()) {
+                assertTrue(child instanceof Button, "工具条里应只有按钮，实际：" + child);
+                Button button = (Button) child;
+                assertNotNull(button.getId(), "按钮缺少 id，工具条状态反射就找不到它");
+                assertFalse(button.getText().isBlank(), "按钮缺少文案");
+                ids.add(button.getId());
+            }
+            assertEquals(java.util.List.of("paragraph", "heading", "quote", "list", "rule",
+                            "bold", "italic", "underline", "strike", "code", "link", "image"),
+                    ids, "按钮 id（= 格式名）与顺序必须与 window.epubraQuery() 的返回值一致");
         });
     }
 

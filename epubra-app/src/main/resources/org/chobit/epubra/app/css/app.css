@@ -83,6 +83,14 @@
     -fx-background-color: -epubra-pressed-bg;
 }
 
+/* 「当前格式正在生效」态：光标落在 <strong>/<em> 里时把按钮点亮。
+ * 由 MainController 依据 window.epubraQuery() 的返回值动态增删这个样式类。 */
+.flat-button.active {
+    -fx-background-color: -epubra-pressed-bg;
+    -fx-text-fill: -epubra-accent;
+    -fx-font-weight: bold;
+}
+
 /* 编辑辅助工具条：与上方边界用细线隔开，底色沿用菜单/页签同款 toolbar 色。
  * 按钮已通过 .flat-button 透明化，这里只负责容器配色 + 下边线。 */
 .editor-toolbar {
