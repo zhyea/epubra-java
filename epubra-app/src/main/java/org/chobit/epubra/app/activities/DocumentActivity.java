@@ -114,9 +114,7 @@ public class DocumentActivity {
 
     /** 取最近一次访问的工作空间目录；没有或目录不存在时返回 null。 */
     private static Path resolveInitialWorkspace() {
-        return WorkspaceStore.last()
-                .or(() -> WorkspaceStore.recentExisting().stream().findFirst())
-                .orElse(null);
+        return WorkspaceStore.initial().orElse(null);
     }
 
     public void onOpen() {

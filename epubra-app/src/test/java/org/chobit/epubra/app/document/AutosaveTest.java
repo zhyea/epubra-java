@@ -15,6 +15,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.prefs.AbstractPreferences;
 import java.util.prefs.Preferences;
@@ -278,6 +279,53 @@ class AutosaveTest {
         assertNotEquals(tempDir.resolve("book.draft"), draft);
     }
 
+    // ---- 工作空间主文档：.draft 就是本体 ----
+
+    @Test
+    void isDraftFileDetectsDraftSuffix() {
+        assertTrue(Autosave.isDraftFile(tempDir.resolve("三体.draft")));
+        assertFalse(Autosave.isDraftFile(tempDir.resolve("三体.epub")));
+        assertFalse(Autosave.isDraftFile(null));
+    }
+
+    @Test
+    void draftPathForReturnsDraftItselfWhenMainFileIsAlreadyDraft() {
+        Path workspaceDraft = tempDir.resolve("三体.draft");
+        ctx.setCurrentFile(workspaceDraft);
+
+        // 关键回归：旧实现会对已是 .draft 的 currentFile 再追加一层后缀
+        assertEquals(workspaceDraft, Autosave.draftPathFor(ctx),
+                "工作空间里的 .draft 是主文档本体，草稿路径就是它自己");
+    }
+
+    @Test
+    void flushNowWritesIntoWorkspaceDraftWithoutShadowFile() throws IOException {
+        Path workspaceDraft = tempDir.resolve("三体.draft");
+        ctx.setCurrentFile(workspaceDraft);
+
+        Autosave.flushNow(ctx);
+
+        assertTrue(Files.exists(workspaceDraft),
+                "自动暂存应原地覆盖工作空间里的 .draft（编辑即写它）");
+        assertFalse(Files.exists(tempDir.resolve("三体.draft.draft")),
+                "绝不能生成 .draft.draft 影子文件——它会同时被 WorkspaceScanner 命中，"
+                        + "在宫格上表现为一本图书两张卡片");
+        assertNotNull(new EpubReader().read(workspaceDraft), "覆盖后仍是合法 EPUB");
+    }
+
+    @Test
+    void discardForOnWorkspaceDraftKeepsTheDocument() throws IOException {
+        Path workspaceDraft = tempDir.resolve("三体.draft");
+        ctx.setCurrentFile(workspaceDraft);
+        Autosave.flushNow(ctx);
+        assertTrue(Files.exists(workspaceDraft));
+
+        Autosave.discardFor(ctx);
+
+        assertTrue(Files.exists(workspaceDraft),
+                "切换文档 / 工作空间时删掉工作空间里的 .draft 等于删掉整本书，必须跳过");
+    }
+
     // ---- 流式验证:draft 文件读回时 metadata.status 仍在 ----
 
     @Test
@@ -305,5 +353,81 @@ class AutosaveTest {
         Book loaded = Autosave.readDraft(tempDir.resolve("sample.draft"));
         assertEquals("测试书籍", loaded.metadata().firstTitle());
         assertEquals(book.metadata().firstTitle(), loaded.metadata().firstTitle());
+    }
+
+    // ---- 孤儿草稿收编到工作空间 ----
+
+    @Test
+    void uniqueDraftPathAvoidsCollision() throws IOException {
+        Path workspace = Files.createDirectories(tempDir.resolve("ws"));
+
+        Path first = Autosave.uniqueDraftPath(workspace, "三体");
+        assertEquals(workspace.resolve("三体.draft"), first);
+
+        Files.writeString(first, "x");
+        assertEquals(workspace.resolve("三体 2.draft"), Autosave.uniqueDraftPath(workspace, "三体"),
+                "重名时应顺延编号，不能覆盖工作空间里已有的图书");
+    }
+
+    @Test
+    void uniqueDraftPathSanitizesIllegalCharactersAndBlank() {
+        Path workspace = tempDir.resolve("ws");
+
+        assertEquals("a_b_c_d_e_f_g_h_i.draft",
+                Autosave.uniqueDraftPath(workspace, "a/b:c*d?e\"f<g>h|i").getFileName().toString());
+        assertEquals("未命名图书.draft",
+                Autosave.uniqueDraftPath(workspace, "   ").getFileName().toString(),
+                "书名全空白时要有兜底名，不能生成 '.draft' 这种不可读文件名");
+    }
+
+    @Test
+    void writeIntoWorkspaceWritesReadableDraftAndMarksIt() throws IOException {
+        Path workspace = Files.createDirectories(tempDir.resolve("ws"));
+        Book source = BookFactory.createEmpty("球状闪电");
+
+        Path target = Autosave.writeIntoWorkspace(source, workspace, "球状闪电");
+
+        assertEquals(workspace.resolve("球状闪电.draft"), target);
+        assertTrue(Files.exists(target));
+        assertTrue(Autosave.isMarkedDraft(source), "收编后这本书就是草稿，metadata 应带 draft 标记");
+        Book reread = new EpubReader().read(target);
+        assertEquals("球状闪电", reread.metadata().firstTitle());
+        assertEquals(Autosave.STATUS_DRAFT, reread.metadata().property(Autosave.STATUS_PROPERTY));
+    }
+
+    // ---- 恢复提示文案：必须写明工作空间 ----
+
+    @Test
+    void recoveryPromptHeaderNamesTheWorkspace() {
+        assertTrue(Autosave.recoveryPromptHeader(tempDir.resolve("我的书库")).contains("我的书库"),
+                "提示标题必须点出草稿归属的工作空间");
+        assertEquals("发现未归属工作空间的草稿", Autosave.recoveryPromptHeader(null),
+                "没有工作空间时要明说，并引导用户先选一个");
+    }
+
+    @Test
+    void recoveryPromptTextNamesWorkspaceAndFullPath() throws IOException {
+        Path draft = tempDir.resolve("untitled.draft");
+        Files.writeString(draft, "x");
+        Path workspace = tempDir.resolve("我的书库");
+
+        String text = Autosave.recoveryPromptText(draft, workspace, Instant.now());
+
+        assertTrue(text.contains("untitled"), "应显示草稿名（去掉 .draft 后缀）: " + text);
+        assertTrue(text.contains("我的书库"), "应显示工作空间名: " + text);
+        assertTrue(text.contains(workspace.toAbsolutePath().toString()),
+                "应显示工作空间完整路径，避免同名目录歧义: " + text);
+        assertTrue(text.contains(draft.toAbsolutePath().toString()),
+                "应显示草稿位置，方便用户核对: " + text);
+    }
+
+    @Test
+    void recoveryPromptTextGuidesWhenNoWorkspace() throws IOException {
+        Path draft = tempDir.resolve("untitled.draft");
+        Files.writeString(draft, "x");
+
+        String text = Autosave.recoveryPromptText(draft, null, Instant.now());
+
+        assertTrue(text.contains("尚未选择工作空间"), "无工作空间时应给出引导: " + text);
     }
 }

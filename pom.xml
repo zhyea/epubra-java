@@ -100,6 +100,15 @@
                     <version>3.5.3</version>
                     <configuration>
                         <argLine>-Dfile.encoding=UTF-8</argLine>
+                        <systemPropertyVariables>
+                            <!--
+                              测试必须与开发者的真实用户数据目录隔离：
+                              GUI 测试会真实加载 main-window.fxml 并触发自动暂存，
+                              不隔离就会把 untitled.draft 写进 ~/.Epubra/autosave/，
+                              表现为下次启动真实应用时莫名弹出「恢复草稿」提示。
+                            -->
+                            <epubra.autosave.dir>${project.build.directory}/test-autosave</epubra.autosave.dir>
+                        </systemPropertyVariables>
                     </configuration>
                 </plugin>
                 <plugin>

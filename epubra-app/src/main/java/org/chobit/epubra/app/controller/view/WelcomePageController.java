@@ -26,7 +26,6 @@ import java.io.ByteArrayInputStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.function.Consumer;
 
 /** 启动首页：展示当前工作空间中的图书书架。 */
@@ -85,11 +84,8 @@ public class WelcomePageController {
     }
 
     private Path resolveInitialWorkspace() {
-        Optional<Path> last = WorkspaceStore.last();
-        if (last.isPresent()) {
-            return last.get();
-        }
-        return WorkspaceStore.recentExisting().stream().findFirst().orElse(null);
+        // 与新建图书的默认目录、启动草稿恢复共用同一判定，避免三处各写一套导致错位。
+        return WorkspaceStore.initial().orElse(null);
     }
 
     private void rebuildBookshelf() {

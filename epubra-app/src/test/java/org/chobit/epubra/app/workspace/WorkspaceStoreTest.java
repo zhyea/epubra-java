@@ -148,4 +148,28 @@ class WorkspaceStoreTest {
 
         assertEquals(List.of(dirA), WorkspaceStore.recent(), "pruneMissing 应清掉已删除的条目");
     }
+
+    // ---- initial()：启动路径的唯一判定入口 ----
+
+    @Test
+    void initialIsEmptyWhenNothingRecorded() {
+        assertTrue(WorkspaceStore.initial().isEmpty(),
+                "首次启动应返回 empty，让调用方回退到「选择工作空间」引导态");
+    }
+
+    @Test
+    void initialPrefersLastThenFallsBackToRecent() throws IOException {
+        WorkspaceStore.add(dirA);
+        assertEquals(dirA, WorkspaceStore.initial().orElseThrow());
+
+        // last 指向一个不在最近列表里的目录 → 仍以 last 为准
+        Path other = Files.createDirectory(dirB.resolve("other"));
+        WorkspaceStore.setLast(other);
+        assertEquals(other, WorkspaceStore.initial().orElseThrow(), "last 有效时优先用它");
+
+        // last 失效 → 回退到最近列表里仍然存在的第一个
+        Files.delete(other);
+        assertEquals(dirA, WorkspaceStore.initial().orElseThrow(),
+                "last 目录被删后应回退到 recent 的第一个，而不是返回 empty");
+    }
 }

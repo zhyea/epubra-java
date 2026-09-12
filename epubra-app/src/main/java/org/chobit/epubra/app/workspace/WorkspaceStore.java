@@ -134,6 +134,18 @@ public final class WorkspaceStore {
         flush(prefs);
     }
 
+    /**
+     * 启动时的初始工作空间：{@link #last()} 优先，其次 {@link #recentExisting()} 的第一个；
+     * 两者都没有（首次启动 / 目录全失效）时返回 {@link Optional#empty()}，调用方回退到
+     * 「选择工作空间」引导态。
+     *
+     * <p>集中在这里是因为启动路径有三处要用同一套判定——欢迎页宫格、新建图书的默认目录、
+     * 启动草稿恢复。三份拷贝各写各的迟早会出现"首页显示 A、新建却默认 B"的错位。
+     */
+    public static Optional<Path> initial() {
+        return last().or(() -> recentExisting().stream().findFirst());
+    }
+
     /** 清除「上次打开的工作空间」——用于「关闭工作空间」回到引导态。 */
     public static void clearLast() {
         Preferences prefs = preferences();

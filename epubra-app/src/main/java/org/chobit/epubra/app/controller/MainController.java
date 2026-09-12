@@ -75,7 +75,9 @@ import javafx.util.Duration;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -262,6 +264,17 @@ public class MainController {
      */
     private boolean splitPreview = false;
 
+    /**
+     * 主窗口 stage 由 {@code EpubraApp} 在 FXML 加载完成后注入——晚于 {@link #initialize()}。
+     *
+     * <p>因此两件事必须在这里补做，不能放在 {@code initialize()}：
+     * <ol>
+     *   <li>把 stage 补发给需要它的子控制器（FileChooser 的 owner）；</li>
+     *   <li>启动草稿恢复提示 {@link #promptRecoveryIfAny()}——它要弹窗，需要一个既有的
+     *       owner 窗口；更重要的是 GUI 测试只 load FXML + {@code stage.show()}，
+     *       不会调本方法，弹窗因此不可能在无头/无人应答的环境里挂住 FX 线程。</li>
+     * </ol>
+     */
     public void setStage(Stage stage) {
         this.stage = stage;
         // 子控制器在 initialize 阶段已 bind 完，此时只能补发 stage
@@ -278,6 +291,7 @@ public class MainController {
             metadataViewController.setStage(stage);
         }
         workspaceActivity.refreshRecentMenu();
+        promptRecoveryIfAny();
     }
 
     /**
@@ -416,12 +430,11 @@ public class MainController {
         ensureDocumentActivity();
         setEditorChromeVisible(false);
         workspaceActivity.refreshRecentMenu();
-        // 启动恢复扫描：必须在 newBook() 之前判断——否则新建的空书会覆盖 ctx，
-        // findRecoverable(ctx) 看到的 currentFile 就是新建后的 null，找不到任何东西。
-        promptRecoveryIfAny();
         // 故意不在这里 newBook()：启动后欢迎页是初始视图，用户从欢迎页挑一个动作（新建图书 /
         // 打开图书 / 切换工作空间）才落到 ctx.book() 上，避免一开始就凭空创建一本书造成
         // 「自动暂存里多出一份不会有人认领的临时草稿」的窘境。
+        //
+        // 启动草稿恢复提示**不在这里**，放在 setStage() 末尾——见该方法注释。
     }
 
     /**
@@ -840,66 +853,116 @@ public class MainController {
     }
 
     /**
-     * 启动时扫描可恢复的草稿：发现就弹 Alert，让用户选恢复还是丢弃。
+     * 启动时扫描可恢复的草稿：发现就弹 Alert，让用户选恢复到哪个工作空间。
      *
-     * <p>必须放在 {@code newBook()} 之前调用——{@code newBook} 会重置 ctx.book() 和
-     * {@code ctx.currentFile()}，{@link Autosave#findRecoverable} 会因此看不到旧文件的草稿。
+     * <p>由 {@link #setStage(Stage)} 调用（而不是 {@code initialize()}）：需要在 stage 就绪后
+     * 才有 owner 窗口，且 GUI 测试链路上不会触发弹窗。
+     *
+     * <h2>为什么恢复必须绑定工作空间</h2>
+     * <p>没有工作空间就无从创建 / 维护图书，反过来"有图书草稿就该有工作空间"。启动扫描
+     * 命中的都是<b>未归属工作空间</b>的孤儿草稿（{@code ~/.Epubra/autosave/*.draft}），
+     * 所以这里的恢复语义是<b>收编</b>：读出来 → 以书名写成
+     * {@code <workspace>/<书名>.draft} → 清掉孤儿。提示里必须写明工作空间的名称与完整路径，
+     * 恢复后 {@code ctx.currentFile()} 指向工作空间里的真实文件（旧实现留 null，
+     * 造成"恢复出来的书不属于任何工作空间，改完又写回孤儿目录"的死循环）。
+     *
+     * <h2>为什么用 {@code show()} 而不是 {@code showAndWait()}</h2>
+     * <p>启动流程跑在 FX 线程上。{@code showAndWait()} 会开一个嵌套事件循环把 FX 线程
+     * 停在原地，一旦没人应答弹窗（无人值守启动、GUI 测试里恰好存在遗留的孤儿草稿），
+     * 整个应用连同测试一起挂死。这里改为 {@code show()} + {@code setOnHidden}：
+     * 弹窗依旧是模态的，用户应答后走同一条回调，但 FX 线程立即返回。
      */
     private void promptRecoveryIfAny() {
-        Optional<Path> draft = Autosave.findRecoverable(ctx);
-        if (draft.isEmpty()) {
+        Optional<Path> orphan = Autosave.findRecoverable(ctx);
+        if (orphan.isEmpty()) {
             return;
         }
-        Path file = draft.get();
+        Path file = orphan.get();
+        Path workspace = WorkspaceStore.initial().orElse(null);
+
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("发现未保存的草稿");
-        alert.setHeaderText("检测到上次未保存的修改");
-        alert.setContentText("文件：" + file.getFileName() + "\n是否恢复该草稿？");
+        alert.setTitle("恢复草稿");
+        alert.setHeaderText(Autosave.recoveryPromptHeader(workspace));
+        alert.setContentText(Autosave.recoveryPromptText(file, workspace, Instant.now()));
         if (stage != null) {
             alert.initOwner(stage);
         }
-        ButtonType restoreBtn = new ButtonType("恢复草稿");
+        ButtonType acceptBtn = new ButtonType(
+                workspace == null ? "选择工作空间并恢复" : "恢复到此工作空间");
         ButtonType discardBtn = new ButtonType("丢弃");
-        alert.getButtonTypes().setAll(restoreBtn, discardBtn);
-        Optional<ButtonType> choice = alert.showAndWait();
-        if (choice.isEmpty() || choice.get() == discardBtn) {
-            // 丢弃：删除草稿文件，让后续 newBook() 拿干净的初始状态
-            try {
-                java.nio.file.Files.deleteIfExists(file);
-            } catch (IOException e) {
-                System.getLogger(MainController.class.getName())
-                        .log(System.Logger.Level.WARNING,
-                                "Failed to discard draft: " + e.getMessage(), e);
-            }
+        alert.getButtonTypes().setAll(acceptBtn, discardBtn);
+        alert.setOnHidden(event -> onRecoveryChoice(file, workspace, alert.getResult(), acceptBtn));
+        alert.show();
+    }
+
+    /** 恢复弹窗的应答处理：接受 → 收编进工作空间；其它（含"丢弃"/直接关窗）→ 删掉孤儿。 */
+    private void onRecoveryChoice(Path file, Path workspace, ButtonType result, ButtonType acceptBtn) {
+        if (result != acceptBtn) {
+            // 丢弃：删掉孤儿草稿，让后续启动不再反复提示。
+            deleteQuietly(file);
             return;
         }
-        // 恢复：把草稿读回 ctx；标记 dirty 让用户感知到内容已恢复但未保存。
+        Path targetWorkspace = workspace != null ? workspace : chooseRecoveryWorkspace();
+        if (targetWorkspace == null) {
+            // 没有工作空间就无从归属——保留草稿，下次启动再提示。
+            status.set("未选择工作空间，草稿仍保留在自动暂存目录");
+            return;
+        }
+        adoptOrphanDraft(file, targetWorkspace);
+    }
+
+    /** 让用户为孤儿草稿挑一个工作空间；取消时返回 null。 */
+    private Path chooseRecoveryWorkspace() {
+        DirectoryChooser chooser = new DirectoryChooser();
+        chooser.setTitle("选择草稿要恢复到的工作空间");
+        workspacePathHint().ifPresent(dir -> chooser.setInitialDirectory(dir.toFile()));
+        File selected = chooser.showDialog(stage);
+        return selected == null ? null : selected.toPath();
+    }
+
+    private Optional<Path> workspacePathHint() {
+        return WorkspaceStore.initial().filter(Files::isDirectory);
+    }
+
+    /**
+     * 把孤儿草稿收编进工作空间：读内容 → 以书名写成 {@code <ws>/<书名>.draft} → 删孤儿
+     * → 落到 ctx（{@code currentFile} 指向工作空间内的文件）→ 切首页工作空间 → 广播加载事件。
+     */
+    private void adoptOrphanDraft(Path orphan, Path workspace) {
         try {
-            Book restored = Autosave.readDraft(file);
+            Book restored = Autosave.readDraft(orphan);
+            String title = restored.metadata().firstTitle();
+            String stem = title == null || title.isBlank()
+                    ? Autosave.stripDraftSuffix(orphan.getFileName().toString())
+                    : title;
+            Path target = Autosave.writeIntoWorkspace(restored, workspace, stem);
+            deleteQuietly(orphan);
+
+            WorkspaceStore.add(workspace);
             ctx.setBook(restored);
-            // 草稿名若是 "untitled.draft" → 没有对应的主文件路径；否则从草稿路径推断。
-            String draftName = file.getFileName().toString();
-            if (!Autosave.UNTITLED_DRAFT_NAME.equals(draftName)) {
-                // 草稿文件名约定：<main-stem>.draft → 主文件 = <main-stem>.epub
-                String stem = draftName.substring(0, draftName.length() - Autosave.DRAFT_SUFFIX.length());
-                Path inferredMain = file.getParent().resolve(stem + ".epub");
-                if (java.nio.file.Files.exists(inferredMain)) {
-                    ctx.setCurrentFile(inferredMain);
-                    ctx.book().setSource(inferredMain);
-                } else {
-                    ctx.setCurrentFile(null);
-                }
-            } else {
-                ctx.setCurrentFile(null);
-            }
+            ctx.setCurrentFile(target);
+            restored.setSource(target);
             setCurrentChapter(null);
             ctx.setDirty(true);
             ctx.history().reset();
             ctx.setEditCaptured(false);
+            if (!workspace.equals(welcomePageController.currentWorkspace())) {
+                welcomePageController.showWorkspace(workspace);
+            }
             ctx.bus().publish(new AppEventBus.BookLoadedEvent());
-            status.set("已从草稿恢复：" + file.getFileName());
+            status.set("已把草稿恢复到工作空间：" + target.getFileName());
         } catch (IOException e) {
             warn("草稿恢复失败：" + e.getMessage());
+        }
+    }
+
+    private static void deleteQuietly(Path file) {
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException e) {
+            System.getLogger(MainController.class.getName())
+                    .log(System.Logger.Level.WARNING,
+                            "Failed to discard draft: " + e.getMessage(), e);
         }
     }
 
