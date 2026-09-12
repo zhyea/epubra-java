@@ -12,10 +12,13 @@ import org.xml.sax.InputSource;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.StringReader;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -65,6 +68,73 @@ class ResourceOpsTest {
         Resource chapter = book.spineResources().get(0);
         Resource anon = new Resource("img-x", "", MediaTypes.PNG);
         assertFalse(ResourceOps.isReferencedByChapters(book, anon));
+    }
+
+    @Test
+    void isReferencedByChaptersMatchesXmlEscapedFileName() {
+        // P2：buildInsertImageTag 会把文件名 XML 转义后写进 src/alt，
+        // 因此磁盘上的 "Tom & Jerry.png" 在正文里是 "Tom &amp; Jerry.png"。
+        // 只比对原文件名会漏判 → 删除这张被引用的图时不再提示「正文存在引用」。
+        Book book = BookFactory.createEmpty("转义");
+        Resource image = new Resource("img-1", "OEBPS/images/Tom & Jerry.png", MediaTypes.PNG);
+        image.setData(new byte[]{1, 2, 3});
+        book.resources().add(image);
+
+        Resource chapter = book.spineResources().get(0);
+        chapter.setString("<html><body><p><img src=\"images/Tom &amp; Jerry.png\""
+                + " alt=\"Tom &amp; Jerry.png\"/></p></body></html>");
+        assertTrue(ResourceOps.isReferencedByChapters(book, image),
+                "转义后的文件名必须能匹配上，否则删除提示会漏");
+
+        chapter.setString("<html><body><p>与本图无关。</p></body></html>");
+        assertFalse(ResourceOps.isReferencedByChapters(book, image));
+    }
+
+    @Test
+    void isReferencedByChaptersToleratesNullArguments() {
+        Book book = BookFactory.createEmpty("空引用");
+        assertFalse(ResourceOps.isReferencedByChapters(null, null));
+        assertFalse(ResourceOps.isReferencedByChapters(book, null));
+    }
+
+    @Test
+    void joinInsertFragmentsSeparatesMultipleImages() throws Exception {
+        // P2：裸连的 <img/><img/> 是两个行内元素，会挤在同一行。
+        String joined = ResourceOps.joinInsertFragments(List.of(
+                "<img src=\"a.png\" alt=\"a.png\"/>",
+                "<img src=\"b.png\" alt=\"b.png\"/>",
+                "<img src=\"c.png\" alt=\"c.png\"/>"));
+        assertEquals("<img src=\"a.png\" alt=\"a.png\"/>"
+                        + "<br/>"
+                        + "<img src=\"b.png\" alt=\"b.png\"/>"
+                        + "<br/>"
+                        + "<img src=\"c.png\" alt=\"c.png\"/>",
+                joined);
+        // 结果仍必须是合法 XHTML——<br/> 在 <p> 内外都允许
+        assertParsable(joined);
+    }
+
+    @Test
+    void joinInsertFragmentsLeavesSingleFragmentUntouched() {
+        assertEquals("<img src=\"a.png\" alt=\"a.png\"/>",
+                ResourceOps.joinInsertFragments(List.of("<img src=\"a.png\" alt=\"a.png\"/>")));
+        assertEquals("", ResourceOps.joinInsertFragments(List.of()));
+        assertEquals("", ResourceOps.joinInsertFragments(null));
+    }
+
+    @Test
+    void findEquivalentReusesSameNameAndBytes() {
+        Book book = BookFactory.createEmpty("去重");
+        Resource first = book.addResource("dup.png", new byte[]{1, 2, 3});
+
+        assertSame(first, ResourceOps.findEquivalent(book, "dup.png", new byte[]{1, 2, 3}),
+                "同名同内容必须复用，否则重复插图会堆出 dup-1.png 副本");
+        assertNull(ResourceOps.findEquivalent(book, "dup.png", new byte[]{9}),
+                "同名不同内容是两张不同的图，不能合并");
+        assertNull(ResourceOps.findEquivalent(book, "other.png", new byte[]{1, 2, 3}),
+                "不同名不合并");
+        assertNull(ResourceOps.findEquivalent(book, "", new byte[]{1}));
+        assertNull(ResourceOps.findEquivalent(book, "dup.png", null));
     }
 
     @Test
@@ -126,6 +196,13 @@ class ResourceOpsTest {
 
         // 能被 XML 解析器吃掉，才说明写回正文后不会破坏文档结构
         String wrapped = "<div xmlns=\"http://www.w3.org/1999/xhtml\">" + tag + "</div>";
+        assertNotNull(DocumentBuilderFactory.newInstance().newDocumentBuilder()
+                .parse(new InputSource(new StringReader(wrapped))));
+    }
+
+    /** 片段放进带 XHTML 命名空间的 div 里解析——模拟它被插进章节后的真实上下文。 */
+    private static void assertParsable(String fragment) throws Exception {
+        String wrapped = "<div xmlns=\"http://www.w3.org/1999/xhtml\">" + fragment + "</div>";
         assertNotNull(DocumentBuilderFactory.newInstance().newDocumentBuilder()
                 .parse(new InputSource(new StringReader(wrapped))));
     }

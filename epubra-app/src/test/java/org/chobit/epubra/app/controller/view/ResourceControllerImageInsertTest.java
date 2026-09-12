@@ -122,10 +122,53 @@ class ResourceControllerImageInsertTest {
 
         assertEquals(1, h.inserted.size(), "多张图片也应只调一次插入（拼成一串）");
         assertEquals(2, countOf(h.inserted.get(0), "<img "), h.inserted.get(0));
+        assertEquals(1, countOf(h.inserted.get(0), "<br/>"),
+                "多张图之间必须有分隔，否则两个行内元素会挤在同一行：" + h.inserted.get(0));
         assertParsableXml(h.inserted.get(0));
         assertTrue(hasResourceNamed(h.book, "a.png"));
         assertTrue(hasResourceNamed(h.book, "b.jpg"));
         assertEquals("已插入 2 张图片", h.statuses.get(0));
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("重复插入同一张图不会产生重复资源")
+    void reinsertingSameImageReusesResource(@TempDir Path dir) throws Exception {
+        Path png = dir.resolve("dup.png");
+        Files.write(png, new byte[]{7, 7, 7, 7});
+
+        Harness h = new Harness();
+        h.controller.insertImagesFromPaths(List.of(png), h.chapterHref);
+        awaitInsert(h);
+
+        h.expectNextRun();
+        h.controller.insertImagesFromPaths(List.of(png), h.chapterHref);
+        awaitInsert(h);
+
+        assertEquals(2, h.inserted.size(), "两次插入都应发生");
+        assertEquals(1, countOfNamed(h.book, "dup"),
+                "第二次必须复用已导入的资源，不能堆出 dup-1.png 副本");
+        assertEquals("已插入图片：dup.png", h.statuses.get(1));
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("插入落空时不谎报「已插入」——资源仍进书，但状态如实说明")
+    void failedInsertIsNotReportedAsSuccess(@TempDir Path dir) throws Exception {
+        Path png = dir.resolve("cover.png");
+        Files.write(png, new byte[]{1, 2});
+
+        Harness h = new Harness();
+        h.insertSucceeds = false;
+        h.controller.insertImagesFromPaths(List.of(png), h.chapterHref);
+        awaitInsert(h);
+
+        assertEquals(1, h.inserted.size(), "仍应尝试插入一次");
+        assertFalse(h.statuses.get(0).contains("已插入"),
+                "插入失败不能报成功：" + h.statuses.get(0));
+        assertTrue(h.statuses.get(0).contains("未能插入正文"), h.statuses.get(0));
+        assertTrue(hasResourceNamed(h.book, "cover.png"),
+                "插入失败不应回滚导入——用户选过的图仍然留在书里");
     }
 
     @Test
@@ -184,8 +227,10 @@ class ResourceControllerImageInsertTest {
         final AtomicInteger beginChangeCalls = new AtomicInteger();
         final AtomicInteger markDirtyCalls = new AtomicInteger();
         final AtomicInteger refreshResourcesCalls = new AtomicInteger();
-        final CountDownLatch finished = new CountDownLatch(1);
         final ResourceController controller = new ResourceController();
+        /** 模拟「编辑器当前不可插入」：可视化编辑器未加载完成 / 源码区被禁用。 */
+        boolean insertSucceeds = true;
+        private volatile CountDownLatch finished = new CountDownLatch(1);
 
         Harness() {
             ctx.setBook(book);
@@ -206,17 +251,37 @@ class ResourceControllerImageInsertTest {
                     () -> true,
                     (title, message, e) -> warnings.add(title + ": " + message),
                     AsyncTasks.NOOP_PROGRESS,
-                    inserted::add);
+                    xhtml -> {
+                        inserted.add(xhtml);
+                        return insertSucceeds;
+                    });
+        }
+
+        /** 同一 harness 上再跑一次流水线前，重新准备完成信号。 */
+        void expectNextRun() {
+            finished = new CountDownLatch(1);
+        }
+
+        /** 流水线最后一步（setStatus）在 FX 线程完成，看到它才说明整条链路走完。 */
+        void awaitFinished() throws InterruptedException {
+            CountDownLatch latch = finished;
+            assertTrue(latch.await(30, TimeUnit.SECONDS), "插图流水线超时未完成");
         }
     }
 
-    /** 流水线最后一步（setStatus）在 FX 线程完成，看到它才说明整条链路走完。 */
     private static void awaitInsert(Harness h) throws InterruptedException {
-        assertTrue(h.finished.await(30, TimeUnit.SECONDS), "插图流水线超时未完成");
+        h.awaitFinished();
     }
 
     private static boolean hasResourceNamed(Book book, String fileName) {
         return book.resources().all().stream().anyMatch(r -> fileName.equals(r.fileName()));
+    }
+
+    /** 文件名以给定前缀开头的资源数量——用来断言「没有堆出 foo-1.png 副本」。 */
+    private static long countOfNamed(Book book, String prefix) {
+        return book.resources().all().stream()
+                .filter(r -> r.fileName().startsWith(prefix))
+                .count();
     }
 
     private static int countOf(String haystack, String needle) {

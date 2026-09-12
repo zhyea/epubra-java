@@ -56,8 +56,14 @@ public class ResourceController {
     private ErrorReporter showError;
     private AsyncTasks.ProgressController progress;
     private Supplier<ChapterNode> currentNodeProvider = () -> null;
-    /** 把一段 XHTML 片段插到当前激活的编辑器（编辑 tab → 可视化编辑器，否则源码区）。 */
-    private Consumer<String> insertXhtml = xhtml -> { };
+    /**
+     * 把一段 XHTML 片段插到当前激活的编辑器（编辑 tab → 可视化编辑器，否则源码区）。
+     *
+     * <p>返回值有意义：编辑器当前不可用时（没有选中章节、可视化编辑器尚未加载完成、
+     * 源码区被禁用）会返回 {@code false}。调用方必须据此决定是否报「已插入」，
+     * 不能无条件宣告成功。
+     */
+    private XhtmlInserter insertXhtml = xhtml -> false;
 
     /** 主窗口 stage（FileChooser 的 owner）。由 {@link #setStage} 在 FXML 加载后补发。 */
     private Stage stage;
@@ -75,7 +81,7 @@ public class ResourceController {
                      Consumer<String> warn, BooleanSupplier confirm,
                      ErrorReporter showError,
                      AsyncTasks.ProgressController progress,
-                     Consumer<String> insertXhtml) {
+                     XhtmlInserter insertXhtml) {
         this.ctx = ctx;
         this.beginChange = beginChange;
         this.markDirty = markDirty;
@@ -305,8 +311,11 @@ public class ResourceController {
                 current.resource().href(), row.getResource().href(), row.getName());
         // 插入策略（编辑 tab 落可视化编辑器 / 源码 tab 落源码区 + 光标处理）由父控制器决定，
         // 本类只负责「选中了哪张图、该拼成什么标签」。
-        insertXhtml.accept(tag);
-        setStatus.accept("已在正文中插入：" + row.getName());
+        if (insertXhtml.insert(tag)) {
+            setStatus.accept("已在正文中插入：" + row.getName());
+        } else {
+            setStatus.accept("未能插入正文——请先打开该章节的编辑或源码视图");
+        }
     }
 
     /** 编辑 tab 工具条「图片」按钮支持的类型，与资源导入的图片部分保持一致。 */
@@ -392,6 +401,14 @@ public class ResourceController {
      * 管线）因此不会再记一次快照——导入与插入合并成**一次**可撤销操作。
      *
      * <p>若一个文件都没读成功，直接返回：不开变更步、不打脏标记，避免留下一次空操作。
+     *
+     * <p>两条容易踩的坑，都在这里收口：
+     * <ul>
+     *   <li><b>已存在同样文件名 + 同样字节的资源就复用</b>（{@link ResourceOps#findEquivalent}），
+     *       重复选同一张图不再堆积 {@code foo-1.png} 副本；</li>
+     *   <li><b>插入结果要检查</b>（{@link XhtmlInserter#insert} 的返回值）——没有可插入位置时
+     *       资源仍然进了书，但状态栏要说「已导入、未能插入正文」，不能谎报「已插入 N 张图片」。</li>
+     * </ul>
      */
     private void attachImagesAndInsert(String chapterHref, List<LoadedFile> loaded) {
         List<LoadedFile> readable = new ArrayList<>(loaded.size());
@@ -408,16 +425,26 @@ public class ResourceController {
         beginChange.run();
         List<String> tags = new ArrayList<>(readable.size());
         for (LoadedFile lf : readable) {
-            Resource image = ctx.book().addResource(lf.fileName, lf.data);
+            Resource image = ResourceOps.findEquivalent(ctx.book(), lf.fileName, lf.data);
+            if (image == null) {
+                image = ctx.book().addResource(lf.fileName, lf.data);
+            }
             tags.add(ResourceOps.buildInsertImageTag(chapterHref, image.href(), lf.fileName));
         }
         markDirty.run();
-        insertXhtml.accept(String.join("", tags));
+        boolean inserted = insertXhtml.insert(ResourceOps.joinInsertFragments(tags));
         refreshResources.run();
         updateStatus.run();
-        setStatus.accept(readable.size() == 1
-                ? "已插入图片：" + readable.get(0).fileName
-                : "已插入 " + readable.size() + " 张图片");
+        int count = readable.size();
+        if (inserted) {
+            setStatus.accept(count == 1
+                    ? "已插入图片：" + readable.get(0).fileName
+                    : "已插入 " + count + " 张图片");
+        } else {
+            setStatus.accept(count == 1
+                    ? "图片已导入资源列表，但未能插入正文——请先打开该章节的编辑或源码视图"
+                    : count + " 张图片已导入资源列表，但未能插入正文——请先打开该章节的编辑或源码视图");
+        }
     }
 
     public void cleanupUnused() {
@@ -462,5 +489,16 @@ public class ResourceController {
     @FunctionalInterface
     public interface ErrorReporter {
         void report(String title, String message, Exception e);
+    }
+
+    /**
+     * 把一段 XHTML 片段插到「当前激活的编辑器」的钩子。
+     *
+     * <p>返回 {@code false} 表示当前没有可插入的位置（未选中章节 / 可视化编辑器未加载完成 /
+     * 源码区不可用）。调用方据此避免谎报插入成功。
+     */
+    @FunctionalInterface
+    public interface XhtmlInserter {
+        boolean insert(String xhtml);
     }
 }

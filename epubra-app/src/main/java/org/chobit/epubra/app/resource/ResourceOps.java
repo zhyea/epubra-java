@@ -6,6 +6,7 @@ import org.chobit.epubra.lib.domain.Resource;
 import org.chobit.epubra.lib.util.Hrefs;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -40,18 +41,72 @@ public final class ResourceOps {
      *
      * <p>这是为了删除前的提示，不要求精确：full-reference 走
      * {@link Book#unreferencedResources()}。
+     *
+     * <p><b>必须同时比对原文件名与 XML 转义后的文件名</b>：{@link #buildInsertImageTag}
+     * 写 {@code src} / {@code alt} 时会做 XML 转义，磁盘上的 {@code Tom & Jerry.png}
+     * 在正文里是 {@code Tom &amp; Jerry.png}。只比对原名会漏判——删除这张被引用的图时，
+     * 用户就看不到「正文中存在引用」的提示。
      */
     public static boolean isReferencedByChapters(Book book, Resource resource) {
+        if (book == null || resource == null) {
+            return false;
+        }
         String fileName = resource.fileName();
         if (fileName.isEmpty()) {
             return false;
         }
+        String escaped = escapeXmlAttribute(fileName);
         for (Resource chapter : book.spineResources()) {
-            if (chapter != resource && chapter.asString().contains(fileName)) {
+            if (chapter == resource) {
+                continue;
+            }
+            String text = chapter.asString();
+            if (text.contains(fileName) || text.contains(escaped)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * 在书里找一份与给定「文件名 + 字节内容」都相同的既有资源，找不到返回 {@code null}。
+     *
+     * <p>用于插入图片前的去重：重复选同一张图时直接复用已有资源，而不是让
+     * {@link Book#addResource(String, byte[])} 再挂一份 {@code foo-1.png}——否则反复插图
+     * 会让资源列表里堆满同一张图的副本。
+     *
+     * <p>故意要求文件名<b>与</b>内容都一致才复用：同名不同内容是两张不同的图，
+     * 合并会张冠李戴。
+     */
+    public static Resource findEquivalent(Book book, String fileName, byte[] data) {
+        if (book == null || book.resources() == null || data == null
+                || fileName == null || fileName.isEmpty()) {
+            return null;
+        }
+        for (Resource resource : book.resources().all()) {
+            if (fileName.equals(resource.fileName()) && Arrays.equals(data, resource.data())) {
+                return resource;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 把多个待插入片段连成一段可插入的 XHTML。
+     *
+     * <p><b>不能裸连</b>：{@code <img/><img/>} 只是两个相邻的行内元素，渲染出来会挤在同一行，
+     * 看起来像一张被压扁的图。中间插 {@code <br/>} 分隔——{@code <br/>} 在 {@code <p>} 之内
+     * 之外都是合法 XHTML；改用 {@code <p>} 包裹虽然「语义更像段落」，但插入点常位于某个
+     * {@code <p>} 内部，会造出非法的嵌套 {@code <p>}。
+     */
+    public static String joinInsertFragments(List<String> fragments) {
+        if (fragments == null || fragments.isEmpty()) {
+            return "";
+        }
+        if (fragments.size() == 1) {
+            return fragments.get(0);
+        }
+        return String.join("<br/>", fragments);
     }
 
     /**

@@ -1634,20 +1634,28 @@ public class MainController {
      *
      * <p>编辑 tab → 插入可视化编辑器的光标处，不切 tab；否则先切到源码 tab（离开编辑 tab
      * 的联动会先把可视化编辑器里未同步的改动落盘），再插到源码区的光标处。
+     *
+     * <p>返回值供调用方（{@code ResourceController}）判断是否真的插进去了：可视化编辑器
+     * 可能尚未加载完成、源码区可能被禁用，这些情况下会返回 {@code false}，调用方不得
+     * 宣告「已插入」。
      */
-    private void insertXhtmlIntoActiveEditor(String xhtml) {
+    private boolean insertXhtmlIntoActiveEditor(String xhtml) {
+        if (xhtml == null || xhtml.isEmpty()) {
+            return false;
+        }
         if (onVisualTab() && insertHtmlIntoVisualEditor(xhtml)) {
-            return;
+            return true;
         }
         if (editorTabs != null) {
             editorTabs.getSelectionModel().select(SOURCE_TAB_INDEX);
         }
         if (contentArea == null || contentArea.isDisabled()) {
-            return;
+            return false;
         }
         int at = contentArea.getAnchor();
         contentArea.insertText(at, xhtml);
         contentArea.positionCaret(at + xhtml.length());
+        return true;
     }
 
     /**
