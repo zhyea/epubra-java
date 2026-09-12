@@ -19,5 +19,5 @@
         <Insets top="8.0" right="8.0" bottom="8.0" left="8.0"/>
     </padding>
     <Label text="目录" styleClass="panel-title"/>
-    <TreeView fx:id="tocTree" VBox.vgrow="ALWAYS"/>
+    <TreeView fx:id="tocTree" styleClass="toc-tree" VBox.vgrow="ALWAYS"/>
 </VBox>

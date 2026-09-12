@@ -46,14 +46,17 @@ public class WelcomePageController {
 
     private Runnable onNewBook;
     private Consumer<Path> onOpenBook;
+    private Runnable onChooseWorkspace;
     private Runnable onExit;
     private Path currentWorkspace;
     private long rebuildGeneration;
     private Unsubscriber bookLoadedUnsubscriber;
 
-    public void bind(Runnable onNewBook, Consumer<Path> onOpenBook, Runnable onExit) {
+    public void bind(Runnable onNewBook, Consumer<Path> onOpenBook,
+                     Runnable onChooseWorkspace, Runnable onExit) {
         this.onNewBook = onNewBook;
         this.onOpenBook = onOpenBook;
+        this.onChooseWorkspace = onChooseWorkspace;
         this.onExit = onExit;
         showWorkspace(resolveInitialWorkspace());
     }
@@ -95,7 +98,12 @@ public class WelcomePageController {
         }
         long generation = ++rebuildGeneration;
         bookShelf.getChildren().clear();
-        bookShelf.getChildren().add(newBookCard());
+        // 没有工作空间时不能建书——先让用户选定目录，否则「新建图书」无处可放。
+        if (currentWorkspace == null) {
+            bookShelf.getChildren().add(chooseWorkspaceCard());
+        } else {
+            bookShelf.getChildren().add(newBookCard());
+        }
 
         if (workspaceTitle != null) {
             workspaceTitle.setText(currentWorkspace == null
@@ -104,7 +112,7 @@ public class WelcomePageController {
         }
         if (workspaceHint != null) {
             workspaceHint.setText(currentWorkspace == null
-                    ? "请从“文件 → 打开最近工作空间”切换，或点击“+”新建图书"
+                    ? "请点击卡片选择工作空间，或从“文件 → 打开工作空间”切换"
                     : "双击图书打开编辑器");
         }
         if (currentWorkspace == null) {
@@ -173,6 +181,26 @@ public class WelcomePageController {
             event.consume();
         });
         Tooltip.install(card, new Tooltip("新建图书"));
+        return card;
+    }
+
+    /** 未选定工作空间时的引导卡——此时没有落盘位置，不提供「新建图书」。 */
+    private Node chooseWorkspaceCard() {
+        StackPane cover = coverContainer();
+        cover.getChildren().add(new Label("\uD83D\uDCC1"));
+        cover.getStyleClass().addAll("book-cover-placeholder", "new-book-plus");
+
+        Label title = new Label("选择工作空间");
+        title.getStyleClass().add("book-title");
+        VBox card = new VBox(7, cover, title);
+        card.getStyleClass().addAll("book-card", "new-book-card");
+        card.setOnMouseClicked(event -> {
+            if (onChooseWorkspace != null) {
+                onChooseWorkspace.run();
+            }
+            event.consume();
+        });
+        Tooltip.install(card, new Tooltip("选择一个目录作为工作空间"));
         return card;
     }
 

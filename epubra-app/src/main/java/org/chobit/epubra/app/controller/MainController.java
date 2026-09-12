@@ -2,7 +2,11 @@ package org.chobit.epubra.app.controller;
 
 import org.chobit.epubra.app.EpubraApp;
 import org.chobit.epubra.app.activities.DocumentActivity;
+import org.chobit.epubra.app.activities.InsertActivity;
+import org.chobit.epubra.app.activities.StatusCoordinator;
+import org.chobit.epubra.app.activities.ThemeActivity;
 import org.chobit.epubra.app.activities.UndoActivity;
+import org.chobit.epubra.app.activities.WorkspaceActivity;
 import org.chobit.epubra.app.controller.layout.SidebarController;
 import org.chobit.epubra.app.controller.view.FindController;
 import org.chobit.epubra.app.controller.view.MetadataViewController;
@@ -12,6 +16,7 @@ import org.chobit.epubra.app.controller.view.ValidationController;
 import org.chobit.epubra.app.controller.view.WelcomePageController;
 import org.chobit.epubra.app.context.Unsubscriber;
 import org.chobit.epubra.app.ui.model.ChapterNode;
+import org.chobit.epubra.app.ui.FxNodes;
 import org.chobit.epubra.app.context.AppEventBus;
 import org.chobit.epubra.app.context.BookContext;
 import org.chobit.epubra.app.document.Autosave;
@@ -19,7 +24,6 @@ import org.chobit.epubra.app.document.AutosaveConfig;
 import org.chobit.epubra.app.editor.PreviewHtml;
 import org.chobit.epubra.app.editor.TextSearch;
 import org.chobit.epubra.app.editor.Theme;
-import org.chobit.epubra.app.editor.ThemeManager;
 import org.chobit.epubra.app.platform.AppPaths;
 import org.chobit.epubra.app.platform.AsyncTasks;
 import org.chobit.epubra.app.workspace.WorkspaceStore;
@@ -232,7 +236,10 @@ public class MainController {
     /**
      * 当前主题。initialize 时取自持久化配置，切换后预览区与整个界面同步换色。
      */
-    private Theme currentTheme = Theme.LIGHT;
+    private ThemeActivity themeActivity;
+    private StatusCoordinator status;
+    private InsertActivity insertActivity;
+    private WorkspaceActivity workspaceActivity;
 
     /**
      * 编辑区呈现模式：{@code false} = 内容与预览分标签，{@code true} = 左右并排对照。
@@ -254,7 +261,7 @@ public class MainController {
         if (metadataViewController != null) {
             metadataViewController.setStage(stage);
         }
-        refreshRecentWorkspaceMenu();
+        workspaceActivity.refreshRecentMenu();
     }
 
     /**
@@ -279,6 +286,35 @@ public class MainController {
         // 必须在任何 loadContent/load 之前调用(否则 native 已创建默认目录,改不动了)。
         previewView.getEngine().setUserDataDirectory(AppPaths.webviewCacheDir().toFile());
 
+        // status 必须先于任何 bind 构造：子控制器拿的是 status::set 这类方法引用，
+        // 引用在求值时就要拿到非空实例，放到后面的 bind 之后再建会 NPE。
+        status = new StatusCoordinator(ctx, contentArea, this::currentChapter, () -> stage,
+                statusLabel,
+                statusProgressBar, statusProgressLabel, statusProgressDivider,
+                errorStatusLabel, errorStatusDivider,
+                warningStatusLabel, warningStatusDivider,
+                chapterStatusLabel, wordStatusLabel, chapterWordStatusLabel,
+                undoItem, redoItem);
+
+        insertActivity = new InsertActivity(contentArea, status::set, this::beginChange);
+
+        workspaceActivity = new WorkspaceActivity(ctx, recentWorkspaceMenu, () -> stage,
+                this::confirmDiscardChanges, this::warn,
+                () -> setCurrentChapter(null),
+                workspace -> {
+                    welcomePageController.showWorkspace(workspace);
+                    welcomePageController.show();
+                },
+                draft -> {
+                    ensureDocumentActivity();
+                    documentActivity.openDraftAsync(draft);
+                },
+                file -> {
+                    ensureDocumentActivity();
+                    documentActivity.openFileAsync(file);
+                },
+                () -> setEditorChromeVisible(false));
+
         // 子控制器由 fx:include 实例化（先于本方法执行 @FXML 注入），这里统一注入
         // BookContext 与回调。SidebarController 横跨活动栏 / 三个视图 / 底部面板多个
         // FXML 文件，无法归属某个子 FXML，保持手动构造。
@@ -290,7 +326,7 @@ public class MainController {
                 bottomPanel, sidePanel, mainSplit);
         sidebarController.setupActivityBarInteraction();
 
-        tocViewController.bind(ctx, this::beginChange, this::setStatus, this::warn);
+        tocViewController.bind(ctx, this::beginChange, status::set, this::warn);
         tocViewController.wire();
         tocViewController.setOnChapterSelected(this::showChapter);
 
@@ -299,31 +335,32 @@ public class MainController {
 
         welcomePageController.bind(
                 this::onNew,
-                this::openDraft,
+                draft -> workspaceActivity.openDraft(draft),
+                this::onOpenWorkspace,
                 this::onExit);
         // 订阅 BookLoadedEvent 自动收起欢迎页（新建 / 打开 / 自动暂存恢复 都触发）
         welcomePageController.subscribeVisibility(ctx);
 
         bottomPanelController.bind(ctx, validator, editorTabs, contentArea,
                 tocViewController, sidebarController,
-                this::commitPendingEdits, this::setStatus, progressSink());
+                this::commitPendingEdits, status::set, status.progressSink());
         bottomPanelController.setupTable();
 
         metadataViewController.bind(ctx, this::recordBeforeChange, this::markDirty,
-                this::refreshAll, this::refreshResources, this::setStatus);
+                this::refreshAll, this::refreshResources, status::set);
 
         resourceViewController.bind(ctx, editorTabs, contentArea,
                 this::beginChange, this::markDirty,
                 this::refreshAll, this::refreshResources,
                 () -> metadataViewController.refreshCoverCard(),
-                this::updateStatus, this::setStatus, this::warn,
-                this::confirmDiscardChanges, this::showError,
-                progressSink());
+                status::refresh, status::set, this::warn,
+                this::confirmDiscardChanges, status::showError,
+                status.progressSink());
 
         findBarController.bind(ctx, contentArea,
                 this::beginChange, this::markDirty,
                 this::reloadEditor, this::refreshPreview,
-                this::setStatus, this::confirmDiscardChanges);
+                status::set, this::confirmDiscardChanges);
 
         contentArea.textProperty().addListener((obs, oldValue, text) -> {
             if (ctx.loading() || ctx.book() == null) {
@@ -337,16 +374,17 @@ public class MainController {
 
         subscribeAppEvents();
 
-        currentTheme = ThemeManager.current();
-        selectThemeItem(currentTheme);
-        applyThemeWhenSceneReady();
+        themeActivity = new ThemeActivity(statusLabel, themeStatusLabel,
+                themeLightItem, themeDarkItem, themeSepiaItem,
+                status::set, this::refreshPreview);
+        themeActivity.initialize();
 
         wireAutosave();
         wireFileDropWhenSceneReady();
 
         ensureDocumentActivity();
         setEditorChromeVisible(false);
-        refreshRecentWorkspaceMenu();
+        workspaceActivity.refreshRecentMenu();
         // 启动恢复扫描：必须在 newBook() 之前判断——否则新建的空书会覆盖 ctx，
         // findRecoverable(ctx) 看到的 currentFile 就是新建后的 null，找不到任何东西。
         promptRecoveryIfAny();
@@ -369,7 +407,7 @@ public class MainController {
         }));
         busSubscribers.add(bus.subscribe(AppEventBus.BookSavedEvent.class, e -> {
             updateTitleAndHistory();
-            flashStatus("已保存");
+            status.flash("已保存");
         }));
         busSubscribers.add(bus.subscribe(AppEventBus.BookDirtyChangedEvent.class, e -> updateTitleAndHistory()));
     }
@@ -391,8 +429,8 @@ public class MainController {
      * 集中更新标题栏与撤销菜单可用态；保存与脏标记均触发同一组 UI 重画。
      */
     private void updateTitleAndHistory() {
-        updateTitle();
-        updateHistoryControls();
+        status.updateTitle();
+        status.updateHistoryControls();
     }
 
     // ------------------------------------------------------------------ 文件
@@ -411,94 +449,12 @@ public class MainController {
 
     @FXML
     public void onOpenWorkspace() {
-        DirectoryChooser chooser = new DirectoryChooser();
-        chooser.setTitle("打开工作空间");
-        if (stage != null && WorkspaceStore.last().isPresent()
-                && java.nio.file.Files.isDirectory(WorkspaceStore.last().orElseThrow())) {
-            chooser.setInitialDirectory(WorkspaceStore.last().orElseThrow().toFile());
-        }
-        File selected = chooser.showDialog(stage);
-        if (selected != null) {
-            switchWorkspace(selected.toPath());
-        }
-    }
-
-    private void refreshRecentWorkspaceMenu() {
-        if (recentWorkspaceMenu == null) {
-            return;
-        }
-        recentWorkspaceMenu.getItems().clear();
-        List<Path> recent = WorkspaceStore.recentExisting();
-        if (recent.isEmpty()) {
-            MenuItem empty = new MenuItem("暂无最近工作空间");
-            empty.setDisable(true);
-            recentWorkspaceMenu.getItems().add(empty);
-            return;
-        }
-        for (Path workspace : recent) {
-            MenuItem item = new MenuItem(workspaceDisplayName(workspace));
-            item.setOnAction(event -> switchWorkspace(workspace));
-            item.setMnemonicParsing(false);
-            recentWorkspaceMenu.getItems().add(item);
-        }
-    }
-
-    private void switchWorkspace(Path workspace) {
-        if (workspace == null || !java.nio.file.Files.isDirectory(workspace)) {
-            warn("工作空间不存在：" + workspace);
-            refreshRecentWorkspaceMenu();
-            return;
-        }
-        if (ctx.book() != null && !confirmDiscardChanges()) {
-            return;
-        }
-        if (ctx.book() != null) {
-            Autosave.discardFor(ctx);
-            ctx.setBook(null);
-            ctx.setCurrentFile(null);
-            ctx.resetForNewBook();
-            setCurrentChapter(null);
-        }
-        WorkspaceStore.add(workspace);
-        welcomePageController.showWorkspace(workspace);
-        welcomePageController.show();
-        setEditorChromeVisible(false);
-        refreshRecentWorkspaceMenu();
-    }
-
-    private void openDraft(Path draftFile) {
-        if (draftFile == null || !java.nio.file.Files.isRegularFile(draftFile)) {
-            warn("图书文件不存在：" + draftFile);
-            return;
-        }
-        if (!confirmDiscardChanges()) {
-            return;
-        }
-        Autosave.discardFor(ctx);
-        ensureDocumentActivity();
-        documentActivity.openDraftAsync(draftFile);
-    }
-
-    /** 打开拖放进来的图书文件。 */
-    private void openPath(java.nio.file.Path file) {
-        if (!confirmDiscardChanges()) {
-            return;
-        }
-        Autosave.discardFor(ctx);
-        ensureDocumentActivity();
-        documentActivity.openFileAsync(file);
-    }
-
-    private static String workspaceDisplayName(Path workspace) {
-        if (workspace == null || workspace.getFileName() == null) {
-            return workspace == null ? "" : workspace.toString();
-        }
-        return workspace.getFileName().toString();
+        workspaceActivity.chooseAndSwitch();
     }
 
     private void setEditorChromeVisible(boolean visible) {
-        setVisibleManaged(activityBar, visible);
-        setVisibleManaged(statusBar, visible);
+        FxNodes.setVisibleManaged(activityBar, visible);
+        FxNodes.setVisibleManaged(statusBar, visible);
     }
 
     @FXML
@@ -534,10 +490,10 @@ public class MainController {
     private void ensureDocumentActivity() {
         if (documentActivity == null) {
             documentActivity = new DocumentActivity(ctx,
-                    this::setStatus,
+                    status::set,
                     this::confirmDiscardChanges,
                     DocumentActivity.defaultDialogs(stage),
-                    progressSink(),
+                    status.progressSink(),
                     this::reportError);
         }
     }
@@ -546,7 +502,7 @@ public class MainController {
      * 错误信息直接打到状态栏。复杂场景会让 DocumentActivity 触发 Alert，这里保持简洁。
      */
     private void reportError(String message) {
-        setStatus(message);
+        status.set(message);
     }
 
     // ------------------------------------------------------------------ 撤销 / 重做
@@ -592,7 +548,7 @@ public class MainController {
 
     private void ensureUndoActivity() {
         if (undoActivity == null) {
-            undoActivity = new UndoActivity(ctx, this::setStatus, this::clearValidationResults);
+            undoActivity = new UndoActivity(ctx, status::set, this::clearValidationResults);
             undoActivity.installFlushCallbacks(this::flushCurrentChapter, this::flushMetadata);
         }
     }
@@ -629,7 +585,7 @@ public class MainController {
     public void onRefreshPreview() {
         flushCurrentChapter();
         refreshPreview();
-        setStatus("预览已刷新");
+        status.set("预览已刷新");
     }
 
     /**
@@ -643,7 +599,7 @@ public class MainController {
         splitPreview = !splitPreview;
         applyPreviewMode();
         refreshPreview();
-        setStatus(splitPreview ? "已切换为并排预览" : "已切换为标签预览");
+        status.set(splitPreview ? "已切换为并排预览" : "已切换为标签预览");
     }
 
     /**
@@ -667,88 +623,30 @@ public class MainController {
             editorTabs.getTabs().get(1).setContent(previewView);
         }
         // 两个容器互斥显示：visible 与 managed 必须同步，否则隐藏的那个仍占 StackPane 布局
-        setVisibleManaged(editorTabs, !splitPreview);
-        setVisibleManaged(splitPreviewPane, splitPreview);
+        FxNodes.setVisibleManaged(editorTabs, !splitPreview);
+        FxNodes.setVisibleManaged(splitPreviewPane, splitPreview);
         if (splitPreviewItem != null) {
             splitPreviewItem.setText(splitPreview ? "标签预览" : "并排预览");
         }
     }
 
     // ------------------------------------------------------------------ 主题
+    // 实现全部在 ThemeActivity（activities 包）；FXML 的 onAction 只能绑主控制器方法，
+    // 因此这里保留一行委派。
 
     @FXML
     public void onThemeLight() {
-        switchTheme(Theme.LIGHT);
+        themeActivity.switchTo(Theme.LIGHT);
     }
 
     @FXML
     public void onThemeDark() {
-        switchTheme(Theme.DARK);
+        themeActivity.switchTo(Theme.DARK);
     }
 
     @FXML
     public void onThemeSepia() {
-        switchTheme(Theme.SEPIA);
-    }
-
-    /**
-     * 切换主题：落盘偏好、换根节点样式类，并让预览区跟着换配色。
-     */
-    private void switchTheme(Theme theme) {
-        if (theme == currentTheme) {
-            return;
-        }
-        currentTheme = theme;
-        ThemeManager.save(theme);
-        ThemeManager.apply(statusLabel.getScene(), theme);
-        refreshPreview();
-        if (themeStatusLabel != null) {
-            themeStatusLabel.setText(theme.displayName());
-        }
-        setStatus("已切换到" + theme.displayName() + "主题");
-    }
-
-    /**
-     * 在 initialize 阶段先把主题记下来，等 Scene 挂上再真正应用。
-     *
-     * <p>FXML 加载时 Scene 尚未创建，此时拿不到根节点，只能借 statusLabel 的
-     * sceneProperty 做一次性回调。
-     */
-    private void applyThemeWhenSceneReady() {
-        Scene scene = statusLabel.getScene();
-        if (scene != null) {
-            ThemeManager.apply(scene, currentTheme);
-            return;
-        }
-        statusLabel.sceneProperty().addListener(new ChangeListener<>() {
-            @Override
-            public void changed(ObservableValue<? extends Scene> observable, Scene oldScene, Scene newScene) {
-                if (newScene == null) {
-                    return;
-                }
-                statusLabel.sceneProperty().removeListener(this);
-                ThemeManager.apply(newScene, currentTheme);
-                refreshPreview();
-            }
-        });
-    }
-
-    /**
-     * 让单选菜单项的选中态与当前主题一致；setSelected 不触发 onAction，不会递归。
-     */
-    private void selectThemeItem(Theme theme) {
-        RadioMenuItem target = switch (theme) {
-            case DARK -> themeDarkItem;
-            case SEPIA -> themeSepiaItem;
-            case LIGHT -> themeLightItem;
-        };
-        // FXML 里万一漏了某个菜单项，宁可只是不高亮，也不要让整个界面起不来
-        if (target != null) {
-            target.setSelected(true);
-        }
-        if (themeStatusLabel != null) {
-            themeStatusLabel.setText(theme.displayName());
-        }
+        themeActivity.switchTo(Theme.SEPIA);
     }
 
     // ------------------------------------------------------------------ 文件拖放
@@ -793,7 +691,7 @@ public class MainController {
             }
             event.setDropCompleted(true);
             event.consume();
-            openPath(file);
+            workspaceActivity.openBook(file);
         });
     }
 
@@ -815,93 +713,7 @@ public class MainController {
         return null;
     }
 
-    // ------------------------------------------------------------------ 状态反馈
-
-    /**
-     * 关键操作的强化反馈：状态栏文字短暂高亮 1.2 秒后自动复原。
-     *
-     * <p>普通 {@link #setStatus} 写的是一行灰色小字，保存成功、打开完成这类关键结果
-     * 混在里面很容易被忽略——这里用主题色加粗闪一下再退回常态。
-     */
-    private void flashStatus(String message) {
-        setStatus(message);
-        if (statusLabel == null) {
-            return;
-        }
-        if (!statusLabel.getStyleClass().contains("status-flash")) {
-            statusLabel.getStyleClass().add("status-flash");
-        }
-        PauseTransition flash = new PauseTransition(Duration.seconds(1.2));
-        flash.setOnFinished(e -> statusLabel.getStyleClass().remove("status-flash"));
-        flash.play();
-    }
-
-    /**
-     * 长操作进度反馈器：包装状态栏的 ProgressBar + 标签 + 分隔竖线，让
-     * {@link AsyncTasks#runIo} 在工作开始时把它们显示出来、结束时隐藏。
-     *
-     * <p>所有回调都在 FX 线程触发（{@link AsyncTasks} 已用 {@code Platform.runLater}
-     * 包好），直接读 / 写控件属性即可，不需要再次切线程。
-     *
-     * <p>这里没有把进度条做成「跨任务互斥」——同一窗口内不会同时跑两个长操作，但
-     * 万一有，新任务调 {@code begin} 会覆盖旧任务留下的标题，done 会把 UI 隐藏。
-     * 行为可接受：用户能看见最新任务的标题，看不见旧任务的结尾说明——后者由
-     * 各操作的 onSuccess 设到 {@link #statusLabel}（走 {@link #flashStatus}）。
-     */
-    private AsyncTasks.ProgressController progressSink() {
-        return new AsyncTasks.ProgressController() {
-            @Override
-            public void begin(String title) {
-                if (statusProgressBar == null || statusProgressLabel == null) {
-                    return;
-                }
-                statusProgressLabel.setText(title);
-                statusProgressBar.setProgress(-1); // indeterminate
-                setVisibleManaged(statusProgressBar, true);
-                setVisibleManaged(statusProgressLabel, true);
-                setVisibleManaged(statusProgressDivider, true);
-            }
-
-            @Override
-            public void update(double fraction) {
-                if (statusProgressBar == null) {
-                    return;
-                }
-                if (fraction < 0) {
-                    statusProgressBar.setProgress(-1);
-                } else {
-                    statusProgressBar.setProgress(clamp01(fraction));
-                }
-            }
-
-            @Override
-            public void done() {
-                if (statusProgressBar == null || statusProgressLabel == null) {
-                    return;
-                }
-                setVisibleManaged(statusProgressBar, false);
-                setVisibleManaged(statusProgressLabel, false);
-                setVisibleManaged(statusProgressDivider, false);
-                statusProgressBar.setProgress(0);
-                statusProgressLabel.setText("");
-            }
-        };
-    }
-
-    private static double clamp01(double v) {
-        if (Double.isNaN(v)) {
-            return 0;
-        }
-        if (v < 0) {
-            return 0;
-        }
-        if (v > 1) {
-            return 1;
-        }
-        return v;
-    }
-
-    // ------------------------------------------------------------------ 自动暂存
+     // ------------------------------------------------------------------ 自动暂存
 
     /**
      * 装配自动暂存的「停顿 N 秒后写盘」节流器。
@@ -1043,7 +855,7 @@ public class MainController {
             ctx.history().reset();
             ctx.setEditCaptured(false);
             ctx.bus().publish(new AppEventBus.BookLoadedEvent());
-            setStatus("已从草稿恢复：" + file.getFileName());
+            status.set("已从草稿恢复：" + file.getFileName());
         } catch (IOException e) {
             warn("草稿恢复失败：" + e.getMessage());
         }
@@ -1228,109 +1040,36 @@ public class MainController {
         resourceViewController.insertSelectedImageIntoChapter();
     }
 
-    // ------------------------------------------------------------------
-    // 编辑工具条（段落 / 标题 / 加粗 / 斜体 / 列表）
+    // 以下编辑工具条入口的实现都在 InsertActivity（activities 包）；
+    // FXML 的 onAction 只能绑主控制器方法，故保留一行委派。
 
-    /**
-     * 在当前光标处插入段落。空选区时把光标放进 &lt;p&gt;&lt;/p&gt; 中间，方便直接输入；
-     * 有选区时用 &lt;p&gt; 包裹选中文本，光标定位到包裹后内容末尾。
-     */
     @FXML
     public void onInsertParagraph() {
-        insertFragment("<p></p>", 3);
+        insertActivity.paragraph();
     }
 
-    /**
-     * 在当前光标处插入二级标题。H1 通常留作章名，H2 是小节标。
-     */
     @FXML
     public void onInsertHeading() {
-        insertFragment("<h2></h2>", 4);
+        insertActivity.heading();
     }
 
-    /**
-     * 把选中文本用 &lt;strong&gt; 包裹；无选区时空插入 &lt;strong&gt;&lt;/strong&gt;，
-     * 光标落在中间。包裹后默认把内容再次选中，便于连续调整字号 / 颜色等其他属性。
-     */
     @FXML
     public void onInsertBold() {
-        insertWrapTag("strong");
+        insertActivity.bold();
     }
 
-    /**
-     * {@link #onInsertBold()} 的斜体版，用 &lt;em&gt;。
-     */
     @FXML
     public void onInsertItalic() {
-        insertWrapTag("em");
+        insertActivity.italic();
     }
 
-    /**
-     * 插入无序列表骨架 &lt;ul&gt;&lt;li&gt;&lt;/li&gt;&lt;/ul&gt;，光标落在第一个
-     * &lt;li&gt; 内。多行内容由用户自行复制 &lt;li&gt; 增加；不试图预判列表项数。
-     */
     @FXML
     public void onInsertList() {
-        insertFragment("<ul>\n<li></li>\n</ul>", "<ul>\n<li>".length());
+        insertActivity.list();
     }
 
-    /**
-     * 通用片段插入助手。选区非空时把 {@code fragment} 视作「左右两侧开闭标记 + 选区内容」
-     * 重写；选区为空时把 {@code fragment} 插到光标处。光标停在 {@code caretOffset}
-     * 指定的相对位置，便于用户接着输入。
-     *
-     * <p>写入之前调 {@link #beginChange()} 让撤销栈只记一次；后续文本变更由
-     * {@code contentArea} 的 listener 自动触发 {@code markDirty}，本方法不重复调。
-     */
-    private void insertFragment(String fragment, int caretOffset) {
-        if (contentArea == null || contentArea.isDisabled()) {
-            setStatus("当前章节不可编辑，无法插入片段");
-            return;
-        }
-        beginChange();
-        IndexRange sel = contentArea.getSelection();
-        if (sel.getLength() > 0) {
-            String selected = contentArea.getSelectedText();
-            String wrapped = fragment.substring(0, caretOffset)
-                    + selected
-                    + fragment.substring(caretOffset);
-            int start = sel.getStart();
-            contentArea.replaceSelection(wrapped);
-            contentArea.positionCaret(start + caretOffset + selected.length());
-        } else {
-            int caretPos = contentArea.getCaretPosition();
-            contentArea.insertText(caretPos, fragment);
-            contentArea.positionCaret(caretPos + caretOffset);
-        }
-    }
-
-    /**
-     * 包标签助手：选中文本时用 {@code <tag>...</tag>} 包裹并把内容重新选中，
-     * 选区为空时空插入一对标签并把光标落在开标签之后。
-     */
-    private void insertWrapTag(String tag) {
-        if (contentArea == null || contentArea.isDisabled()) {
-            setStatus("当前章节不可编辑，无法插入片段");
-            return;
-        }
-        beginChange();
-        IndexRange sel = contentArea.getSelection();
-        String open = "<" + tag + ">";
-        String close = "</" + tag + ">";
-        if (sel.getLength() > 0) {
-            String selected = contentArea.getSelectedText();
-            String wrapped = open + selected + close;
-            int start = sel.getStart();
-            contentArea.replaceSelection(wrapped);
-            // 把刚被包裹的内容再次选中，方便接着改字号 / 颜色等其他属性
-            contentArea.selectRange(start + open.length(), start + wrapped.length() - close.length());
-        } else {
-            String fragment = open + close;
-            int caretPos = contentArea.getCaretPosition();
-            contentArea.insertText(caretPos, fragment);
-            contentArea.positionCaret(caretPos + open.length());
-        }
-    }
+    // ------------------------------------------------------------------
+    // 编辑工具条（段落 / 标题 / 加粗 / 斜体 / 列表）
 
     @FXML
     public void onCleanupResources() {
@@ -1359,7 +1098,7 @@ public class MainController {
         }
         refreshToc();
         refreshResources();
-        updateStatus();
+        status.refresh();
     }
 
     /**
@@ -1391,7 +1130,7 @@ public class MainController {
             ctx.setLoading(false);
         }
         refreshPreview();
-        updateStatus();
+        status.refresh();
     }
 
     /**
@@ -1414,12 +1153,12 @@ public class MainController {
     private void refreshPreview() {
         ChapterNode current = currentChapter();
         if (current == null || current.resource() == null) {
-            previewView.getEngine().loadContent(PreviewHtml.emptyDocument(currentTheme));
+            previewView.getEngine().loadContent(PreviewHtml.emptyDocument(themeActivity.current()));
             return;
         }
         // 预览区是 WebView，吃不到 -epubra-* 变量，改为往 XHTML 里注入一段内联主题样式
         previewView.getEngine().loadContent(
-                PreviewHtml.withTheme(current.resource().asString(), currentTheme),
+                PreviewHtml.withTheme(current.resource().asString(), themeActivity.current()),
                 "application/xhtml+xml");
     }
 
@@ -1476,132 +1215,7 @@ public class MainController {
             autosaveDebounce.playFromStart();
             markAutosaveSaving();
         }
-        updateStatus();
+        status.refresh();
     }
 
-    private void setStatus(String message) {
-        statusLabel.setText(message);
-    }
-
-    private void updateStatus() {
-        if (ctx.book() == null) {
-            chapterStatusLabel.setText("章节 —");
-            wordStatusLabel.setText("字数 —");
-            setChapterWordStatus(null);
-            updateHistoryControls();
-            return;
-        }
-        chapterStatusLabel.setText("章节 " + ctx.book().spineResources().size());
-        wordStatusLabel.setText("字数 " + wordCount());
-        setChapterWordStatus(currentChapter());
-        updateIssueCounters();
-        updateHistoryControls();
-        updateTitle();
-    }
-
-    /**
-     * 当前章节字数。未选中章节时显示「本章 —」而不是 0——0 看起来像「这章是空的」，
-     * 与「还没选章节」是两回事。
-     */
-    private void setChapterWordStatus(ChapterNode node) {
-        if (chapterWordStatusLabel == null) {
-            return;
-        }
-        if (node == null || node.resource() == null) {
-            chapterWordStatusLabel.setText("本章 —");
-            return;
-        }
-        // 编辑区可用时以它的实时内容为准——用户敲进去还没写回的字符也要算进去
-        String text = contentArea != null && !contentArea.isDisabled()
-                ? contentArea.getText()
-                : node.resource().asString();
-        chapterWordStatusLabel.setText("本章 " + TextSearch.plainTextLength(text) + " 字");
-    }
-
-    /**
-     * 状态栏的错误 / 警告计数，取自最近一次校验结果。
-     *
-     * <p>零值不显示——避免「错误 0 / 警告 0」这种恒常噪音。注意必须连同标签后面那条
-     * 分隔竖线一起隐藏，只清文本会留下孤立竖线。
-     */
-    private void updateIssueCounters() {
-        int err = ctx.lastReport().errorCount();
-        int warn = ctx.lastReport().warningCount();
-        if (errorStatusLabel != null) {
-            errorStatusLabel.setText(err > 0 ? "错误 " + err : "");
-        }
-        if (warningStatusLabel != null) {
-            warningStatusLabel.setText(warn > 0 ? "警告 " + warn : "");
-        }
-        setVisibleManaged(errorStatusDivider, err > 0);
-        setVisibleManaged(warningStatusDivider, warn > 0);
-    }
-
-    /**
-     * 状态栏分区显隐助手：visible 与 managed 必须同步，否则隐藏后仍占布局间距。
-     */
-    private static void setVisibleManaged(Region node, boolean visible) {
-        if (node == null) {
-            return;
-        }
-        node.setVisible(visible);
-        node.setManaged(visible);
-    }
-
-    /**
-     * 全书正文字数：各章节 XHTML 剥离标签后的非空白字符数之和。
-     *
-     * <p>状态栏在每次击键后都会刷新，因此逐章统计的结果按资源缓存起来，只有当前正在编辑的
-     * 那一章实时统计（编辑器里尚未写回的输入也要计入）。缓存由 {@link BookContext#invalidateWordCounts()}
-     * 在内容被程序化改写或换书时整体失效。
-     */
-    private int wordCount() {
-        if (ctx.book() == null) {
-            return 0;
-        }
-        Resource current = currentChapter() == null ? null : currentChapter().resource();
-        int total = 0;
-        for (Resource chapter : ctx.book().spineResources()) {
-            if (chapter == current && !contentArea.isDisabled()) {
-                total += TextSearch.plainTextLength(contentArea.getText());
-                continue;
-            }
-            total += ctx.wordCounts().computeIfAbsent(chapter, resource -> TextSearch.plainTextLength(resource.asString()));
-        }
-        return total;
-    }
-
-    private void updateHistoryControls() {
-        boolean canUndo = ctx.book() != null && ctx.history().canUndo();
-        boolean canRedo = ctx.book() != null && ctx.history().canRedo();
-        if (undoItem != null) {
-            undoItem.setDisable(!canUndo);
-        }
-        if (redoItem != null) {
-            redoItem.setDisable(!canRedo);
-        }
-    }
-
-    private void updateTitle() {
-        if (stage == null) {
-            return;
-        }
-        String name = ctx.currentFile() == null ? "新书籍" : ctx.currentFile().getFileName().toString();
-        // dirty 标记用 ● / ○（U+25CF / U+25CB）放在最前——比藏在末尾的 * 显著得多
-        String marker = ctx.dirty() ? "\u25CF " : "\u25CB ";
-        stage.setTitle(marker + EpubraApp.APP_NAME + " - " + name);
-    }
-
-    private void showError(String title, String message, Exception e) {
-        Alert alert = new Alert(Alert.AlertType.ERROR);
-        alert.setTitle(title);
-        alert.setHeaderText(message);
-        alert.setContentText(e.getMessage());
-        alert.initOwner(stage);
-        alert.showAndWait();
-    }
-
-    private static String nullSafe(String value) {
-        return value == null ? "" : value;
-    }
 }

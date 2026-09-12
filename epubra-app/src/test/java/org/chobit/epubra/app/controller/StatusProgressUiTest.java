@@ -105,11 +105,13 @@ class StatusProgressUiTest {
         });
 
         runOnFx(() -> {
-            // 通过反射调私有的 progressSink()——锁定 progressBar/label/divider 的
-            // 显示/隐藏契约，不依赖具体业务方法。
-            Method m = MainController.class.getDeclaredMethod("progressSink");
-            m.setAccessible(true);
-            AsyncTasks.ProgressController sink = (AsyncTasks.ProgressController) m.invoke(mainController);
+            // 进度反馈器已拆到 StatusCoordinator；经 MainController 的 status 字段取，
+            // 锁定的仍是「FXML 注入的 progressBar/label/divider ↔ 进度反馈器」这条真实链路。
+            Object coordinator = field(mainController, "status");
+            AsyncTasks.ProgressController sink =
+                    (AsyncTasks.ProgressController) coordinator.getClass()
+                            .getMethod("progressSink")
+                            .invoke(coordinator);
 
             sink.begin("测试开始");
             ProgressBar bar = fieldOf(mainController, "statusProgressBar");
