@@ -1,0 +1,117 @@
+/* Epubra 主题变量。 */
+
+.root {
+    -fx-font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif;
+    -fx-font-size: 13px;
+
+    -epubra-bg: #ffffff;
+    -epubra-fg: #333333;
+    -epubra-muted-fg: #6e6e6e;
+    -epubra-title-fg: #666666;
+    -epubra-find-fg: #555555;
+    -epubra-on-accent-fg: #ffffff;
+    -epubra-border: #e8e8e8;
+    -epubra-border-input: #dcdcdc;
+    -epubra-panel-bg: #fafafa;
+    -epubra-activity-bg: #f3f3f3;
+    -epubra-toolbar-bg: #fbfbfb;
+    -epubra-panel-header-bg: #fbfbfb;
+    -epubra-status-bg: #f5f5f5;
+    -epubra-control-bg: #ffffff;
+    -epubra-control-fg: #1f1f1f;
+    -epubra-accent: #1a5fb4;
+    -epubra-error-fg: #c62828;
+    -epubra-warning-fg: #a86200;
+    -epubra-hover-bg: #e8f0fe;
+    -epubra-hover-fg: #1a5fb4;
+    -epubra-pressed-bg: #d3e3fb;
+    -epubra-selected-bg: #cce4ff;
+    -epubra-selected-fg: #1a1a1a;
+    -epubra-scrollbar-thumb: #c8c8c8;
+
+    -fx-background-color: -epubra-bg;
+}
+
+.root.theme-dark,
+.theme-dark {
+    -fx-base: #2b2b2b;
+    -fx-background: #1e1e1e;
+    -fx-control-inner-background: #1a1a1a;
+    -fx-control-inner-background-alt: #232323;
+    -fx-accent: #4a9ad4;
+    -fx-focus-color: #4a9ad4;
+    -fx-faint-focus-color: #4a9ad433;
+    -fx-text-base-color: #dcdcdc;
+    -fx-box-border: #3a3a3a;
+    -fx-text-box-border: #444444;
+    -fx-outer-border: #3f3f3f;
+    -fx-selection-bar: #2a5a8c;
+    -fx-selection-bar-text: #ffffff;
+
+    -epubra-bg: #1e1e1e;
+    -epubra-fg: #dcdcdc;
+    -epubra-muted-fg: #9a9a9a;
+    -epubra-title-fg: #a8a8a8;
+    -epubra-find-fg: #b8b8b8;
+    -epubra-on-accent-fg: #ffffff;
+    -epubra-border: #3a3a3a;
+    -epubra-border-input: #4a4a4a;
+    -epubra-panel-bg: #252526;
+    -epubra-activity-bg: #333333;
+    -epubra-toolbar-bg: #252526;
+    -epubra-panel-header-bg: #2a2a2a;
+    -epubra-status-bg: #232323;
+    -epubra-control-bg: #1a1a1a;
+    -epubra-control-fg: #e4e7ea;
+    -epubra-accent: #4a9ad4;
+    -epubra-error-fg: #f14c4c;
+    -epubra-warning-fg: #cca700;
+    -epubra-hover-bg: #2f4a66;
+    -epubra-hover-fg: #9ecbff;
+    -epubra-pressed-bg: #3a5a7a;
+    -epubra-selected-bg: #2a5a8c;
+    -epubra-selected-fg: #ffffff;
+    -epubra-scrollbar-thumb: #4a4a4a;
+}
+
+.root.theme-sepia,
+.theme-sepia {
+    -fx-base: #e8dcc2;
+    -fx-background: #f5ecd9;
+    -fx-control-inner-background: #fbf6ea;
+    -fx-control-inner-background-alt: #f2e9d6;
+    -fx-accent: #a8702f;
+    -fx-focus-color: #b07a35;
+    -fx-faint-focus-color: #b07a3533;
+    -fx-text-base-color: #3f3524;
+    -fx-box-border: #d8c9a8;
+    -fx-text-box-border: #d2c19c;
+    -fx-outer-border: #d5c49f;
+    -fx-selection-bar: #d9c9a3;
+    -fx-selection-bar-text: #2f2717;
+
+    -epubra-bg: #f5ecd9;
+    -epubra-fg: #3f3524;
+    -epubra-muted-fg: #6b5d3e;
+    -epubra-title-fg: #7a6b4f;
+    -epubra-find-fg: #6f6248;
+    -epubra-on-accent-fg: #ffffff;
+    -epubra-border: #ddd0b4;
+    -epubra-border-input: #d6c8a8;
+    -epubra-panel-bg: #efe6d2;
+    -epubra-activity-bg: #e7dcc4;
+    -epubra-toolbar-bg: #f2e9d6;
+    -epubra-panel-header-bg: #f2e9d6;
+    -epubra-status-bg: #ece2cc;
+    -epubra-control-bg: #fbf6ea;
+    -epubra-control-fg: #3b3122;
+    -epubra-accent: #a8702f;
+    -epubra-error-fg: #9c2a2a;
+    -epubra-warning-fg: #8a5a10;
+    -epubra-hover-bg: #e6dbc0;
+    -epubra-hover-fg: #5a3f15;
+    -epubra-pressed-bg: #dccfae;
+    -epubra-selected-bg: #d9c9a3;
+    -epubra-selected-fg: #2f2717;
+    -epubra-scrollbar-thumb: #cfc09c;
+}

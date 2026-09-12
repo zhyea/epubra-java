@@ -236,7 +236,7 @@
                                     <TabPane fx:id="editorTabs" tabClosingPolicy="UNAVAILABLE">
                                         <tabs>
                                             <Tab text="内容">
-                                                <TextArea fx:id="contentArea"
+                                                <TextArea fx:id="contentArea" styleClass="content-editor"
                                                           promptText="选择左侧章节后，在此编辑 XHTML 内容"/>
                                             </Tab>
                                             <Tab text="预览">

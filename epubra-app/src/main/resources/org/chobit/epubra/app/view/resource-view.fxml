@@ -22,7 +22,7 @@
         <Insets top="8.0" right="8.0" bottom="8.0" left="8.0"/>
     </padding>
     <Label text="资源" styleClass="panel-title"/>
-    <TableView fx:id="resourceTable" VBox.vgrow="ALWAYS">
+    <TableView fx:id="resourceTable" styleClass="resource-table" VBox.vgrow="ALWAYS">
         <columns>
             <TableColumn text="封面" prefWidth="32" sortable="false">
                 <cellValueFactory>
