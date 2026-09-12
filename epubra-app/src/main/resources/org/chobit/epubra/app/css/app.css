@@ -1,6 +1,13 @@
-/* Epubra 主样式入口。 */
-@import url("theme.css");
-@import url("scrollbars.css");
+/* Epubra 主样式：VSCode 风格布局，提供浅色 / 深色 / 护眼米黄三套配色。
+ *
+ * 所有颜色都走 -epubra-* 自定义属性（JavaFX looked-up color）：
+ *   .root                 定义浅色默认值
+ *   .root.theme-dark      深色覆盖
+ *   .root.theme-sepia     护眼米黄覆盖
+ * 切换主题时只需在 Scene 根节点上换一个 theme-* 样式类，整棵控件树随之重算颜色。
+ * 下面各条规则只引用变量，不再出现字面量颜色，新增规则请沿用这一约定——
+ * 硬编码颜色在深色主题下会变成刺眼的白块。
+ */
 
 /* ------------------------------------------------------------ 调色板：浅色（默认） */
 
@@ -9,6 +16,130 @@
     -fx-font-size: 13px;
 
     -epubra-bg: #ffffff; /* 主背景 */
+    -epubra-fg: #333333; /* 主文字 */
+    -epubra-muted-fg: #6e6e6e; /* 弱化文字：原 #777777 对比度 4.48 临界，调到 5.13 达 WCAG AA */
+    -epubra-title-fg: #666666; /* 面板小标题、未选中活动栏图标 */
+    -epubra-find-fg: #555555; /* 查找条文字 */
+    -epubra-on-accent-fg: #ffffff; /* 在 -epubra-accent 底色上的文字色：与主题一同定义，避免硬编码 white */
+    -epubra-border: #e8e8e8; /* 分隔线 / 常规边框 */
+    -epubra-border-input: #dcdcdc; /* 输入控件边框、状态栏分隔竖线 */
+    -epubra-panel-bg: #fafafa; /* 侧边面板 */
+    -epubra-activity-bg: #f3f3f3; /* 活动栏 */
+    -epubra-toolbar-bg: #fbfbfb; /* 菜单栏 / 页签栏 */
+    -epubra-panel-header-bg: #fbfbfb; /* 底部面板头 */
+    -epubra-status-bg: #f5f5f5; /* 状态栏 */
+    -epubra-control-bg: #ffffff; /* 输入框 / 文本区背景 */
+    -epubra-control-fg: #1f1f1f; /* 正文编辑文字 */
+    -epubra-accent: #1a5fb4; /* 主色：焦点、选中、活动栏指示条 */
+    -epubra-error-fg: #c62828; /* 错误计数（红系） */
+    -epubra-warning-fg: #a86200; /* 警告计数（橙系） */
+    -epubra-hover-bg: #e8f0fe; /* 悬停底色 */
+    -epubra-hover-fg: #1a5fb4; /* 悬停文字 */
+    -epubra-pressed-bg: #d3e3fb; /* 按下底色 */
+    -epubra-selected-bg: #cce4ff; /* 选中底色 */
+    -epubra-selected-fg: #1a1a1a; /* 选中文字 */
+    -epubra-scrollbar-thumb: #c8c8c8; /* 滚动条滑块 */
+
+    -fx-background-color: -epubra-bg;
+}
+
+/* ------------------------------------------------------------ 调色板：深色
+ * 除 -epubra-* 外，一并改写 Modena 的主色板变量，让表格、复选框、下拉等
+ * 未在下面显式列规则的通用控件也跟着变成深色。
+ */
+
+.root.theme-dark,
+.theme-dark {
+    -fx-base: #2b2b2b;
+    -fx-background: #1e1e1e;
+    -fx-control-inner-background: #1a1a1a;
+    -fx-control-inner-background-alt: #232323;
+    -fx-accent: #4a9ad4;
+    -fx-focus-color: #4a9ad4;
+    -fx-faint-focus-color: #4a9ad433;
+    -fx-text-base-color: #dcdcdc;
+    -fx-box-border: #3a3a3a;
+    -fx-text-box-border: #444444;
+    -fx-outer-border: #3f3f3f;
+    -fx-selection-bar: #2a5a8c;
+    -fx-selection-bar-text: #ffffff;
+
+    -epubra-bg: #1e1e1e;
+    -epubra-fg: #dcdcdc;
+    -epubra-muted-fg: #9a9a9a;
+    -epubra-title-fg: #a8a8a8;
+    -epubra-find-fg: #b8b8b8;
+    -epubra-on-accent-fg: #ffffff;
+    -epubra-border: #3a3a3a;
+    -epubra-border-input: #4a4a4a;
+    -epubra-panel-bg: #252526;
+    -epubra-activity-bg: #333333;
+    -epubra-toolbar-bg: #252526;
+    -epubra-panel-header-bg: #2a2a2a;
+    -epubra-status-bg: #232323;
+    -epubra-control-bg: #1a1a1a;
+    -epubra-control-fg: #e4e7ea;
+    -epubra-accent: #4a9ad4;
+    -epubra-error-fg: #f14c4c;
+    -epubra-warning-fg: #cca700;
+    -epubra-hover-bg: #2f4a66;
+    -epubra-hover-fg: #9ecbff;
+    -epubra-pressed-bg: #3a5a7a;
+    -epubra-selected-bg: #2a5a8c;
+    -epubra-selected-fg: #ffffff;
+    -epubra-scrollbar-thumb: #4a4a4a;
+}
+
+/* ------------------------------------------------------------ 调色板：护眼米黄 */
+
+.root.theme-sepia,
+.theme-sepia {
+    -fx-base: #e8dcc2;
+    -fx-background: #f5ecd9;
+    -fx-control-inner-background: #fbf6ea;
+    -fx-control-inner-background-alt: #f2e9d6;
+    -fx-accent: #a8702f;
+    -fx-focus-color: #b07a35;
+    -fx-faint-focus-color: #b07a3533;
+    -fx-text-base-color: #3f3524;
+    -fx-box-border: #d8c9a8;
+    -fx-text-box-border: #d2c19c;
+    -fx-outer-border: #d5c49f;
+    -fx-selection-bar: #d9c9a3;
+    -fx-selection-bar-text: #2f2717;
+
+    -epubra-bg: #f5ecd9;
+    -epubra-fg: #3f3524;
+    -epubra-muted-fg: #6b5d3e; /* 原 #8a7c60 对比度 3.34 fail AA；调到 5.18 达 4.5 阈值 */
+    -epubra-title-fg: #7a6b4f;
+    -epubra-find-fg: #6f6248;
+    -epubra-on-accent-fg: #ffffff;
+    -epubra-border: #ddd0b4;
+    -epubra-border-input: #d6c8a8;
+    -epubra-panel-bg: #efe6d2;
+    -epubra-activity-bg: #e7dcc4;
+    -epubra-toolbar-bg: #f2e9d6;
+    -epubra-panel-header-bg: #f2e9d6;
+    -epubra-status-bg: #ece2cc;
+    -epubra-control-bg: #fbf6ea;
+    -epubra-control-fg: #3b3122;
+    -epubra-accent: #a8702f;
+    -epubra-error-fg: #9c2a2a;
+    -epubra-warning-fg: #8a5a10;
+    -epubra-hover-bg: #e6dbc0;
+    -epubra-hover-fg: #5a3f15; /* 原 #7a4f1d hover 时 hover-bg 上对比度偏弱，调深一点 */
+    -epubra-pressed-bg: #dccfae;
+    -epubra-selected-bg: #d9c9a3;
+    -epubra-selected-fg: #2f2717;
+    -epubra-scrollbar-thumb: #cfc09c;
+}
+
+/* ---------------------------------------------------------------- 通用控件 */
+
+.label {
+    -fx-text-fill: -epubra-fg;
+}
+
 .muted-label {
     -fx-text-fill: -epubra-muted-fg;
 }
@@ -208,6 +339,55 @@
     -fx-max-width: 7px;
 }
 
+.toc-tree > .virtual-flow > .scroll-bar:horizontal {
+    -fx-min-height: 7px;
+    -fx-pref-height: 7px;
+    -fx-max-height: 7px;
+}
+
+.toc-tree > .virtual-flow > .scroll-bar > .increment-button,
+.toc-tree > .virtual-flow > .scroll-bar > .decrement-button {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+}
+
+.toc-tree > .virtual-flow > .scroll-bar:vertical > .increment-button,
+.toc-tree > .virtual-flow > .scroll-bar:vertical > .decrement-button {
+    -fx-min-height: 6px;
+    -fx-pref-height: 6px;
+    -fx-max-height: 6px;
+}
+
+.toc-tree > .virtual-flow > .scroll-bar:horizontal > .increment-button,
+.toc-tree > .virtual-flow > .scroll-bar:horizontal > .decrement-button {
+    -fx-min-width: 6px;
+    -fx-pref-width: 6px;
+    -fx-max-width: 6px;
+}
+
+.toc-tree > .virtual-flow > .scroll-bar > .increment-button > .increment-arrow,
+.toc-tree > .virtual-flow > .scroll-bar > .decrement-button > .decrement-arrow {
+    -fx-opacity: 0;
+}
+
+.toc-tree > .virtual-flow > .scroll-bar:vertical > .thumb {
+    -fx-background-color: -epubra-scrollbar-thumb;
+    -fx-background-insets: 0 1px 0 1px;
+    -fx-background-radius: 2px;
+}
+
+.toc-tree > .virtual-flow > .scroll-bar:horizontal > .thumb {
+    -fx-background-color: -epubra-scrollbar-thumb;
+    -fx-background-insets: 1px 0 1px 0;
+    -fx-background-radius: 2px;
+}
+
+/* ---------------------------------------------------------------- 资源表格 */
+
+.table-view {
+    -fx-background-color: -epubra-bg;
+    -fx-border-color: -epubra-border;
+    -fx-border-width: 1;
     -fx-table-cell-border-color: -epubra-border;
 }
 
