@@ -6,11 +6,11 @@ import javafx.scene.control.TextArea;
 import java.util.function.Consumer;
 
 /**
- * 编辑工具条的 XHTML 片段插入：段落 / 标题 / 加粗 / 斜体 / 列表。
+ * 源码编辑区的 XHTML 片段插入：段落 / 标题 / 加粗 / 斜体 / 列表。
  *
- * <p>从 {@code MainController} 拆出——这一组只操作 {@code contentArea} 与撤销入口，
- * 与窗口其他部分无耦合。{@code MainController} 只保留 {@code onInsertXxx} 一行委派
- * （FXML 的 {@code onAction} 只能绑主控制器方法）。
+ * <p>工具条已挪进「编辑」tab 并改为直接作用于可视化编辑器（{@code window.epubraFormat}），
+ * 本类是它的<b>降级路径</b>——可视化编辑器还没加载完就点了按钮时，把片段插到源码区，
+ * 免得这次点击被吞掉。
  *
  * <p><b>注意</b>：这里产出的必须是 XHTML 片段而非 HTML——HTMLEditor 产出的 HTML
  * 直接写进正文会让 EPUB 校验失败，所以走「光标处插入片段」而不是换编辑器。

@@ -29,7 +29,7 @@
 
     top    MenuBar（命令全部走菜单 + 快捷键，已移除工具栏）
     left   活动栏（48px）：目录 / 资源 / 元数据 / 校验，四个 ToggleButton 共用一个 ToggleGroup
-    center 侧边栏（单视图切换）| 编辑区（内容 / 预览）+ 底部「问题」面板，底下挂隐藏式查找条
+    center 侧边栏（单视图切换）| 编辑区（源码 / 预览）+ 底部「问题」面板，底下挂隐藏式查找条
     bottom 状态栏：左侧提示语，右侧错误 / 警告 / 章节 / 字数 / 主题
 
   侧边栏三个视图、查找条与底部问题面板各拆为独立 FXML，经 <fx:include> 引入：
@@ -207,37 +207,49 @@
                                 </children>
                             </StackPane>
 
-                            <!-- 编辑区：内容 / 预览 + 底部问题面板。
+                            <!-- 编辑区：编辑 / 源码 / 预览 + 底部问题面板。
 
+                     可视化编辑（visualEditorView）走 WebView + contenteditable，
+                     不用 JavaFX 的 HTMLEditor——后者产 HTML 而非 XHTML。
                      两种呈现模式共用 contentArea 与 previewView 两个节点：
-                       标签模式（默认）— 分别挂在 editorTabs 的两个 Tab 上
+                       标签模式（默认）— 分别挂在 editorTabs 的对应 Tab 上
                        并排模式        — 一起挂进 splitPreviewPane 左右分栏
                      切换时把节点在两个父容器之间搬运——一个 Node 只能有一个 parent。 -->
                             <VBox maxWidth="Infinity" maxHeight="Infinity">
-                                <!-- 编辑辅助工具条：把常用 XHTML 片段做成一键插入，降低手写标签的门槛。
-                                     这里刻意不做所见即所得——JavaFX 的 HTMLEditor 产出 HTML 而非 XHTML
-                                     （标签不闭合、属性不带引号、&lt;br&gt; 而非 &lt;br/&gt;），
-                                     直接替换正文编辑器会让产出的 EPUB 校验失败。 -->
-                                <HBox styleClass="editor-toolbar" spacing="4.0" alignment="CENTER_LEFT">
-                                    <padding>
-                                        <Insets top="4.0" right="8.0" bottom="4.0" left="8.0"/>
-                                    </padding>
-                                    <Button text="段落" styleClass="flat-button" onAction="#onInsertParagraph"/>
-                                    <Button text="标题" styleClass="flat-button" onAction="#onInsertHeading"/>
-                                    <Button text="加粗" styleClass="flat-button" onAction="#onInsertBold"/>
-                                    <Button text="斜体" styleClass="flat-button" onAction="#onInsertItalic"/>
-                                    <Button text="列表" styleClass="flat-button" onAction="#onInsertList"/>
-                                    <!-- 图片走菜单「插入」同一个入口（从已导入资源里选），
-                                         不在这里另插一个裸 img 标签，避免两种不一致的行为 -->
-                                    <Button text="图片" styleClass="flat-button" onAction="#onInsertImage"/>
-                                </HBox>
-
                                 <StackPane VBox.vgrow="ALWAYS">
                                     <TabPane fx:id="editorTabs" tabClosingPolicy="UNAVAILABLE">
                                         <tabs>
-                                            <Tab text="内容">
+                                            <Tab text="编辑">
+                                                <!-- 「编辑」tab 自带一排格式化按钮，直接作用于可视化编辑器
+                                                     （加粗 / 斜体包裹选中内容，段落 / 标题 / 列表做块级转换）。
+                                                     源码 tab 不再提供片段插入按钮——需要手写标签时直接敲即可。 -->
+                                                <VBox maxWidth="Infinity" maxHeight="Infinity">
+                                                    <HBox fx:id="editorToolbar" styleClass="editor-toolbar"
+                                                         spacing="4.0" alignment="CENTER_LEFT">
+                                                        <padding>
+                                                            <Insets top="4.0" right="8.0" bottom="4.0" left="8.0"/>
+                                                        </padding>
+                                                        <Button text="段落" styleClass="flat-button"
+                                                                onAction="#onInsertParagraph"/>
+                                                        <Button text="标题" styleClass="flat-button"
+                                                                onAction="#onInsertHeading"/>
+                                                        <Button text="加粗" styleClass="flat-button"
+                                                                onAction="#onInsertBold"/>
+                                                        <Button text="斜体" styleClass="flat-button"
+                                                                onAction="#onInsertItalic"/>
+                                                        <Button text="列表" styleClass="flat-button"
+                                                                onAction="#onInsertList"/>
+                                                        <!-- 图片与菜单「插入 → 插入图片」同一个入口（从已导入资源里选），
+                                                             不另插一个裸 img 标签，避免两种不一致的行为 -->
+                                                        <Button text="图片" styleClass="flat-button"
+                                                                onAction="#onInsertImage"/>
+                                                    </HBox>
+                                                    <WebView fx:id="visualEditorView" VBox.vgrow="ALWAYS"/>
+                                                </VBox>
+                                            </Tab>
+                                            <Tab text="源码">
                                                 <TextArea fx:id="contentArea" styleClass="content-editor"
-                                                          promptText="选择左侧章节后，在此编辑 XHTML 内容"/>
+                                                          promptText="选择左侧章节后，在此编辑 XHTML 源码"/>
                                             </Tab>
                                             <Tab text="预览">
                                                 <WebView fx:id="previewView"/>

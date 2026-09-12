@@ -11,9 +11,7 @@ import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.Resource;
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
-import javafx.scene.control.TabPane;
 import javafx.scene.control.TableView;
-import javafx.scene.control.TextArea;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
@@ -31,8 +29,7 @@ import java.util.function.Supplier;
  * 资源面板控制器——导入 / 导出 / 删除 / 设为封面 / 插入图片正文 / 清理未引用资源。
  *
  * <p>作为 {@code resource-view.fxml} 的 {@code fx:controller} 由 FXML 实例化：
- * 面板内的表格与按钮经 {@code @FXML} 注入并直接绑定本类方法；编辑区节点
- * （{@code editorTabs} / {@code contentArea} 属主 FXML）与回调在父控制器
+ * 面板内的表格与按钮经 {@code @FXML} 注入并直接绑定本类方法；回调在父控制器
  * {@code initialize()} 阶段通过 {@link #bind} 注入。本类不得定义 {@code initialize()}。
  *
  * <p>{@link ResourceOps} 提供纯逻辑（是否被引用、HTML 标签拼接等），本类负责把它们包装
@@ -47,8 +44,6 @@ public class ResourceController {
     private Button setCoverButton;
 
     private BookContext ctx;
-    private TabPane editorTabs;
-    private TextArea contentArea;
     private Runnable beginChange;
     private Runnable markDirty;
     private Runnable refreshAll;
@@ -61,6 +56,8 @@ public class ResourceController {
     private ErrorReporter showError;
     private AsyncTasks.ProgressController progress;
     private Supplier<ChapterNode> currentNodeProvider = () -> null;
+    /** 把一段 XHTML 片段插到当前激活的编辑器（编辑 tab → 可视化编辑器，否则源码区）。 */
+    private Consumer<String> insertXhtml = xhtml -> { };
 
     /** 主窗口 stage（FileChooser 的 owner）。由 {@link #setStage} 在 FXML 加载后补发。 */
     private Stage stage;
@@ -70,17 +67,16 @@ public class ResourceController {
     }
 
     /** FXML 加载后由父控制器注入运行时依赖；必须在任何 onAction 触发前完成。 */
-    public void bind(BookContext ctx, TabPane editorTabs, TextArea contentArea,
+    public void bind(BookContext ctx,
                      Runnable beginChange, Runnable markDirty,
                      Runnable refreshAll, Runnable refreshResources,
                      Runnable refreshCoverCard,
                      Runnable updateStatus, Consumer<String> setStatus,
                      Consumer<String> warn, BooleanSupplier confirm,
                      ErrorReporter showError,
-                     AsyncTasks.ProgressController progress) {
+                     AsyncTasks.ProgressController progress,
+                     Consumer<String> insertXhtml) {
         this.ctx = ctx;
-        this.editorTabs = editorTabs;
-        this.contentArea = contentArea;
         this.beginChange = beginChange;
         this.markDirty = markDirty;
         this.refreshAll = refreshAll;
@@ -92,6 +88,7 @@ public class ResourceController {
         this.confirm = confirm;
         this.showError = showError;
         this.progress = progress;
+        this.insertXhtml = insertXhtml;
         wireCoverButtonRefresh();
     }
 
@@ -306,8 +303,9 @@ public class ResourceController {
         }
         String tag = ResourceOps.buildInsertImageTag(
                 current.resource().href(), row.getResource().href(), row.getName());
-        contentArea.insertText(contentArea.getAnchor(), tag);
-        editorTabs.getSelectionModel().selectFirst();
+        // 插入策略（编辑 tab 落可视化编辑器 / 源码 tab 落源码区 + 光标处理）由父控制器决定，
+        // 本类只负责「选中了哪张图、该拼成什么标签」。
+        insertXhtml.accept(tag);
         setStatus.accept("已在正文中插入：" + row.getName());
     }
 

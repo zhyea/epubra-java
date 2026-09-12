@@ -1,5 +1,6 @@
 package org.chobit.epubra.app.controller;
 
+import netscape.javascript.JSObject;
 import org.chobit.epubra.app.EpubraApp;
 import org.chobit.epubra.app.activities.DocumentActivity;
 import org.chobit.epubra.app.activities.InsertActivity;
@@ -60,6 +61,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.web.WebEngine;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
 import javafx.stage.DirectoryChooser;
@@ -84,6 +86,12 @@ public class MainController {
     private TextArea contentArea;
     @FXML
     private WebView previewView;
+    /** 可视化编辑视图：contenteditable 的 XHTML，改动经 JS 桥回写正文。 */
+    @FXML
+    private WebView visualEditorView;
+    /** 格式化工具条：只挂在「编辑」tab 内，作用于 {@link #visualEditorView}。 */
+    @FXML
+    private HBox editorToolbar;
     @FXML
     private TabPane editorTabs;
     /**
@@ -285,6 +293,16 @@ public class MainController {
         // 公开 API setUserDataDirectory 覆盖默认行为,锁定到 AppPaths.webviewCacheDir()。
         // 必须在任何 loadContent/load 之前调用(否则 native 已创建默认目录,改不动了)。
         previewView.getEngine().setUserDataDirectory(AppPaths.webviewCacheDir().toFile());
+        // 编辑视图与预览视图共用同一个 WebView 缓存目录，避免多套 native 缓存
+        WebEngine visualEngine = visualEditorView.getEngine();
+        visualEngine.setUserDataDirectory(AppPaths.webviewCacheDir().toFile());
+        // window 在每次文档加载后都是新对象，桥必须跟着重装，否则 loadContent 之后
+        // 旧 window 上的 epubraBridge 就没了，页面里的改动再也回不来。
+        visualEngine.getLoadWorker().stateProperty().addListener((obs, oldState, newState) -> {
+            if (newState == javafx.concurrent.Worker.State.SUCCEEDED) {
+                installVisualEditorBridge();
+            }
+        });
 
         // status 必须先于任何 bind 构造：子控制器拿的是 status::set 这类方法引用，
         // 引用在求值时就要拿到非空实例，放到后面的 bind 之后再建会 NPE。
@@ -349,13 +367,13 @@ public class MainController {
         metadataViewController.bind(ctx, this::recordBeforeChange, this::markDirty,
                 this::refreshAll, this::refreshResources, status::set);
 
-        resourceViewController.bind(ctx, editorTabs, contentArea,
+        resourceViewController.bind(ctx,
                 this::beginChange, this::markDirty,
                 this::refreshAll, this::refreshResources,
                 () -> metadataViewController.refreshCoverCard(),
                 status::refresh, status::set, this::warn,
                 this::confirmDiscardChanges, status::showError,
-                status.progressSink());
+                status.progressSink(), this::insertXhtmlIntoActiveEditor);
 
         findBarController.bind(ctx, contentArea,
                 this::beginChange, this::markDirty,
@@ -372,6 +390,7 @@ public class MainController {
             markDirty();
         });
 
+        wireEditorTabSwitching();
         subscribeAppEvents();
 
         themeActivity = new ThemeActivity(statusLabel, themeStatusLabel,
@@ -610,17 +629,19 @@ public class MainController {
      * 抛「节点已有父容器」异常。
      */
     private void applyPreviewMode() {
-        if (splitPreviewPane == null || editorTabs == null || editorTabs.getTabs().size() < 2) {
+        if (splitPreviewPane == null || editorTabs == null || editorTabs.getTabs().size() < 3) {
             return;
         }
+        // tab 顺序：0 编辑 / 1 源码 / 2 预览；并排模式仍只搬源码与预览两个节点，
+        // 编辑 tab 留在标签页里（可视化编辑与并排预览互斥使用）。
         if (splitPreview) {
-            editorTabs.getTabs().get(0).setContent(null);
             editorTabs.getTabs().get(1).setContent(null);
+            editorTabs.getTabs().get(2).setContent(null);
             splitPreviewPane.getItems().setAll(contentArea, previewView);
         } else {
             splitPreviewPane.getItems().clear();
-            editorTabs.getTabs().get(0).setContent(contentArea);
-            editorTabs.getTabs().get(1).setContent(previewView);
+            editorTabs.getTabs().get(1).setContent(contentArea);
+            editorTabs.getTabs().get(2).setContent(previewView);
         }
         // 两个容器互斥显示：visible 与 managed 必须同步，否则隐藏的那个仍占 StackPane 布局
         FxNodes.setVisibleManaged(editorTabs, !splitPreview);
@@ -1040,36 +1061,47 @@ public class MainController {
         resourceViewController.insertSelectedImageIntoChapter();
     }
 
-    // 以下编辑工具条入口的实现都在 InsertActivity（activities 包）；
-    // FXML 的 onAction 只能绑主控制器方法，故保留一行委派。
+    // 工具条入口（段落 / 标题 / 加粗 / 斜体 / 列表）挂在「编辑」tab 的 WebView 上，
+    // 优先作用于可视化编辑器；编辑器还没就绪时退回源码区的片段插入（InsertActivity），
+    // 避免点击被吞掉。FXML 的 onAction 只能绑主控制器方法，故实现留在这里。
 
     @FXML
     public void onInsertParagraph() {
-        insertActivity.paragraph();
+        if (!applyVisualFormat("paragraph")) {
+            insertActivity.paragraph();
+        }
     }
 
     @FXML
     public void onInsertHeading() {
-        insertActivity.heading();
+        if (!applyVisualFormat("heading")) {
+            insertActivity.heading();
+        }
     }
 
     @FXML
     public void onInsertBold() {
-        insertActivity.bold();
+        if (!applyVisualFormat("bold")) {
+            insertActivity.bold();
+        }
     }
 
     @FXML
     public void onInsertItalic() {
-        insertActivity.italic();
+        if (!applyVisualFormat("italic")) {
+            insertActivity.italic();
+        }
     }
 
     @FXML
     public void onInsertList() {
-        insertActivity.list();
+        if (!applyVisualFormat("list")) {
+            insertActivity.list();
+        }
     }
 
     // ------------------------------------------------------------------
-    // 编辑工具条（段落 / 标题 / 加粗 / 斜体 / 列表）
+    // 资源维护（清理未引用资源 / 刷新资源列表）
 
     @FXML
     public void onCleanupResources() {
@@ -1116,6 +1148,8 @@ public class MainController {
         }
         flushCurrentChapter();
         setCurrentChapter(node);
+        // 编辑视图不会在非「编辑」tab 时自动重载，先标记失效，防止旧章节内容被回写到新章节
+        visualEditorLoaded = false;
         ctx.setLoading(true);
         try {
             if (node == null || node.resource() == null) {
@@ -1130,6 +1164,9 @@ public class MainController {
             ctx.setLoading(false);
         }
         refreshPreview();
+        if (onVisualTab()) {
+            reloadVisualEditor();
+        }
         status.refresh();
     }
 
@@ -1141,6 +1178,12 @@ public class MainController {
         if (current == null || current.resource() == null || contentArea.isDisabled()) {
             return;
         }
+        // 正文被程序化改写（撤销 / 元数据应用等），可视化编辑器里的副本已过期
+        if (onVisualTab()) {
+            reloadVisualEditor();
+        } else {
+            visualEditorLoaded = false;
+        }
         ctx.setLoading(true);
         try {
             contentArea.setText(current.resource().asString());
@@ -1149,6 +1192,226 @@ public class MainController {
             ctx.setLoading(false);
         }
     }
+
+    // ------------------------------------------------------------------ 可视化编辑
+
+    /**
+     * 安装 JS 桥：编辑视图里的改动经 {@code window.epubraBridge.onEdited(xhtml)} 回传。
+     *
+     * <p>回调在 FX 线程触发（WebView 的 JS 引擎就在 FX 线程上跑），可直接改 {@code Book}。
+     */
+    private void installVisualEditorBridge() {
+        JSObject window = (JSObject) visualEditorView.getEngine().executeScript("window");
+        window.setMember("epubraBridge", new VisualEditBridge());
+    }
+
+    /** 暴露给页面脚本的回写入口；必须是 public 类 + public 方法，桥才能反射调用。 */
+    public final class VisualEditBridge {
+        public void onEdited(String xhtml) {
+            if (xhtml == null || xhtml.isBlank()) {
+                return;
+            }
+            ChapterNode current = currentChapter();
+            if (current == null || current.resource() == null) {
+                return;
+            }
+            String existing = current.resource().asString();
+            if (existing != null && existing.equals(xhtml)) {
+                return; // 内容没变（例如只是切了焦点）——不打扰撤销栈
+            }
+            // 与源码编辑同样走 onTextInput：一次连续输入只记一次快照，600ms 静默合并。
+            // 不能用 beginChange()——它会 commitPendingEdits() → flushCurrentChapter()
+            // → flushVisualEditor() → 回到这里，构成递归。
+            ensureUndoActivity();
+            undoActivity.onTextInput();
+            current.resource().setString(xhtml);
+            ctx.invalidateWordCounts();
+            markDirty();
+            syncSourceFromVisualEditor(xhtml);
+            status.refresh();
+        }
+    }
+
+    /** 把可视化编辑的结果同步到源码 tab，避免两个 tab 显示的内容不一致。 */
+    private void syncSourceFromVisualEditor(String xhtml) {
+        if (contentArea == null || contentArea.isDisabled()) {
+            return;
+        }
+        // 用户正停在源码 tab 打字时不要覆盖他的输入——以他为权威，等他改完自然写回正文
+        if (contentArea.isFocused()) {
+            return;
+        }
+        ctx.setLoading(true);
+        try {
+            int caret = contentArea.getCaretPosition();
+            contentArea.setText(xhtml);
+            contentArea.positionCaret(Math.min(caret, xhtml.length()));
+        } finally {
+            ctx.setLoading(false);
+        }
+    }
+
+    /**
+     * 把当前章节载入可视化编辑器。
+     *
+     * <p>只在切到「编辑」tab 或换章节时调用——不为每次击键重建文档，否则输入会被打断。
+     */
+    private void reloadVisualEditor() {
+        ChapterNode current = currentChapter();
+        String xhtml = current == null || current.resource() == null
+                ? ""
+                : current.resource().asString();
+        visualEditorLoaded = current != null && current.resource() != null;
+        visualEditorView.getEngine().loadContent(
+                PreviewHtml.editableDocument(xhtml, themeActivity.current()),
+                "application/xhtml+xml");
+    }
+
+    /**
+     * 主动把编辑器里的最新内容拉回正文（不等 600ms 节流）。
+     *
+     * <p>切章节 / 保存前调用：用户可能刚敲完就点了别处，节流还没到点。
+     *
+     * @return 是否确实写回了内容；调用方据此避免再用旧的源码文本覆盖
+     */
+    private boolean flushVisualEditor() {
+        if (visualEditorView == null || !visualEditorLoaded) {
+            return false;
+        }
+        try {
+            Object result = visualEditorView.getEngine().executeScript("window.epubraSerialize()");
+            if (result instanceof String xhtml && !xhtml.isBlank()) {
+                ChapterNode current = currentChapter();
+                if (current != null && current.resource() != null
+                        && !xhtml.equals(current.resource().asString())) {
+                    // 同 onEdited：复用输入编辑步的合并逻辑，且不能调 beginChange()（递归）
+                    ensureUndoActivity();
+                    undoActivity.onTextInput();
+                    current.resource().setString(xhtml);
+                    ctx.invalidateWordCounts();
+                    markDirty();
+                    return true;
+                }
+            }
+        } catch (RuntimeException ignored) {
+            // 页面尚未加载完 / 脚本不可用：忽略，正文保持原样
+        }
+        return false;
+    }
+
+    /**
+     * 编辑 tab 切换联动：切到「编辑」时把当前章节推给可视化编辑器，
+     * 切到「预览」时刷新渲染（编辑期间不重载页面，免得打断输入）。
+     */
+    private void wireEditorTabSwitching() {
+        if (editorTabs == null) {
+            return;
+        }
+        editorTabs.getSelectionModel().selectedIndexProperty().addListener((obs, oldIdx, newIdx) -> {
+            int index = newIdx == null ? -1 : newIdx.intValue();
+            // 离开「编辑」tab：先把最新内容推回正文，再让它失效——不能依赖页面 blur 一定触发
+            if (oldIdx != null && oldIdx.intValue() == VISUAL_TAB_INDEX && index != VISUAL_TAB_INDEX) {
+                flushVisualEditor();
+                visualEditorLoaded = false;
+            }
+            if (index < 0 || currentChapter() == null) {
+                return;
+            }
+            if (index == VISUAL_TAB_INDEX) {
+                reloadVisualEditor();
+            } else if (index == PREVIEW_TAB_INDEX) {
+                refreshPreview();
+            }
+        });
+    }
+
+    /** 当前是否停在「编辑」tab。 */
+    private boolean onVisualTab() {
+        return editorTabs != null && editorTabs.getSelectionModel().getSelectedIndex() == VISUAL_TAB_INDEX;
+    }
+
+    /** tab 索引：与 main-window.fxml 里的顺序一一对应。 */
+    private static final int VISUAL_TAB_INDEX = 0;
+    private static final int SOURCE_TAB_INDEX = 1;
+    private static final int PREVIEW_TAB_INDEX = 2;
+
+    // ------------------------------------------------------------------ 工具条对可视化编辑器的操作
+
+    /**
+     * 对可视化编辑器施加一次富文本操作。
+     *
+     * <p>kind 取值：{@code paragraph} / {@code heading} / {@code bold} / {@code italic} /
+     * {@code list}，全部是硬编码的 ASCII 字面量，可直接拼进脚本，无需转义。
+     *
+     * @return 是否真的改了内容；false 表示编辑视图还没就绪，调用方应走降级路径
+     */
+    private boolean applyVisualFormat(String kind) {
+        if (visualEditorView == null || !visualEditorLoaded) {
+            return false;
+        }
+        try {
+            Object ok = visualEditorView.getEngine()
+                    .executeScript("window.epubraFormat('" + kind + "')");
+            return Boolean.TRUE.equals(ok);
+        } catch (RuntimeException notLoadedYet) {
+            return false;
+        }
+    }
+
+    /**
+     * 把一段 XHTML 片段插到可视化编辑器的光标处（图片等）。
+     *
+     * <p>片段先经 {@code window} 上的临时成员传进去，而不是拼进脚本字符串——
+     * 标签里带引号，手工转义容易出错。
+     */
+    private boolean insertHtmlIntoVisualEditor(String xhtml) {
+        if (visualEditorView == null || !visualEditorLoaded || xhtml == null) {
+            return false;
+        }
+        WebEngine engine = visualEditorView.getEngine();
+        try {
+            JSObject window = (JSObject) engine.executeScript("window");
+            window.setMember(PENDING_HTML_MEMBER, xhtml);
+            Object ok = engine.executeScript(
+                    "window.epubraInsertHtml(window." + PENDING_HTML_MEMBER + ")");
+            window.setMember(PENDING_HTML_MEMBER, null);
+            return Boolean.TRUE.equals(ok);
+        } catch (RuntimeException notLoadedYet) {
+            return false;
+        }
+    }
+
+    /** {@link #insertHtmlIntoVisualEditor} 传片段用的临时成员名。 */
+    private static final String PENDING_HTML_MEMBER = "__epubraPendingHtml";
+
+    /**
+     * 把一段 XHTML 片段插到「当前激活的编辑器」。
+     *
+     * <p>编辑 tab → 插入可视化编辑器的光标处，不切 tab；否则先切到源码 tab（离开编辑 tab
+     * 的联动会先把可视化编辑器里未同步的改动落盘），再插到源码区的光标处。
+     */
+    private void insertXhtmlIntoActiveEditor(String xhtml) {
+        if (onVisualTab() && insertHtmlIntoVisualEditor(xhtml)) {
+            return;
+        }
+        if (editorTabs != null) {
+            editorTabs.getSelectionModel().select(SOURCE_TAB_INDEX);
+        }
+        if (contentArea == null || contentArea.isDisabled()) {
+            return;
+        }
+        int at = contentArea.getAnchor();
+        contentArea.insertText(at, xhtml);
+        contentArea.positionCaret(at + xhtml.length());
+    }
+
+    /**
+     * 编辑视图当前内容是否<b>对应当前章节</b>。
+     *
+     * <p>必须严格维护：编辑视图在非「编辑」tab 时不会随章节切换重载，若此时误判为「已加载」
+     * 并拉取内容，会把上一章正文写到新章节里。
+     */
+    private boolean visualEditorLoaded;
 
     private void refreshPreview() {
         ChapterNode current = currentChapter();
@@ -1166,6 +1429,11 @@ public class MainController {
      * 把编辑器中的内容写回当前章节资源。
      */
     private void flushCurrentChapter() {
+        // 可视化编辑器里有尚未同步的改动：它已写回正文并同步了源码区，
+        // 此时再用源码区的文本覆盖会把刚敲的内容冲掉。
+        if (flushVisualEditor()) {
+            return;
+        }
         ChapterNode current = currentChapter();
         if (current == null || current.resource() == null) {
             return;
