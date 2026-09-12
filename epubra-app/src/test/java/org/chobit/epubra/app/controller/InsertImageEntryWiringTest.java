@@ -1,9 +1,11 @@
 package org.chobit.epubra.app.controller;
 
+import org.chobit.epubra.app.ui.ToolbarIcons;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.xpath.XPath;
@@ -12,6 +14,7 @@ import javax.xml.xpath.XPathFactory;
 import java.io.InputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
@@ -38,6 +41,21 @@ class InsertImageEntryWiringTest {
         assertEquals("#onInsertImage",
                 attributeOf(fxml, "//MenuItem[@text='插入图片']", "onAction"),
                 "菜单栏「插入图片」按约定保持从资源列表插入");
+    }
+
+    @Test
+    @DisplayName("编辑栏工具条的每个按钮都配好了图标与悬停提示")
+    void toolbarButtonsAllHaveIconsAndTooltips() throws Exception {
+        Document fxml = loadMainWindowFxml();
+        XPath xpath = XPathFactory.newInstance().newXPath();
+        NodeList buttons = (NodeList) xpath.evaluate(
+                "//FlowPane[@styleClass='editor-toolbar']//Button", fxml, XPathConstants.NODESET);
+        assertEquals(12, buttons.getLength(), "工具条应有 12 个按钮");
+        for (int i = 0; i < buttons.getLength(); i++) {
+            String id = ((Element) buttons.item(i)).getAttribute("id");
+            assertTrue(ToolbarIcons.covers(id),
+                    "按钮 " + id + " 在 ToolbarIcons 里缺少图形路径或悬停提示文案");
+        }
     }
 
     private static Document loadMainWindowFxml() throws Exception {

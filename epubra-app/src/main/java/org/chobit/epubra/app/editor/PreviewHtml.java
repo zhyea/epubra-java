@@ -39,24 +39,35 @@ public final class PreviewHtml {
      * @param theme 当前主题
      */
     public static String withTheme(String xhtml, Theme theme) {
+        return injectStyle(xhtml, styleTag(theme));
+    }
+
+    /**
+     * 把一段 {@code <style>} 注入 {@code <head>}。
+     *
+     * <p>按文档结构的完整程度依次降级：有 {@code </head>} 就插在它前面；只有
+     * {@code <body>} 就补一个 {@code <head>}；只有 {@code <html>} 就插在 html 开标签之后；
+     * 连根标签都没有的裸片段则整体包一层最小文档。
+     */
+    private static String injectStyle(String xhtml, String style) {
         if (xhtml == null || xhtml.isBlank()) {
-            return emptyDocument(theme);
+            return "<html xmlns=\"" + XHTML_NS + "\"><head>" + style + "</head><body></body></html>";
         }
         int headClose = indexOfIgnoringCase(xhtml, "</head>");
         if (headClose >= 0) {
-            return xhtml.substring(0, headClose) + styleTag(theme) + "\n" + xhtml.substring(headClose);
+            return xhtml.substring(0, headClose) + style + "\n" + xhtml.substring(headClose);
         }
         int bodyStart = indexOfIgnoringCase(xhtml, "<body");
         if (bodyStart >= 0) {
-            return xhtml.substring(0, bodyStart) + "<head>" + styleTag(theme) + "</head>"
+            return xhtml.substring(0, bodyStart) + "<head>" + style + "</head>"
                     + xhtml.substring(bodyStart);
         }
         int htmlTagEnd = endOfOpenTag(xhtml, "<html");
         if (htmlTagEnd >= 0) {
-            return xhtml.substring(0, htmlTagEnd) + "<head>" + styleTag(theme) + "</head>"
+            return xhtml.substring(0, htmlTagEnd) + "<head>" + style + "</head>"
                     + xhtml.substring(htmlTagEnd);
         }
-        return "<html xmlns=\"" + XHTML_NS + "\"><head>" + styleTag(theme) + "</head><body>"
+        return "<html xmlns=\"" + XHTML_NS + "\"><head>" + style + "</head><body>"
                 + xhtml + "</body></html>";
     }
 
@@ -141,7 +152,7 @@ public final class PreviewHtml {
      * @param baseHref 章节在资源镜像里的目录 URI；为 {@code null} 时等价于两参重载
      */
     public static String editableDocument(String xhtml, Theme theme, String baseHref) {
-        String document = withBaseHref(withTheme(xhtml, theme), baseHref);
+        String document = withBaseHref(injectStyle(xhtml, editorStyleTag(theme)), baseHref);
         String editable = addContentEditable(document);
         int headClose = indexOfIgnoringCase(editable, "</head>");
         if (headClose < 0) {
@@ -578,6 +589,29 @@ public final class PreviewHtml {
     private static String styleTag(Theme theme) {
         return "<style id=\"" + INJECTED_STYLE_ID + "\" type=\"text/css\">\n"
                 + theme.previewStyleCss() + "\n</style>";
+    }
+
+    /**
+     * 编辑器画布的「纸面」配色：可视化编辑器的正文画布<b>永远用浅色</b>，
+     * 不随主题走（对齐 WPS / Word 的「页面永远是白纸」模型——编辑的是要发布的书，
+     * 画布跟界面主题同色调反而干扰对成品的判断，深色 / 护眼主题下尤其明显）。
+     *
+     * <p>叠在 {@link Theme#previewStyleCss()} 之后：同权重同特异性，靠书写顺序取胜，
+     * 只覆盖颜色（背景 / 文字 / 边框 / 链接 / 代码块），字体、字号、行距仍由主题层提供。
+     * 整个 {@code <style>} 共用 {@link #INJECTED_STYLE_ID}，回写序列化时随注入样式一起剥掉。
+     */
+    private static final String EDITOR_PAPER_CSS = """
+                html, body { background: #faf9f5 !important; color: #2b2b28 !important; }
+                p, li, h1, h2, h3, h4, h5, h6, div, section, article, blockquote, td, th, span, figcaption { color: #2b2b28 !important; border-color: #dedbd2 !important; }
+                a { color: #1a5fb4 !important; }
+                hr, table, th, td, pre, img { border-color: #dedbd2 !important; }
+                pre, code { background: #f1efe8 !important; color: #2b2b28 !important; }
+                ::selection { background: #cfe0f5 !important; color: #2b2b28 !important; }
+            """;
+
+    private static String editorStyleTag(Theme theme) {
+        return "<style id=\"" + INJECTED_STYLE_ID + "\" type=\"text/css\">\n"
+                + theme.previewStyleCss() + EDITOR_PAPER_CSS + "\n</style>";
     }
 
     private static int indexOfIgnoringCase(String text, String token) {

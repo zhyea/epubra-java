@@ -84,10 +84,17 @@
 }
 
 /* 「当前格式正在生效」态：光标落在 <strong>/<em> 里时把按钮点亮。
- * 由 MainController 依据 window.epubraQuery() 的返回值动态增删这个样式类。 */
-.flat-button.active {
-    -fx-background-color: -epubra-pressed-bg;
-    -fx-text-fill: -epubra-accent;
+ * 由 MainController 依据 window.epubraQuery() 的返回值动态增删这个样式类。
+ *
+ * 按钮图标化之后，淡底色 + 描边变色的老方案不够醒目（浅色主题下 hover 色
+ * 与激活色还相同），改为明确的「实心强调底 + 反白图标」：三套主题下激活项
+ * 都一眼可辨，且不会被 hover / pressed 状态冲掉——分组选择器写在
+ * .flat-button:hover / :pressed 之后，特异性更高，后到强胜。 */
+.flat-button.active,
+.flat-button.active:hover,
+.flat-button.active:pressed {
+    -fx-background-color: -epubra-accent;
+    -fx-text-fill: -epubra-on-accent-fg;
     -fx-font-weight: bold;
 }
 
@@ -96,6 +103,32 @@
 .editor-toolbar {
     -fx-background-color: -epubra-toolbar-bg;
     -fx-border-color: transparent transparent -epubra-border transparent;
+}
+
+/* 图标按钮：文字由 ToolbarIcons 换成 SVG 线性图标（Tooltip 保留中文名）。
+ * 图标描边色跟随主题变量，hover / 生效态随按钮同步切换。 */
+.editor-toolbar .button {
+    -fx-padding: 4 6 4 6;
+}
+.toolbar-icon {
+    -fx-stroke: -epubra-fg;
+    -fx-stroke-width: 1.7;
+    -fx-stroke-line-cap: round;
+    -fx-stroke-line-join: round;
+}
+.flat-button:hover .toolbar-icon {
+    -fx-stroke: -epubra-hover-fg;
+}
+.flat-button:pressed .toolbar-icon {
+    -fx-stroke: -epubra-accent;
+}
+/* 激活态：反白图标 + 加粗描边，与实心强调底配套（见 .flat-button.active 组）。
+ * 三个选择器并列，保证 hover / pressed 期间激活观感不被冲掉。 */
+.flat-button.active .toolbar-icon,
+.flat-button.active:hover .toolbar-icon,
+.flat-button.active:pressed .toolbar-icon {
+    -fx-stroke: -epubra-on-accent-fg;
+    -fx-stroke-width: 2.1;
 }
 
 /* ---------------------------------------------------------------- 活动栏 */
@@ -383,6 +416,27 @@
 
 .tab-pane > .tab-content-area {
     -fx-background-color: -epubra-bg;
+}
+
+/* 源码编辑画布：固定浅色「纸面」，不随主题走——与可视化编辑器的纸面配色
+ * （PreviewHtml.EDITOR_PAPER_CSS）保持同一套色值，两个编辑窗口在深色 / 护眼
+ * 主题下也能与周围界面明确区分（对齐 WPS「页面永远是白纸」的模型）。 */
+.content-editor {
+    -fx-control-inner-background: #faf9f5;
+    -fx-background-color: #faf9f5;
+    -fx-background-insets: 0;
+    -fx-text-fill: #2b2b28;
+    -fx-highlight-fill: #cfe0f5;
+    -fx-highlight-text-fill: #2b2b28;
+    -fx-prompt-text-fill: #a09d94;
+}
+.content-editor .content {
+    -fx-background-color: #faf9f5;
+    -fx-background-insets: 0;
+}
+.content-editor:focused {
+    -fx-background-color: #faf9f5;
+    -fx-background-insets: 0;
 }
 
 .tab-pane .tab {

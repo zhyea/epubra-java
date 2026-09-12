@@ -18,6 +18,7 @@ import org.chobit.epubra.app.controller.view.WelcomePageController;
 import org.chobit.epubra.app.context.Unsubscriber;
 import org.chobit.epubra.app.ui.model.ChapterNode;
 import org.chobit.epubra.app.ui.FxNodes;
+import org.chobit.epubra.app.ui.ToolbarIcons;
 import org.chobit.epubra.app.context.AppEventBus;
 import org.chobit.epubra.app.context.BookContext;
 import org.chobit.epubra.app.document.Autosave;
@@ -329,6 +330,9 @@ public class MainController {
         // 资源镜像：预览 / 可视化编辑器里的相对引用（图片、字体、CSS）要靠它才有解析基准。
         // 惰性同步，构造本身不碰磁盘；换书时自动清空重建。
         previewMirror = PreviewMirror.forUserData();
+
+        // 工具条文字换图标：图形 + Tooltip 由 ToolbarIcons 统一管理（见该类 javadoc）。
+        ToolbarIcons.install(editorToolbar);
 
         // status 必须先于任何 bind 构造：子控制器拿的是 status::set 这类方法引用，
         // 引用在求值时就要拿到非空实例，放到后面的 bind 之后再建会 NPE。

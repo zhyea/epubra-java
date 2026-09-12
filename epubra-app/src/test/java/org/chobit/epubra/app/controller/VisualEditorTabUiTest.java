@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -117,7 +118,7 @@ class VisualEditorTabUiTest {
 
     @Test
     @Timeout(60)
-    @DisplayName("每个按钮的 id 就是格式名，且与上报表一一对应")
+    @DisplayName("每个按钮的 id 就是格式名；文字已换成图标，可发现性由 Tooltip 补回")
     void toolbarButtonsCarryFormatNamesAsIds() throws Exception {
         runOnFx(() -> {
             FlowPane toolbar = field(mainController, "editorToolbar");
@@ -126,8 +127,18 @@ class VisualEditorTabUiTest {
                 assertTrue(child instanceof Button, "工具条里应只有按钮，实际：" + child);
                 Button button = (Button) child;
                 assertNotNull(button.getId(), "按钮缺少 id，工具条状态反射就找不到它");
-                assertFalse(button.getText().isBlank(), "按钮缺少文案");
                 ids.add(button.getId());
+                // 文字已换成图标（ToolbarIcons.install）：断言图形存在 + 中文提示可悬停
+                assertNull(button.getText(),
+                        "工具条按钮应已是图标（文字清空），实际：" + button.getId());
+                assertNotNull(button.getGraphic(), "按钮缺少图标图形：" + button.getId());
+                assertNotNull(button.getTooltip(), "图标按钮必须有 Tooltip 兜底可发现性：" + button.getId());
+                assertFalse(button.getTooltip().getText().isBlank(),
+                        "Tooltip 文案不能为空：" + button.getId());
+                // 图标没有文字表意，Tooltip 默认 ~1s 的显示延迟等于「没有提示」（用户实测反馈）
+                assertTrue(button.getTooltip().getShowDelay().toMillis() <= 300,
+                        "Tooltip 显示延迟必须压到 300ms 内，实际："
+                                + button.getTooltip().getShowDelay() + "（" + button.getId() + "）");
             }
             assertEquals(java.util.List.of("paragraph", "heading", "quote", "list", "rule",
                             "bold", "italic", "underline", "strike", "code", "link", "image"),
