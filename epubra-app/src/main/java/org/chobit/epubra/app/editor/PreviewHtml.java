@@ -579,9 +579,14 @@ public final class PreviewHtml {
                 var out = [];
                 var n = (range.startContainer.nodeType === 1)
                         ? range.startContainer : range.startContainer.parentNode;
+                // 拖选时的点亮语义与 toggleInline 一致：选区两端都在同一格式元素内，
+                // 点「斜体」才会把整块包裹拆掉。只看锚点端的话，从斜体文字外起拖、
+                // 把斜体包进选区的「再次选中」不会亮灯（#54 用户实测场景）。
                 while (n && n !== document.body) {
                   var name = INLINE_FMT[tagOf(n)];
-                  if (name && out.indexOf(name) < 0) { out.push(name); }
+                  var covered = range.collapsed
+                          || (name && !!n.contains(range.endContainer));
+                  if (name && covered && out.indexOf(name) < 0) { out.push(name); }
                   n = n.parentNode;
                 }
                 var block = closestBlock(range.startContainer);

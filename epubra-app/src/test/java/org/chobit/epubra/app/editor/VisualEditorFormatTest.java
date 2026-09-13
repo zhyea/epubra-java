@@ -462,6 +462,82 @@ class VisualEditorFormatTest {
                 "行内语义标签的 computed style 被破坏，画布上强调格式会隐形");
     }
 
+    @Test
+    @Timeout(60)
+    @DisplayName("斜体后光标落回 / 重新选中，epubraQuery 与选区上报流都仍报 italic（工具条点亮的前置契约）")
+    void italicStillReportedAfterReactivation() throws Exception {
+        // 装 stub 桥记录 onSelectionChanged 上报流
+        runScript("window.__selReports = [];"
+                + "window.epubraBridge = {"
+                + " onSelectionChanged: function (q) { window.__selReports.push(q); },"
+                + " onEdited: function () {}, onUndo: function () {}, onRedo: function () {} };");
+
+        selectParagraphContents();
+        runScript("window.epubraFormat('italic')");
+        runScript("document.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}))");
+
+        // 用户操作模拟：点别处收起选区，再把光标落回斜体文字上
+        runScript("(function () {"
+                + " var s = window.getSelection(); s.removeAllRanges();"
+                + " var em = document.body.querySelector('em');"
+                + " var r = document.createRange(); r.selectNodeContents(em); r.collapse(true);"
+                + " s.addRange(r);"
+                + " document.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));"
+                + " return true; })()");
+        Object caretQuery = runScript("window.epubraQuery()");
+        assertTrue(String.valueOf(caretQuery).contains("italic"),
+                "光标落在斜体文字上时 epubraQuery 必须报 italic，实际：" + caretQuery);
+
+        // 再模拟拖选斜体文字
+        runScript("(function () {"
+                + " var em = document.body.querySelector('em');"
+                + " var r = document.createRange(); r.selectNodeContents(em);"
+                + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+                + " document.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));"
+                + " return true; })()");
+        Object selectQuery = runScript("window.epubraQuery()");
+        Object reports = runScript("window.__selReports.join(' || ')");
+        assertTrue(String.valueOf(selectQuery).contains("italic"),
+                "重新选中斜体文字时 epubraQuery 必须报 italic，实际：" + selectQuery);
+        assertTrue(String.valueOf(reports).contains("italic"),
+                "mouseup / selectionchange 上报流必须包含 italic，实际：" + reports);
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("拖选一端在斜体之外（把斜体包进更大选区）不点亮 italic——点亮语义与 toggleInline 一致")
+    void partialSelectionAcrossEmDoesNotReportItalic() throws Exception {
+        selectParagraphContents();
+        runScript("window.epubraFormat('italic')");
+
+        // 选区：起点在 em 内部文本，终点在 p 上 em 之后的位置（em 外）。
+        // 若按「只看锚点端」点亮，用户点「斜体」却不会拆掉这层包裹——亮灯就成了误导。
+        Object q = runScript("(function () {"
+                + " var em = document.body.querySelector('em');"
+                + " var r = document.createRange();"
+                + " r.setStart(em.firstChild, 0); r.setEnd(em.parentNode, 1);"
+                + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+                + " return window.epubraQuery(); })()");
+        assertFalse(String.valueOf(q).contains("italic"),
+                "一端在 em 外的选区不应报 italic，实际：" + q);
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("选区两端都在斜体内才点亮 italic")
+    void fullSelectionInsideEmReportsItalic() throws Exception {
+        selectParagraphContents();
+        runScript("window.epubraFormat('italic')");
+
+        Object q = runScript("(function () {"
+                + " var em = document.body.querySelector('em');"
+                + " var r = document.createRange(); r.selectNodeContents(em);"
+                + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+                + " return window.epubraQuery(); })()");
+        assertTrue(String.valueOf(q).contains("italic"),
+                "两端都在 em 内的选区应报 italic，实际：" + q);
+    }
+
     // ------------------------------------------------------------------ 脚本与断言助手
 
     /** 选中正文段落里的文字（模拟用户划选一段后点工具条）。 */
