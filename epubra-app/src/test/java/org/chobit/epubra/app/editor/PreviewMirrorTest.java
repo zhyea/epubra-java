@@ -157,6 +157,31 @@ class PreviewMirrorTest {
         assertTrue(Files.isDirectory(dir));
     }
 
+    @Test
+    @DisplayName("mirrorResource 把刚插入的资源补写进镜像——插图后立即显示的根据")
+    void mirrorResourceWritesNewlyInsertedResource(@TempDir Path dir) throws Exception {
+        PreviewMirror mirror = new PreviewMirror(dir);
+        Book book = BookFactory.createEmpty("镜像");
+        String href = firstChapterHref(book,
+                "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><p>无图</p></body></html>");
+        mirror.baseHrefFor(book, href);
+
+        Resource fresh = new Resource("image-new", "OEBPS/images/just-inserted.png", MediaTypes.PNG);
+        fresh.setData(PNG_BYTES);
+        assertTrue(mirror.mirrorResource(book, fresh),
+                "会话内补写应成功");
+        Path mirrored = dir.resolve("OEBPS/images/just-inserted.png");
+        assertTrue(Files.exists(mirrored),
+                "补写后 img 进 DOM 就能解析到文件——这就是「插入后立即显示」的依据");
+        assertArrayEquals(PNG_BYTES, Files.readAllBytes(mirrored));
+
+        // 换书窗口期不补写：避免把新书资源混进旧书镜像（下次章节加载会整体重建）
+        Book other = BookFactory.createEmpty("另一本");
+        assertFalse(mirror.mirrorResource(other, fresh),
+                "书实例与会话不一致时必须拒绝");
+        assertFalse(mirror.mirrorResource(book, null), "空资源直接跳过");
+    }
+
     // ---------------------------------------------------------------- 辅助
 
     /** 复用 book 自带的首章，换上指定正文；返回它的 href。 */

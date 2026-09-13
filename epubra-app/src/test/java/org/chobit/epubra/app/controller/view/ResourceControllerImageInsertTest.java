@@ -3,6 +3,7 @@ package org.chobit.epubra.app.controller.view;
 import javafx.application.Platform;
 import org.chobit.epubra.app.context.BookContext;
 import org.chobit.epubra.app.platform.AsyncTasks;
+import org.chobit.epubra.app.resource.ResourceOps;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.BookFactory;
 import org.chobit.epubra.lib.domain.Resource;
@@ -79,14 +80,20 @@ class ResourceControllerImageInsertTest {
         String tag = h.inserted.get(0);
         assertTrue(tag.startsWith("<img "), tag);
         assertTrue(tag.endsWith("/>"), tag);
-        assertTrue(tag.contains("alt=\"cover.png\""), tag);
-        assertTrue(tag.contains("cover.png"), tag);
+        assertTrue(tag.contains("alt=\"cover.png\""), "alt 保留原名供无障碍：" + tag);
+        // 图片本体按内容寻址命名（md5 + 原扩展名），src 不再出现用户原名
+        assertTrue(tag.matches("(?s).*src=\"[^\"]*/[0-9a-f]{32}\\.png\".*"),
+                "src 应为 images/<md5>.png：" + tag);
         assertFalse(tag.contains(dir.toString()),
                 "正文里不能出现本机绝对路径——必须写包内相对路径：" + tag);
         assertParsableXml(tag);
 
-        assertTrue(hasResourceNamed(h.book, "cover.png"),
+        Resource imported = findByContent(h.book, new byte[]{1, 2, 3, 4});
+        assertTrue(imported != null,
                 "选中的本机图片必须真的导入为书内资源，否则是悬空引用");
+        assertTrue(imported.href().endsWith(
+                        "/images/" + ResourceOps.md5Hex(new byte[]{1, 2, 3, 4}) + ".png"),
+                "新资源应按内容寻址命名并归入 images/ 子目录：" + imported.href());
         assertEquals("已插入图片：cover.png", h.statuses.get(0));
     }
 
@@ -102,8 +109,10 @@ class ResourceControllerImageInsertTest {
         awaitInsert(h);
 
         String tag = h.inserted.get(0);
-        assertTrue(tag.contains("Tom &amp; Jerry.png"), tag);
+        assertTrue(tag.contains("Tom &amp; Jerry.png"), "alt 保留原名且做了转义：" + tag);
         assertFalse(tag.contains("Tom & Jerry.png"), "裸 & 必须被转义：" + tag);
+        assertTrue(ResourceOps.extractImageSrcs(tag).get(0).matches(".*/[0-9a-f]{32}\\.png"),
+                "src 用 md5 内容寻址名后，原名里的特殊字符根本进不了包内路径：" + tag);
         assertParsableXml(tag);
     }
 
@@ -125,8 +134,8 @@ class ResourceControllerImageInsertTest {
         assertEquals(1, countOf(h.inserted.get(0), "<br/>"),
                 "多张图之间必须有分隔，否则两个行内元素会挤在同一行：" + h.inserted.get(0));
         assertParsableXml(h.inserted.get(0));
-        assertTrue(hasResourceNamed(h.book, "a.png"));
-        assertTrue(hasResourceNamed(h.book, "b.jpg"));
+        assertTrue(findByContent(h.book, new byte[]{1}) != null);
+        assertTrue(findByContent(h.book, new byte[]{2}) != null);
         assertEquals("已插入 2 张图片", h.statuses.get(0));
     }
 
@@ -146,9 +155,32 @@ class ResourceControllerImageInsertTest {
         awaitInsert(h);
 
         assertEquals(2, h.inserted.size(), "两次插入都应发生");
-        assertEquals(1, countOfNamed(h.book, "dup"),
-                "第二次必须复用已导入的资源，不能堆出 dup-1.png 副本");
+        assertEquals(1, countOf(h.book, new byte[]{7, 7, 7, 7}),
+                "第二次必须复用已导入的资源，不能再挂一份");
+        assertEquals(h.inserted.get(0), h.inserted.get(1),
+                "同图同章两次插入应产出相同标签（指向同一 href）");
         assertEquals("已插入图片：dup.png", h.statuses.get(1));
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("同内容不同文件名的图片按内容排重：只挂一份资源，两个标签指向同一 href")
+    void duplicateContentUnderDifferentNamesSharesResource(@TempDir Path dir) throws Exception {
+        Path a = dir.resolve("first.png");
+        Path b = dir.resolve("second.png");
+        Files.write(a, new byte[]{9, 9, 9});
+        Files.write(b, new byte[]{9, 9, 9});
+
+        Harness h = new Harness();
+        h.controller.insertImagesFromPaths(List.of(a, b), h.chapterHref);
+        awaitInsert(h);
+
+        assertEquals(1, countOf(h.book, new byte[]{9, 9, 9}),
+                "内容排重不认文件名：同字节只挂一份资源");
+        List<String> srcs = ResourceOps.extractImageSrcs(h.inserted.get(0));
+        assertEquals(2, srcs.size(), "两个 <img> 都要插进去");
+        assertEquals(srcs.get(0), srcs.get(1), "两个标签应指向同一资源");
+        assertEquals("已插入 2 张图片", h.statuses.get(0));
     }
 
     @Test
@@ -167,7 +199,7 @@ class ResourceControllerImageInsertTest {
         assertFalse(h.statuses.get(0).contains("已插入"),
                 "插入失败不能报成功：" + h.statuses.get(0));
         assertTrue(h.statuses.get(0).contains("未能插入正文"), h.statuses.get(0));
-        assertTrue(hasResourceNamed(h.book, "cover.png"),
+        assertTrue(findByContent(h.book, new byte[]{1, 2}) != null,
                 "插入失败不应回滚导入——用户选过的图仍然留在书里");
     }
 
@@ -184,7 +216,8 @@ class ResourceControllerImageInsertTest {
         assertTrue(h.inserted.isEmpty(), "不应触发插入");
         assertEquals(1, h.warnings.size(), "应当告知用户跳过了什么：" + h.warnings);
         assertTrue(h.warnings.get(0).contains("notes.txt"), h.warnings.get(0));
-        assertFalse(hasResourceNamed(h.book, "notes.txt"), "非图片不应进书");
+        assertFalse(findByContent(h.book, "not an image".getBytes()) != null,
+                "非图片不应进书");
     }
 
     @Test
@@ -201,17 +234,14 @@ class ResourceControllerImageInsertTest {
         awaitInsert(h);
 
         String tag = h.inserted.get(0);
-        // 前缀剥离会写出 "OEBPS/images/pic.png"（包内绝对路径）→ 预览里静默消失
-        assertEquals("<img src=\"../../images/pic.png\" alt=\"pic.png\"/>", tag);
+        // 前缀剥离会写出 "OEBPS/images/<md5>.png"（包内绝对路径）→ 预览里静默消失
+        String src = ResourceOps.extractImageSrcs(tag).get(0);
+        assertEquals("../../images/" + ResourceOps.md5Hex(new byte[]{1, 2, 3, 4}) + ".png", src);
 
         // 真正的不变量：引用经校验侧解析必须还原成图片的容器内路径，否则会被判为断链
-        Resource image = h.book.resources().all().stream()
-                .filter(r -> "pic.png".equals(r.fileName()))
-                .findFirst()
-                .orElseThrow();
+        Resource image = findByContent(h.book, new byte[]{1, 2, 3, 4});
         assertEquals(image.href(),
-                ResourceReferences.resolveTarget(Hrefs.parentDirectory(chapterHref),
-                        "../../images/pic.png"));
+                ResourceReferences.resolveTarget(Hrefs.parentDirectory(chapterHref), src));
     }
 
     // ---------------------------------------------------------------- 辅助
@@ -275,14 +305,18 @@ class ResourceControllerImageInsertTest {
         h.awaitFinished();
     }
 
-    private static boolean hasResourceNamed(Book book, String fileName) {
-        return book.resources().all().stream().anyMatch(r -> fileName.equals(r.fileName()));
+    /** 书里内容与给定字节完全一致的资源；找不到返回 null。 */
+    private static Resource findByContent(Book book, byte[] data) {
+        return book.resources().all().stream()
+                .filter(r -> java.util.Arrays.equals(data, r.data()))
+                .findFirst()
+                .orElse(null);
     }
 
-    /** 文件名以给定前缀开头的资源数量——用来断言「没有堆出 foo-1.png 副本」。 */
-    private static long countOfNamed(Book book, String prefix) {
+    /** 内容与给定字节一致的资源数量——用来断言「排重后只挂了一份」。 */
+    private static long countOf(Book book, byte[] data) {
         return book.resources().all().stream()
-                .filter(r -> r.fileName().startsWith(prefix))
+                .filter(r -> java.util.Arrays.equals(data, r.data()))
                 .count();
     }
 

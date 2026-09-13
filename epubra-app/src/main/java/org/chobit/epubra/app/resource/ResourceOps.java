@@ -14,9 +14,10 @@ import java.util.List;
  * <ul>
  *   <li>资源面板的行过滤（{@link #userVisible}）与删除前引用提示判定
  *       （{@link #isReferencedByChapters}）；</li>
- *   <li>编辑器工具条「图片」按钮的插图流水线：等价资源查找（{@link #findEquivalent}）、
- *       {@code <img>} 标签生成（{@link #buildInsertImageTag}）、多图片段拼接
- *       （{@link #joinInsertFragments}）。</li>
+ *   <li>编辑器工具条「图片」按钮的插图流水线：内容排重（{@link #findByContent}）、
+ *       内容寻址命名（{@link #contentAddressedFileName}）、{@code <img>} 标签生成
+ *       （{@link #buildInsertImageTag}）、多图片段拼接（{@link #joinInsertFragments}）、
+ *       片段图片引用提取（{@link #extractImageSrcs}）。</li>
  * </ul>
  *
  * <p>UI 操作（选行、文件选择器、确认对话框等）在 {@code ResourceController} 里组装，
@@ -77,26 +78,95 @@ public final class ResourceOps {
     }
 
     /**
-     * 在书里找一份与给定「文件名 + 字节内容」都相同的既有资源，找不到返回 {@code null}。
+     * 在书里找一份与给定<b>字节内容完全一致</b>的既有资源，找不到返回 {@code null}。
      *
-     * <p>用于插入图片前的去重：重复选同一张图时直接复用已有资源，而不是让
-     * {@link Book#addResource(String, byte[])} 再挂一份 {@code foo-1.png}——否则反复插图
-     * 会让资源列表里堆满同一张图的副本。
+     * <p>用于插入图片前的去重（#49 之后的口径）：书里已有同内容图片时直接复用、
+     * 不再重复挂载——反复选同一张图（哪怕换了个文件名）不会让资源列表堆满副本。
      *
-     * <p>故意要求文件名<b>与</b>内容都一致才复用：同名不同内容是两张不同的图，
-     * 合并会张冠李戴。
+     * <p>直接 {@link Arrays#equals(byte[], byte[])} 逐字节比较，而不是比 md5：
+     * 排重要的是零碰撞，md5 只在<b>命名</b>（{@link #contentAddressedFileName}）里用。
+     * 旧版 books 里按原名挂载的同内容图片也会被这里认出来并复用。
      */
-    public static Resource findEquivalent(Book book, String fileName, byte[] data) {
-        if (book == null || book.resources() == null || data == null
-                || fileName == null || fileName.isEmpty()) {
+    public static Resource findByContent(Book book, byte[] data) {
+        if (book == null || book.resources() == null || data == null || data.length == 0) {
             return null;
         }
         for (Resource resource : book.resources().all()) {
-            if (fileName.equals(resource.fileName()) && Arrays.equals(data, resource.data())) {
+            if (Arrays.equals(data, resource.data())) {
                 return resource;
             }
         }
         return null;
+    }
+
+    /**
+     * 内容寻址命名：{@code <md5 十六进制><原扩展名>}，如 {@code 5d41402abc4b2a76b9719d911017c592.png}。
+     *
+     * <p>插图不再用图片原名（可能带中文 / 空格 / 特殊字符，还会把用户本地目录结构泄进包里）。
+     * {@link Book#addResource(String, byte[])} 会按媒体类型把图片归到 {@code images/} 子目录，
+     * 因此最终 href 形如 {@code OEBPS/images/<md5>.png}。
+     *
+     * <p>内容寻址天然与 {@link #findByContent} 联动：同内容必同名，重名改名逻辑
+     * （{@code uniqueHref}）对新插图永远不触发；同一批选两张相同的图也只挂一份资源。
+     * 扩展名取自原文件名——媒体类型识别与阅读器渲染都靠它，不能省。
+     */
+    public static String contentAddressedFileName(String originalName, byte[] data) {
+        String ext = "";
+        if (originalName != null) {
+            int dot = originalName.lastIndexOf('.');
+            if (dot >= 0 && dot < originalName.length() - 1) {
+                ext = originalName.substring(dot);
+            }
+        }
+        return md5Hex(data) + ext;
+    }
+
+    /** MD5 摘要的小写十六进制串（命名去标识用，非安全场景）。 */
+    public static String md5Hex(byte[] data) {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("MD5");
+            StringBuilder hex = new StringBuilder(32);
+            for (byte b : digest.digest(data)) {
+                hex.append(Character.forDigit((b >> 4) & 0xF, 16))
+                        .append(Character.forDigit(b & 0xF, 16));
+            }
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("JVM 缺少 MD5 实现", impossible);
+        }
+    }
+
+    /**
+     * 从插入片段里抽出所有 {@code <img src="…">} 的 src 属性值（XML 转义已还原）。
+     *
+     * <p>用于插图前把目标资源补写进预览镜像（见 {@code PreviewMirror#mirrorResource}）：
+     * 可视化编辑器 {@code loadContent} 没有解析基准，相对引用全靠镜像 + {@code <base>}，
+     * 新插入的图不在「章节可达」范围内，不补写就会是裂图。
+     *
+     * <p>片段是本应用自己生成的（{@link #buildInsertImageTag}），属性恒为双引号；
+     * 正则在这里够用且可无头单测，不必动用 DOM 解析。
+     */
+    public static List<String> extractImageSrcs(String xhtml) {
+        if (xhtml == null || xhtml.isEmpty()) {
+            return List.of();
+        }
+        List<String> srcs = new ArrayList<>();
+        java.util.regex.Matcher matcher =
+                java.util.regex.Pattern.compile("<img\\b[^>]*?\\bsrc\\s*=\\s*\"([^\"]*)\"",
+                        java.util.regex.Pattern.CASE_INSENSITIVE).matcher(xhtml);
+        while (matcher.find()) {
+            srcs.add(unescapeXmlAttribute(matcher.group(1)));
+        }
+        return srcs;
+    }
+
+    /** {@link #escapeXmlAttribute} 的逆运算，只处理自己会写的五个实体。 */
+    private static String unescapeXmlAttribute(String escaped) {
+        return escaped.replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .replace("&apos;", "'")
+                .replace("&amp;", "&");
     }
 
     /**

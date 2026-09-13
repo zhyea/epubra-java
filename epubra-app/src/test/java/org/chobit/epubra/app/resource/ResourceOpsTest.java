@@ -123,18 +123,54 @@ class ResourceOpsTest {
     }
 
     @Test
-    void findEquivalentReusesSameNameAndBytes() {
+    void findByContentReusesBytesRegardlessOfName() {
         Book book = BookFactory.createEmpty("去重");
         Resource first = book.addResource("dup.png", new byte[]{1, 2, 3});
 
-        assertSame(first, ResourceOps.findEquivalent(book, "dup.png", new byte[]{1, 2, 3}),
-                "同名同内容必须复用，否则重复插图会堆出 dup-1.png 副本");
-        assertNull(ResourceOps.findEquivalent(book, "dup.png", new byte[]{9}),
-                "同名不同内容是两张不同的图，不能合并");
-        assertNull(ResourceOps.findEquivalent(book, "other.png", new byte[]{1, 2, 3}),
-                "不同名不合并");
-        assertNull(ResourceOps.findEquivalent(book, "", new byte[]{1}));
-        assertNull(ResourceOps.findEquivalent(book, "dup.png", null));
+        assertSame(first, ResourceOps.findByContent(book, new byte[]{1, 2, 3}),
+                "同内容必须复用——哪怕书里那份是旧命名（原名挂载的历史资源也要认出来）");
+        assertNull(ResourceOps.findByContent(book, new byte[]{9}),
+                "不同内容是两张不同的图，不能合并");
+        assertNull(ResourceOps.findByContent(book, new byte[]{}), "空字节不算有效内容");
+        assertNull(ResourceOps.findByContent(book, null));
+        assertNull(ResourceOps.findByContent(null, new byte[]{1}));
+    }
+
+    @Test
+    void contentAddressedFileNameUsesMd5AndKeepsExtension() {
+        // md5("hello") 的公认向量，钉死摘要算法与大小写
+        assertEquals("5d41402abc4b2a76b9719d911017c592",
+                ResourceOps.md5Hex("hello".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        // 空输入的 md5 向量
+        assertEquals("d41d8cd98f00b204e9800998ecf8427e",
+                ResourceOps.md5Hex(new byte[0]));
+
+        assertEquals("5d41402abc4b2a76b9719d911017c592.png",
+                ResourceOps.contentAddressedFileName("风景照.png", "hello".getBytes()));
+        assertEquals("5d41402abc4b2a76b9719d911017c592.jpeg",
+                ResourceOps.contentAddressedFileName("Tom & Jerry.jpeg", "hello".getBytes()));
+        // 无扩展名 → 不造后缀（媒体类型会落到 misc，属上游口径）
+        assertEquals("5d41402abc4b2a76b9719d911017c592",
+                ResourceOps.contentAddressedFileName("noext", "hello".getBytes()));
+        // 原名缺失也只影响扩展名，摘要仍要产出
+        assertEquals("5d41402abc4b2a76b9719d911017c592",
+                ResourceOps.contentAddressedFileName(null, "hello".getBytes()));
+        // 同内容不同名 → 同一目标文件名（排重的另一半：命名即寻址）
+        assertEquals(
+                ResourceOps.contentAddressedFileName("a.png", new byte[]{7}),
+                ResourceOps.contentAddressedFileName("b.png", new byte[]{7}));
+    }
+
+    @Test
+    void extractImageSrcsPicksImgTagsAndUnescapesEntities() {
+        String fragment = "<img src=\"../images/a&amp;b.png\" alt=\"x\"/><br/>"
+                + "<IMG SRC='../images/c.png'/>" // 单引号 + 大写不是本应用产物，允许不识别
+                + "<img src=\"images/d.png\"/><p>正文</p>";
+        assertEquals(java.util.List.of("../images/a&b.png", "images/d.png"),
+                ResourceOps.extractImageSrcs(fragment));
+        assertEquals(java.util.List.of(), ResourceOps.extractImageSrcs(""));
+        assertEquals(java.util.List.of(), ResourceOps.extractImageSrcs(null));
+        assertEquals(java.util.List.of(), ResourceOps.extractImageSrcs("<p>没有图片</p>"));
     }
 
     @Test

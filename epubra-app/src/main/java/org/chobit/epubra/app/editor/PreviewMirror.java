@@ -115,6 +115,38 @@ public final class PreviewMirror {
         }
     }
 
+    /**
+     * 把单个资源补写进镜像（插图后立即显示用）。
+     *
+     * <p>{@link #sync} 只镜像「章节可达」的资源——刚插入正文的图在书的章节文本尚未回写时
+     * 不可达，若不补写，可视化编辑器里新插的 {@code <img>} 解析不到文件就是裂图。
+     * 本方法在<b>插入之前</b>调用，把目标图片先写到磁盘，img 一进 DOM 就能加载。
+     *
+     * <p>书实例与当前镜像会话不一致时（换书窗口期）不补写——下次章节加载会整体重建，
+     * 此时贸然写入会把新书资源混进旧书镜像。镜像不可用（degraded）时静默返回 false，
+     * 与 {@link #baseHrefFor} 的降级行为一致。
+     *
+     * @return 是否成功写盘（未写不报错，预览退化由 baseHrefFor 一侧兜底）
+     */
+    public boolean mirrorResource(Book book, Resource resource) {
+        if (degraded || root == null || book == null || resource == null
+                || resource.data() == null || resource.data().length == 0) {
+            return false;
+        }
+        if (book != session) {
+            return false;
+        }
+        try {
+            mirror(resource);
+            return true;
+        } catch (IOException | RuntimeException e) {
+            // 单张补写失败不禁用整个镜像：下次章节加载的 sync 还有机会补上
+            LOG.log(System.Logger.Level.WARNING,
+                    "补写预览镜像失败：" + resource.href() + "：" + e.getMessage(), e);
+            return false;
+        }
+    }
+
     /** 丢弃全部镜像内容。进程退出前由 shutdown hook 调用。 */
     public void discard() {
         session = null;

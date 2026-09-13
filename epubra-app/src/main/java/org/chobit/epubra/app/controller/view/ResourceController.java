@@ -417,8 +417,10 @@ public class ResourceController {
      *
      * <p>两条容易踩的坑，都在这里收口：
      * <ul>
-     *   <li><b>已存在同样文件名 + 同样字节的资源就复用</b>（{@link ResourceOps#findEquivalent}），
-     *       重复选同一张图不再堆积 {@code foo-1.png} 副本；</li>
+     *   <li><b>书里已有同内容图片就复用</b>（{@link ResourceOps#findByContent}）——按字节排重，
+     *       重复选同一张图（换名也一样）不再重复挂载；新挂载的资源用内容寻址命名
+     *       （{@link ResourceOps#contentAddressedFileName}，{@code images/<md5>.<ext>}），
+     *       alt 保留原名供无障碍；</li>
      *   <li><b>插入结果要检查</b>（{@link XhtmlInserter#insert} 的返回值）——没有可插入位置时
      *       资源仍然进了书，但状态栏要说「已导入、未能插入正文」，不能谎报「已插入 N 张图片」。</li>
      * </ul>
@@ -438,9 +440,10 @@ public class ResourceController {
         beginChange.run();
         List<String> tags = new ArrayList<>(readable.size());
         for (LoadedFile lf : readable) {
-            Resource image = ResourceOps.findEquivalent(ctx.book(), lf.fileName, lf.data);
+            Resource image = ResourceOps.findByContent(ctx.book(), lf.data);
             if (image == null) {
-                image = ctx.book().addResource(lf.fileName, lf.data);
+                image = ctx.book().addResource(
+                        ResourceOps.contentAddressedFileName(lf.fileName, lf.data), lf.data);
             }
             tags.add(ResourceOps.buildInsertImageTag(chapterHref, image.href(), lf.fileName));
         }

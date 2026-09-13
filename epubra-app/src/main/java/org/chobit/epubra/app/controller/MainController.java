@@ -29,11 +29,14 @@ import org.chobit.epubra.app.editor.TextSearch;
 import org.chobit.epubra.app.editor.Theme;
 import org.chobit.epubra.app.platform.AppPaths;
 import org.chobit.epubra.app.platform.AsyncTasks;
+import org.chobit.epubra.app.resource.ResourceOps;
 import org.chobit.epubra.app.workspace.WorkspaceStore;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.Resource;
 import org.chobit.epubra.lib.io.EpubReader;
 import org.chobit.epubra.lib.io.EpubWriter;
+import org.chobit.epubra.lib.util.Hrefs;
+import org.chobit.epubra.lib.util.ResourceReferences;
 import org.chobit.epubra.lib.validation.EpubValidator;
 import javafx.animation.PauseTransition;
 import javafx.application.Platform;
@@ -1726,8 +1729,13 @@ public class MainController {
         if (xhtml == null || xhtml.isEmpty()) {
             return false;
         }
-        if (onVisualTab() && insertHtmlIntoVisualEditor(xhtml)) {
-            return true;
+        if (onVisualTab()) {
+            // 新插的图不在镜像里（sync 只镜像「章节可达」资源，章节文本此刻尚未回写），
+            // 不补写的话 img 进了 DOM 也解析不到文件——用户看到的就是「插了却不显示」
+            mirrorImagesReferencedBy(xhtml);
+            if (insertHtmlIntoVisualEditor(xhtml)) {
+                return true;
+            }
         }
         if (editorTabs != null) {
             editorTabs.getSelectionModel().select(SOURCE_TAB_INDEX);
@@ -1739,6 +1747,35 @@ public class MainController {
         contentArea.insertText(at, xhtml);
         contentArea.positionCaret(at + xhtml.length());
         return true;
+    }
+
+    /**
+     * 把片段里 {@code <img>} 引用的资源补写进预览镜像。
+     *
+     * <p>src 是相对章节目录的引用，先还原成容器内路径再找资源；找不到（外部地址、
+     * 资源缺失）就跳过——镜像只服务「能解析到的图」，缺资源该裂还是裂，属上游问题。
+     * 写盘是几个小文件的 {@code Files.write}，与章节加载时 {@code baseHrefFor} 的
+     * 同步镜像同一口径，不为此起后台任务。
+     */
+    private void mirrorImagesReferencedBy(String xhtml) {
+        if (previewMirror == null || ctx.book() == null || xhtml == null || xhtml.isEmpty()) {
+            return;
+        }
+        ChapterNode current = currentChapter();
+        if (current == null || current.resource() == null) {
+            return;
+        }
+        String baseDir = Hrefs.parentDirectory(current.resource().href());
+        for (String src : ResourceOps.extractImageSrcs(xhtml)) {
+            String target = ResourceReferences.resolveTarget(baseDir, src);
+            if (target == null) {
+                continue;
+            }
+            Resource resource = ResourceReferences.findResource(ctx.book().resources(), target).resource();
+            if (resource != null) {
+                previewMirror.mirrorResource(ctx.book(), resource);
+            }
+        }
     }
 
     /**
