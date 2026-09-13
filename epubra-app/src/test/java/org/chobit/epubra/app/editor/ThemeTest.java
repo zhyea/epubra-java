@@ -92,6 +92,22 @@ class ThemeTest {
     }
 
     @Test
+    @DisplayName("预览样式为 em/i 配了「西文真斜体字面 + 楷体替代」的强调字体栈")
+    void previewStyleKeepsEmphasisVisible() {
+        // 引擎不做合成斜体 + 雅黑无斜体字面 → 不配字体栈的话 <em> 在画布上完全隐形
+        // （诊断依据：同字体 italic 与 normal 的渲染像素逐位一致，见 #52 记录）
+        String css = Theme.LIGHT.previewStyleCss();
+        assertTrue(css.contains("em, i, dfn, cite, var"), "必须覆盖斜体一族的全部标签：" + css);
+        assertTrue(css.contains("font-style: italic !important"), css);
+        assertTrue(css.contains("\"Segoe UI\"") && css.contains("\"KaiTi\""),
+                "西文走真斜体字面、中文走楷体替代，缺一不可：" + css);
+        for (Theme theme : Theme.values()) {
+            assertTrue(theme.previewStyleCss().contains("KaiTi"),
+                    "每个主题都要带这条规则：" + theme);
+        }
+    }
+
+    @Test
     @DisplayName("Scene 尚未创建或主题为 null 时应用主题不抛异常")
     void applyIsDefensive() {
         assertDoesNotThrow(() -> ThemeManager.apply(null, Theme.DARK));

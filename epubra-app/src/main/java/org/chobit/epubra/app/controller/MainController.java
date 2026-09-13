@@ -1437,6 +1437,8 @@ public class MainController {
             if (xhtml == null || xhtml.isBlank()) {
                 return;
             }
+            // 三道防线之三（同 flushVisualEditor）：回写进书前再剥一次编辑脚本
+            xhtml = PreviewHtml.stripInjectedScript(xhtml);
             ChapterNode current = currentChapter();
             if (current == null || current.resource() == null) {
                 return;
@@ -1537,7 +1539,10 @@ public class MainController {
         }
         try {
             Object result = visualEditorView.getEngine().executeScript("window.epubraSerialize()");
-            if (result instanceof String xhtml && !xhtml.isBlank()) {
+            if (result instanceof String raw && !raw.isBlank()) {
+                // 三道防线之三：回写进书前再剥一次编辑脚本——任何序列化层的疏漏
+                // 都不能污染正文（#51：脚本曾整段混进章节源码）
+                String xhtml = PreviewHtml.stripInjectedScript(raw);
                 ChapterNode current = currentChapter();
                 if (current != null && current.resource() != null
                         && !xhtml.equals(current.resource().asString())) {
@@ -1545,6 +1550,10 @@ public class MainController {
                     ensureUndoActivity();
                     undoActivity.onTextInput();
                     current.resource().setString(xhtml);
+                    // 源码区也要跟上（onEdited 路径做了、这里漏了曾导致两 tab 不同步）：
+                    // 否则紧随其后的切 tab 会经 flushCurrentChapter 用旧源码文本
+                    // 把刚写进资源的可视化改动冲掉
+                    syncSourceFromVisualEditor(xhtml);
                     ctx.invalidateWordCounts();
                     markDirty();
                     return true;
@@ -1575,6 +1584,12 @@ public class MainController {
             if (index < 0 || currentChapter() == null) {
                 return;
             }
+            // 源码区的改动此刻只躺在 contentArea 里——文本监听器只做撤销快照与标脏，
+            // 不写章节资源；不先落盘的话，reloadVisualEditor / refreshPreview 读到的
+            // 仍是修改前的旧文本，表现为「改了源码，编辑/预览不跟新」（#53）。
+            // 离开「编辑」tab 时可视化侧已在上方分支 flush 并置 loaded=false，
+            // 这里的 flushVisualEditor 必然 no-op，写进资源的就是源码区文本。
+            flushCurrentChapter();
             if (index == VISUAL_TAB_INDEX) {
                 // 新文档是全新的一棵树，旧的高亮不再成立
                 clearToolbarState();

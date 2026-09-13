@@ -1,5 +1,7 @@
 package org.chobit.epubra.app.editor;
 
+import java.util.regex.Pattern;
+
 /**
  * 给预览用的章节 XHTML 注入主题样式。
  *
@@ -24,6 +26,15 @@ public final class PreviewHtml {
      * 一旦写进书里就成了指向 {@code ~/.Epubra/} 的绝对路径，换台机器整章图片全断。
      */
     static final String INJECTED_BASE_ID = "epubra-preview-base";
+
+    /**
+     * 注入的编辑脚本元素 id。
+     *
+     * <p>脚本比样式 / 基准更必须在回写序列化时剥掉——它有几百行，一旦写进章节，
+     * 源码视图与整本书都会被无意义 JS 污染。样式与基准一直带 id，脚本却曾经没有，
+     * 于是每次可视化编辑的回写都把整段脚本带进正文（#51）。
+     */
+    static final String INJECTED_SCRIPT_ID = "epubra-preview-script";
 
     private PreviewHtml() {
     }
@@ -154,7 +165,11 @@ public final class PreviewHtml {
      * @param baseHref 章节在资源镜像里的目录 URI；为 {@code null} 时等价于两参重载
      */
     public static String editableDocument(String xhtml, Theme theme, String baseHref) {
-        String document = withBaseHref(injectStyle(xhtml, editorStyleTag(theme)), baseHref);
+        // 章节可能带着历史版本回写进去的编辑脚本（旧版序列化剥不掉 script）——
+        // 加载时先剥掉，DOM 里就只剩下面刚注入的、带 id 的这一份；
+        // 否则历史脚本会被再次序列化回书里，永远洗不掉
+        String document = withBaseHref(
+                injectStyle(stripInjectedScript(xhtml), editorStyleTag(theme)), baseHref);
         String editable = addContentEditable(document);
         int headClose = indexOfIgnoringCase(editable, "</head>");
         if (headClose < 0) {
@@ -177,13 +192,43 @@ public final class PreviewHtml {
     }
 
     /**
+     * 编辑脚本的特征：{@code <script>} 块内容里出现我们的入口命名空间 {@code window.epubra}。
+     *
+     * <p>不用 id 定位——历史版本注入的脚本<b>没有 id</b>，只有内容特征能同时覆盖
+     * 「旧的无 id 脚本」与「现行带 id 脚本」两种形态。作者自己的脚本（不含
+     * {@code window.epubra}）不会被误伤。
+     */
+    private static final Pattern INJECTED_SCRIPT = Pattern.compile(
+            "<script\\b[^>]*>(?:(?!</script>).)*?window\\.epubra(?:(?!</script>).)*?</script>\\s*",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+
+    /**
+     * 剥掉章节里混入的编辑脚本（三道防线之二）。
+     *
+     * <ol>
+     *   <li>JS 序列化按 {@link #INJECTED_SCRIPT_ID} 剥掉刚注入的那份（第一道，主防线）；</li>
+     *   <li>本方法在<b>加载时</b>清洗历史污染——旧版回写进正文的无 id 脚本在这里消失，
+     *       下一次编辑保存后章节即自愈；</li>
+     *   <li>Java 侧回写前再调一次本方法（第三道），任何序列化异常都到不了书里。</li>
+     * </ol>
+     *
+     * @return 剥离后的文档；入参为 {@code null} / 空串时原样返回
+     */
+    public static String stripInjectedScript(String xhtml) {
+        if (xhtml == null || xhtml.isEmpty()) {
+            return xhtml;
+        }
+        return INJECTED_SCRIPT.matcher(xhtml).replaceAll("");
+    }
+
+    /**
      * 编辑脚本。整体包在 CDATA 里——文档按 XML 解析，脚本中的 {@code <} / {@code &}
      * 会直接让文档解析失败。
      */
     private static final String EDIT_SCRIPT = """
-            <script type="text/javascript">//<![CDATA[
+            <script id="%3$s" type="text/javascript">//<![CDATA[
             (function () {
-              var INJECTED_IDS = ['%s', '%s'];
+              var INJECTED_IDS = ['%s', '%s', '%3$s'];
               function stripInjected(root) {
                 for (var i = 0; i < INJECTED_IDS.length; i++) {
                   var el = root.querySelector('#' + INJECTED_IDS[i]);
@@ -723,7 +768,7 @@ public final class PreviewHtml {
                 return true;
               }
             })();
-            //]]></script>""".formatted(INJECTED_STYLE_ID, INJECTED_BASE_ID);
+            //]]></script>""".formatted(INJECTED_STYLE_ID, INJECTED_BASE_ID, INJECTED_SCRIPT_ID);
 
     private static String styleTag(Theme theme) {
         return "<style id=\"" + INJECTED_STYLE_ID + "\" type=\"text/css\">\n"

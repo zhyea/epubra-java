@@ -22,6 +22,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -422,6 +423,43 @@ class VisualEditorFormatTest {
         selectParagraphContents();
         assertFalse(Boolean.TRUE.equals(runScript("window.epubraFormat('unlink')")),
                 "不在链接内时 unlink 应返回 false");
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("回写序列化不携带编辑脚本——正文里不应混入任何 <script>")
+    void serializedOutputCarriesNoEditorScript() throws Exception {
+        selectParagraphContents();
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('bold')")));
+        String xhtml = serialized();
+
+        assertTrue(xhtml.contains("<strong"), "命令本身要生效：" + xhtml);
+        assertFalse(xhtml.contains("<script"),
+                "编辑脚本必须从回写结果里剥掉，否则每次编辑都往书里灌几百行 JS：" + xhtml);
+        assertFalse(xhtml.contains("epubraFormat"), xhtml);
+        assertWellFormedXhtml(xhtml);
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("行内语义标签在画布上有视觉样式：em 斜体 / strong 加粗 / u 下划线")
+    void inlineSemanticTagsCarryVisualStyles() throws Exception {
+        runScript("(function () {"
+                + " var p = document.body.querySelector('p');"
+                + " p.innerHTML = '前<em>斜</em>中<strong>粗</strong>后<u>下</u>';"
+                + " return true; })()");
+        Object report = runScript("(function () {"
+                + " function styleOf(sel, prop) {"
+                + "   var el = document.body.querySelector(sel);"
+                + "   return el ? document.defaultView.getComputedStyle(el)[prop] : 'MISSING';"
+                + " }"
+                + " return styleOf('em', 'fontStyle') + '|' + styleOf('strong', 'fontWeight')"
+                + "      + '|' + styleOf('u', 'textDecorationLine');"
+                + "})()");
+        // computed style 只能证明 CSS 链路通（引擎不做合成斜体，中文斜体的「可见」
+        // 由 Theme.previewStyleCss 的 em 字体栈负责：西文真斜体字面 + 楷体替代）
+        assertEquals("italic|700|underline", String.valueOf(report),
+                "行内语义标签的 computed style 被破坏，画布上强调格式会隐形");
     }
 
     // ------------------------------------------------------------------ 脚本与断言助手

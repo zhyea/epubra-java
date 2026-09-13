@@ -81,6 +81,13 @@ public enum Theme {
      * <p>作者自己的 XHTML 常常带内联配色，这里统一用 {@code !important} 压过文档自带样式，
      * 否则深色主题下会出现白底黑字的刺眼预览页。
      *
+     * <p>{@code em/i} 的字体栈是给「斜体可见性」专门定制的（实测依据见
+     * VisualEditorFormatTest 的诊断记录）：渲染引擎<b>不做合成斜体</b>（同字体下
+     * italic 与 normal 的渲染像素完全一致），雅黑又没有斜体字面——不做任何处理的话
+     * {@code <em>} 在画布上完全隐形。西文交给带真斜体字面的 Segoe UI / Times New Roman，
+     * 中文按排版惯例用楷体承担「强调」视觉（楷体无斜体字面、引擎也不合成，中文斜体
+     * 在本引擎里只能以替代字形呈现）。
+     *
      * <p>注意：这段 CSS 会被当作 XML 文本解析，不能出现 {@code <}、{@code >}、{@code &}。
      */
     public String previewStyleCss() {
@@ -92,6 +99,7 @@ public enum Theme {
                 hr, table, th, td, pre, img { border-color: %s !important; }
                 pre, code { background: %s !important; color: %s !important; padding: 2px 4px; }
                 img { max-width: 100%%; height: auto; }
+                em, i, dfn, cite, var { font-style: italic !important; font-family: "Segoe UI", "Times New Roman", "KaiTi", "楷体", serif !important; }
                 """.formatted(previewBackground, previewForeground, previewForeground, previewBorder,
                 previewLink, previewBorder, previewCodeBackground, previewForeground);
     }

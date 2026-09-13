@@ -106,6 +106,62 @@ class PreviewHtmlTest {
     }
 
     @Test
+    @DisplayName("编辑脚本带 id 且登记进剥离名单——否则回写时整段脚本会混进正文")
+    void injectedScriptCarriesIdAndIsRegisteredForStripping() {
+        String doc = PreviewHtml.editableDocument(FULL_DOC, Theme.LIGHT);
+
+        assertTrue(doc.contains("<script id=\"" + PreviewHtml.INJECTED_SCRIPT_ID + "\""),
+                "脚本元素必须有稳定 id，serialize 才能把它从回写结果里剥掉");
+        // JS 侧的 INJECTED_IDS 必须登记全部三个注入物：样式 / 基准 / 脚本
+        assertTrue(doc.contains("'" + PreviewHtml.INJECTED_STYLE_ID + "'"));
+        assertTrue(doc.contains("'" + PreviewHtml.INJECTED_BASE_ID + "'"));
+        assertTrue(doc.contains("'" + PreviewHtml.INJECTED_SCRIPT_ID + "'"));
+    }
+
+    @Test
+    @DisplayName("stripInjectedScript 只剥我们的脚本，作者自己的脚本不能误伤")
+    void stripInjectedScriptRemovesOnlyOurScripts() {
+        // 旧版历史形态：无 id，靠内容特征（window.epubra）识别
+        String legacy = "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head>"
+                + "<script type=\"text/javascript\">//<![CDATA[\n"
+                + "(function () { window.epubraFormat = function () {}; })();\n"
+                + "//]]></script>\n</head><body><p>正文</p></body></html>";
+        String cleaned = PreviewHtml.stripInjectedScript(legacy);
+        assertFalse(cleaned.contains("epubraFormat"), "历史脚本要被剥掉：" + cleaned);
+        assertTrue(cleaned.contains("<p>正文</p>"), "正文不能受伤：" + cleaned);
+
+        // 现行带 id 的整份编辑文档同样按特征剥掉（回写前的兜底防线）
+        String doc = PreviewHtml.editableDocument(FULL_DOC, Theme.LIGHT);
+        String stripped = PreviewHtml.stripInjectedScript(doc);
+        assertFalse(stripped.contains("epubraFormat"), "现行脚本也要剥得掉：" + stripped);
+        assertTrue(stripped.contains("<p>正文</p>"), "正文不能受伤：" + stripped);
+
+        // 作者自己的脚本（CDATA 风格相同但没有 epubra 入口）不能误删
+        String own = "<html><head><script type=\"text/javascript\">//<![CDATA[\n"
+                + "var highlight = function (el) { el.style.color = 'red'; };\n"
+                + "//]]></script></head><body><p>正文</p></body></html>";
+        assertEquals(own, PreviewHtml.stripInjectedScript(own), "作者脚本不能被误删");
+        assertEquals("", PreviewHtml.stripInjectedScript(""));
+        assertNull(PreviewHtml.stripInjectedScript(null));
+    }
+
+    @Test
+    @DisplayName("加载时清洗历史污染：曾混进正文的编辑脚本不会再次注入")
+    void editableDocumentCleansLegacyInjectedScript() {
+        String legacyScript = "<script type=\"text/javascript\">//<![CDATA[\n"
+                + "window.epubraSerialize = function () { return 'LEGACY-JS'; };\n//]]></script>";
+        String polluted = FULL_DOC.replace("</head>", legacyScript + "</head>");
+
+        String doc = PreviewHtml.editableDocument(polluted, Theme.LIGHT);
+
+        int occurrences = doc.split("epubraSerialize", -1).length - 1;
+        assertEquals(1, occurrences,
+                "剥离历史脚本后应只剩现行注入的一份，否则污染会滚雪球");
+        assertFalse(doc.contains("LEGACY-JS"), "历史脚本内容不能残留：" + doc);
+        assertTrue(doc.contains("<p>正文</p>"), "原始正文不能被丢掉");
+    }
+
+    @Test
     @DisplayName("缺 body 的裸片段也能得到可编辑文档")
     void editableDocumentWrapsBareFragment() {
         String doc = PreviewHtml.editableDocument("<p>裸片段</p>", Theme.LIGHT);

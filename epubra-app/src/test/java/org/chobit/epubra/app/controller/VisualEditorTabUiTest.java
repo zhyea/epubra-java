@@ -11,9 +11,13 @@ import javafx.scene.control.TextArea;
 import javafx.scene.layout.FlowPane;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
+import org.chobit.epubra.app.context.BookContext;
 import org.chobit.epubra.app.controller.view.ResourceController;
 import org.chobit.epubra.app.controller.view.TocController;
 import org.chobit.epubra.app.ui.model.ChapterNode;
+import org.chobit.epubra.lib.domain.Book;
+import org.chobit.epubra.lib.domain.BookFactory;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -58,6 +62,11 @@ class VisualEditorTabUiTest {
         assertTrue(FX_STARTED.await(10, TimeUnit.SECONDS), "JavaFX toolkit 启动超时");
         Platform.setImplicitExit(false);
 
+        // 本类会触发章节加载（reloadVisualEditor → 预览镜像 / WebView 缓存落盘），
+        // 把用户数据根指到临时目录，避免测试写真实 ~/.Epubra/
+        userDataDir = java.nio.file.Files.createTempDirectory("epubra-tab-ui-test");
+        System.setProperty("epubra.userDataDir", userDataDir.toString());
+
         runOnFx(() -> {
             FXMLLoader loader = new FXMLLoader(
                     VisualEditorTabUiTest.class.getResource("/org/chobit/epubra/app/view/main-window.fxml"));
@@ -68,6 +77,13 @@ class VisualEditorTabUiTest {
             stage.show();
         });
     }
+
+    @AfterAll
+    static void releaseUserDataDir() {
+        System.clearProperty("epubra.userDataDir");
+    }
+
+    private static java.nio.file.Path userDataDir;
 
     @Test
     @Timeout(60)
@@ -176,6 +192,39 @@ class VisualEditorTabUiTest {
                 assertSame(node, provider.get(),
                         "章节 provider 必须接目录树状态——漏接时插入图片恒报「请先在左侧目录中选择章节」"
                                 + "（曾以从未被调用的 setter 形式存在，工具条插图全被拦）");
+            } finally {
+                tocController.setCurrentNode(null);
+            }
+        });
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("源码区的改动在切回编辑 tab 前先落进章节资源——可视化编辑器才能同步")
+    void sourceEditsAreCommittedBeforeVisualReload() throws Exception {
+        runOnFx(() -> {
+            TocController tocController = field(mainController, "tocViewController");
+            BookContext ctx = field(mainController, "ctx");
+            TabPane tabs = field(mainController, "editorTabs");
+            TextArea sourceArea = field(mainController, "contentArea");
+
+            Book book = BookFactory.createEmpty("同步测试");
+            ctx.setBook(book);
+            org.chobit.epubra.lib.domain.Resource chapter = book.spineResources().get(0);
+            tocController.setCurrentNode(new ChapterNode("第一章", chapter, null));
+            try {
+                // 停在源码 tab 改文本：此刻章节资源还不知道这次修改
+                tabs.getSelectionModel().select(1);
+                sourceArea.setText(chapter.asString().replace("</p>", "</p>")
+                        + "<p>源码改动标记五十三</p>");
+                assertFalse(chapter.asString().contains("源码改动标记五十三"),
+                        "前置确认：源码输入不直接写章节资源（文本监听器只做撤销与标脏）");
+
+                // 切回编辑 tab：修复点是切换时先 flushCurrentChapter 再 reload
+                tabs.getSelectionModel().select(0);
+
+                assertTrue(chapter.asString().contains("源码改动标记五十三"),
+                        "切 tab 必须先把源码区文本写进章节资源，否则可视化编辑器重载的是旧内容");
             } finally {
                 tocController.setCurrentNode(null);
             }
