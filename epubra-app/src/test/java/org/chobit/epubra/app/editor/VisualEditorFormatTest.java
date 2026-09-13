@@ -117,6 +117,209 @@ class VisualEditorFormatTest {
 
     @Test
     @Timeout(60)
+    @DisplayName("无选区点行内格式按钮不再插入空的 <strong>/<em>/<code> 占位标签")
+    void collapsedCaretFormattingDoesNotInsertEmptyTags() throws Exception {
+        caretIntoParagraph();
+        // 光标收进块内后确保没有选区（collapse 成光标）
+        runScript("(function () {"
+                + " var s = window.getSelection();"
+                + " if (s.rangeCount) { s.getRangeAt(0).collapse(true); }"
+                + " return true; })()");
+
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('bold')")),
+                "光标态命令按「有意不作为」处理（返回 true，避免 Java 侧 fallback 去源码区插片段）");
+        runScript("window.epubraFormat('italic')");
+        runScript("window.epubraFormat('code')");
+
+        String xhtml = serialized();
+        assertFalse(bodyHasTag("strong"), "无选区不该出现空 <strong>：" + xhtml);
+        assertFalse(bodyHasTag("em"), "无选区不该出现空 <em>：" + xhtml);
+        assertFalse(bodyHasTag("code"), "无选区不该出现空 <code>：" + xhtml);
+        assertTrue(xhtml.contains("正文"), "原有文字不能被动：" + xhtml);
+        assertWellFormedXhtml(xhtml);
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("光标落在斜体文字内点「斜体」仍取消整段斜体（#54 保留行为）")
+    void caretInsideEmStillTogglesOff() throws Exception {
+        selectParagraphContents();
+        runScript("window.epubraFormat('italic')");
+        // 光标收进 <em> 内部
+        runScript("(function () {"
+                + " var em = document.body.querySelector('em');"
+                + " var r = document.createRange(); r.selectNodeContents(em); r.collapse(true);"
+                + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+                + " return true; })()");
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('italic')")),
+                "光标在格式内点按钮 = 取消（返回 true）");
+
+        assertFalse(bodyHasTag("em"), "光标在 <em> 内点「斜体」应拆掉包裹：" + serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("无选区插入链接不再产生空 <a href>")
+    void collapsedCaretLinkDoesNotInsertEmptyAnchor() throws Exception {
+        caretIntoParagraph();
+        runScript("(function () {"
+                + " var s = window.getSelection();"
+                + " if (s.rangeCount) { s.getRangeAt(0).collapse(true); }"
+                + " return true; })()");
+
+        assertTrue(Boolean.TRUE.equals(withMember("__testHref", "https://example.com",
+                        "window.epubraFormat('link', window.__testHref)")),
+                "光标态插链接同样按「有意不作为」处理");
+        String xhtml = serialized();
+        assertFalse(bodyHasTag("a"), "无选区不该出现空 <a href>：" + xhtml);
+        assertWellFormedXhtml(xhtml);
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("序列化剔除空强调标签（含空白壳与嵌套空壳），带图片等内容的保留")
+    void serializePrunesEmptyInlineTags() throws Exception {
+        // 直接在 DOM 里注入各类空壳（模拟历史文档 / 粘贴带进来的），验证回写兜底净化
+        runScript("(function () {"
+                + " var p = document.body.querySelector('p');"
+                + " p.appendChild(document.createElementNS('http://www.w3.org/1999/xhtml', 'strong'));"
+                + " var emBlank = document.createElementNS('http://www.w3.org/1999/xhtml', 'em');"
+                + " emBlank.appendChild(document.createTextNode('  '));"
+                + " p.appendChild(emBlank);"
+                + " var shell = document.createElementNS('http://www.w3.org/1999/xhtml', 'strong');"
+                + " shell.appendChild(document.createElementNS('http://www.w3.org/1999/xhtml', 'em'));"
+                + " p.appendChild(shell);"
+                + " var alias = document.createElementNS('http://www.w3.org/1999/xhtml', 'b');"
+                + " p.appendChild(alias);"
+                + " var withImg = document.createElementNS('http://www.w3.org/1999/xhtml', 'em');"
+                + " var img = document.createElementNS('http://www.w3.org/1999/xhtml', 'img');"
+                + " img.setAttribute('src', 'x.png');"
+                + " withImg.appendChild(img);"
+                + " p.appendChild(withImg);"
+                + " return true; })()");
+
+        String xhtml = serialized();
+        String body = bodyOf(xhtml);
+        assertFalse(body.contains("<strong"), "空 <strong> 与嵌套空壳都应被剔除：" + body);
+        assertFalse(body.contains("<b>"), "别名 <b> 的空壳也应被剔除：" + body);
+        assertTrue(body.contains("<em><img"), "带 <img> 内容的 <em> 必须保留：" + body);
+        assertTrue(body.contains("x.png"), "图片本身不能被动：" + body);
+        assertWellFormedXhtml(xhtml);
+    }
+
+    /** 取序列化输出的 body 区间——head 里内嵌的编辑脚本源码会撞断言，不能整篇 contains。 */
+    private String bodyOf(String xhtml) {
+        int start = xhtml.indexOf("<body");
+        int end = xhtml.indexOf("</body>");
+        assertTrue(start >= 0 && end > start, "序列化输出缺 body：" + xhtml);
+        return xhtml.substring(start, end);
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("列表/段落多次往返结构始终合法，内容不丢")
+    void listRoundTripsKeepStructureLegal() throws Exception {
+        caretIntoParagraph();
+        for (int round = 0; round < 3; round++) {
+            assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('list')")),
+                    "第 " + (round + 1) + " 轮转列表应成功");
+            String asList = serialized();
+            assertWellFormedXhtml(asList);
+            assertFalse(asList.contains("<p><ul") || asList.contains("<p><ol"),
+                    "列表内不应出现段落嵌套列表的非法结构：" + bodyOf(asList));
+
+            caretIntoParagraph();
+            assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('list')")),
+                    "第 " + (round + 1) + " 轮退回段落应成功");
+            String asParagraph = serialized();
+            assertWellFormedXhtml(asParagraph);
+            assertTrue(asParagraph.contains("正文"), "往返后文字不能丢：" + bodyOf(asParagraph));
+        }
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("带子列表的列表项退回段落：子列表提出去，绝不产生 p>ul 非法嵌套")
+    void indentedSublistExitsToParagraphWithoutIllegalNesting() throws Exception {
+        selectParagraphContents();
+        runScript("window.epubraFormat('list')");
+        // 模拟 Tab 缩进结果：外层 li 里有一个子列表
+        runScript("(function () {"
+                + " var li = document.body.querySelector('li');"
+                + " var sub = document.createElementNS('http://www.w3.org/1999/xhtml', 'ul');"
+                + " var subLi = document.createElementNS('http://www.w3.org/1999/xhtml', 'li');"
+                + " subLi.appendChild(document.createTextNode('子项'));"
+                + " sub.appendChild(subLi);"
+                + " li.appendChild(sub);"
+                + " return true; })()");
+        caretIntoParagraph();
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('list')")),
+                "带子列表的列表项退回段落应成功");
+
+        String body = bodyOf(serialized());
+        assertFalse(body.contains("<p><ul") && body.contains("</ul></p>"),
+                "绝不能产生 p>ul 非法嵌套：" + body);
+        assertTrue(body.contains("<ul><li>子项</li></ul>"),
+                "子列表应作为独立列表保留：" + body);
+        assertTrue(body.contains("正文"), "外层文字不能丢：" + body);
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("引用块内含多个段落时退回段落：块级孩子提出去，绝不产生 p>p")
+    void quoteWithBlocksExitsToParagraphWithoutIllegalNesting() throws Exception {
+        // 直接构造引用块含两个段落的形态
+        runScript("(function () {"
+                + " var body = document.body;"
+                + " var p0 = body.querySelector('p');"
+                + " var bq = document.createElementNS('http://www.w3.org/1999/xhtml', 'blockquote');"
+                + " var p1 = document.createElementNS('http://www.w3.org/1999/xhtml', 'p');"
+                + " p1.appendChild(document.createTextNode('引文一'));"
+                + " var p2 = document.createElementNS('http://www.w3.org/1999/xhtml', 'p');"
+                + " p2.appendChild(document.createTextNode('引文二'));"
+                + " bq.appendChild(p1); bq.appendChild(p2);"
+                + " body.replaceChild(bq, p0);"
+                + " return true; })()");
+        // 光标落进引用块内
+        runScript("(function () {"
+                + " var p = document.body.querySelector('blockquote p');"
+                + " var r = document.createRange(); r.selectNodeContents(p); r.collapse(true);"
+                + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+                + " return true; })()");
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('quote')")),
+                "引用块再点「引用」应退回段落");
+
+        String body = bodyOf(serialized());
+        assertFalse(body.contains("<p><p>"), "绝不能产生 p>p 非法嵌套：" + body);
+        assertTrue(body.contains("引文一") && body.contains("引文二"),
+                "两段引文都要保留：" + body);
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("整列表被选中再点「列表」：所有 li 退回成段（绝不 fallback 往源码区插骨架）")
+    void wholeListSelectionTogglesToParagraphs() throws Exception {
+        caretIntoParagraph();
+        runScript("window.epubraFormat('list')");
+        // 整列表选中（selectNodeContents(ul)：起点就是列表本身）
+        runScript("(function () {"
+                + " var ul = document.body.querySelector('ul');"
+                + " var r = document.createRange(); r.selectNodeContents(ul);"
+                + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+                + " return true; })()");
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('list')")),
+                "整列表选中点「列表」应退回段落（返回 true，触发源码 fallback 会把内容搞乱）");
+
+        String body = bodyOf(serialized());
+        assertFalse(body.contains("<ul"), "整列表退回后不应残留列表：" + body);
+        assertTrue(body.contains("正文"), "文字不能丢：" + body);
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
     @DisplayName("标题把光标所在块转成 <h2>（不新增空块）")
     void headingConvertsCurrentBlock() throws Exception {
         caretIntoParagraph();
@@ -505,21 +708,86 @@ class VisualEditorFormatTest {
 
     @Test
     @Timeout(60)
-    @DisplayName("拖选一端在斜体之外（把斜体包进更大选区）不点亮 italic——点亮语义与 toggleInline 一致")
-    void partialSelectionAcrossEmDoesNotReportItalic() throws Exception {
+    @DisplayName("选区内只要含有斜体文字（部分覆盖）也点亮 italic")
+    void partialSelectionAcrossEmReportsItalic() throws Exception {
+        selectParagraphContents();
+        runScript("window.epubraFormat('italic')");
+        // p 变成 <p><em>正文</em></p>；在包裹外补一段文字，构造部分覆盖的选区
+        runScript("document.body.querySelector('p').appendChild(document.createTextNode('续写'))");
+
+        // 选区：斜体文字的前半段 + 包裹外的「续」字——混有格式外文字也应点亮
+        Object q = runScript("(function () {"
+                + " var em = document.body.querySelector('em');"
+                + " var tail = em.nextSibling;"
+                + " var r = document.createRange();"
+                + " r.setStart(em.firstChild, 0); r.setEnd(tail, 1);"
+                + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+                + " return window.epubraQuery(); })()");
+        assertTrue(String.valueOf(q).contains("italic"),
+                "选区内含有斜体文字就应报 italic（亮 ⇔ 可移除），实际：" + q);
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("部分覆盖选区点「斜体」= 移除选区内相交的 <em>（整标签拆掉，文字保留）")
+    void partialSelectionTogglesItalicOffRemovesTag() throws Exception {
+        selectParagraphContents();
+        runScript("window.epubraFormat('italic')");
+        runScript("document.body.querySelector('p').appendChild(document.createTextNode('续写'))");
+
+        // 部分覆盖选区（斜体前半段 + 包裹外的字），点「斜体」→ 移除 <em>
+        assertTrue(Boolean.TRUE.equals(runScript("(function () {"
+                + " var em = document.body.querySelector('em');"
+                + " var tail = em.nextSibling;"
+                + " var r = document.createRange();"
+                + " r.setStart(em.firstChild, 0); r.setEnd(tail, 1);"
+                + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+                + " return window.epubraFormat('italic'); })()")),
+                "点亮状态下点击应执行移除（返回 true）");
+
+        String body = bodyOf(serialized());
+        assertFalse(body.contains("<em>"), "选区内相交的 <em> 应被移除：" + body);
+        assertTrue(body.contains("正文") && body.contains("续写"),
+                "文字一律保留：" + body);
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("整段选中完全覆盖斜体包裹（三击选段形态）也点亮 italic")
+    void fullParagraphSelectionCoveringEmReportsItalic() throws Exception {
         selectParagraphContents();
         runScript("window.epubraFormat('italic')");
 
-        // 选区：起点在 em 内部文本，终点在 p 上 em 之后的位置（em 外）。
-        // 若按「只看锚点端」点亮，用户点「斜体」却不会拆掉这层包裹——亮灯就成了误导。
+        // 三击选段形态：选区起点/终点都在 p 上（包裹之外），但语义上完整覆盖了 em。
+        // #54 用户实测「把斜体字选中后按钮不亮」正是这种形态。
         Object q = runScript("(function () {"
-                + " var em = document.body.querySelector('em');"
-                + " var r = document.createRange();"
-                + " r.setStart(em.firstChild, 0); r.setEnd(em.parentNode, 1);"
+                + " var p = document.body.querySelector('p');"
+                + " var r = document.createRange(); r.selectNodeContents(p);"
                 + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
                 + " return window.epubraQuery(); })()");
-        assertFalse(String.valueOf(q).contains("italic"),
-                "一端在 em 外的选区不应报 italic，实际：" + q);
+        assertTrue(String.valueOf(q).contains("italic"),
+                "完整覆盖斜体包裹的整段选区应报 italic，实际：" + q);
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("整段选中后点「斜体」应拆掉包裹（toggle off），而不是再嵌套一层")
+    void fullParagraphSelectionTogglesItalicOff() throws Exception {
+        selectParagraphContents();
+        runScript("window.epubraFormat('italic')");
+        assertTrue(Boolean.TRUE.equals(runScript("!!document.body.querySelector('em')")),
+                "前置确认：斜体已设置");
+
+        // 再次整段选中（起点在包裹外），点「斜体」= 取消
+        selectParagraphContents();
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('italic')")),
+                "整段选中已斜体内容后点「斜体」应执行取消");
+        String serialized = serialized();
+        assertFalse(bodyHasTag("em"),
+                "取消后不应再有 <em>，实际：" + serialized);
+        assertFalse(serialized.contains("<em><em>"),
+                "绝不能嵌套包裹（取消被实现成了再加一层），实际：" + serialized);
     }
 
     @Test

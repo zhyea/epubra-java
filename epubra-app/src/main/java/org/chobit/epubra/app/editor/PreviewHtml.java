@@ -238,10 +238,31 @@ public final class PreviewHtml {
               function serialize() {
                 var clone = document.documentElement.cloneNode(true);
                 stripInjected(clone);
+                pruneEmptyInline(clone);
                 var body = clone.querySelector('body');
                 if (body) { body.removeAttribute('contenteditable'); }
                 return '<?xml version="1.0" encoding="UTF-8"?>\\n' +
                        new XMLSerializer().serializeToString(clone);
+              }
+              // 空行内标签是纯噪音（无锚文本的强调、无内容的强调壳），回写前剔除。
+              // 循环到不动点，处理 <strong><em></em></strong> 这类嵌套空壳：
+              // 内层删掉后外层变空，下一轮接着删。只清强调类语义标签，
+              // <a>（有 href 属性语义）与 <span>（可能有 class）不碰。
+              function pruneEmptyInline(root) {
+                var tags = 'strong,em,u,del,code,b,i,s';
+                var changed = true;
+                while (changed) {
+                  changed = false;
+                  var els = root.querySelectorAll(tags);
+                  for (var i = 0; i < els.length; i++) {
+                    var el = els[i];
+                    var hasMedia = el.querySelector('img,br,hr,video,audio,iframe,object,svg,math');
+                    if (!hasMedia && !el.textContent.replace(/\\s/g, '')) {
+                      el.parentNode.removeChild(el);
+                      changed = true;
+                    }
+                  }
+                }
               }
               function push() {
                 if (window.epubraBridge) { window.epubraBridge.onEdited(serialize()); }
@@ -313,7 +334,36 @@ public final class PreviewHtml {
                 while (from.firstChild) { to.appendChild(from.firstChild); }
               }
 
-              // 把 tag 对应的块级元素换掉当前块；块在列表里则先脱离列表
+              // 块级标签集合：这些孩子不能塞进 p/h2/h3 这类行内容器
+              //（p>ul、p>p 都会让回写进书的 XHTML 结构损坏，再次加载后内容展示异常）
+              function isBlockTag(t) {
+                return t === 'p' || t === 'h1' || t === 'h2' || t === 'h3'
+                        || t === 'ul' || t === 'ol' || t === 'blockquote'
+                        || t === 'hr' || t === 'div' || t === 'pre' || t === 'table';
+              }
+
+              // 把容器的块级孩子摘出来按原序返回，剩下的行内容子再搬运
+              function pullOutBlocks(container) {
+                var out = [];
+                var c = container.firstChild;
+                while (c) {
+                  var next = c.nextSibling;
+                  if (isBlockTag(tagOf(c))) { out.push(c); container.removeChild(c); }
+                  c = next;
+                }
+                return out;
+              }
+
+              // 块级节点数组按原序接到 anchor 后面，返回新的追加锚点
+              function appendBlocksAfter(blocks, anchor) {
+                for (var i = 0; i < blocks.length; i++) {
+                  anchor.parentNode.insertBefore(blocks[i], anchor.nextSibling);
+                  anchor = blocks[i];
+                }
+                return anchor;
+              }
+
+              // 把光标所在块换掉当前块；块在列表里则先脱离列表
               function formatBlock(tag) {
                 var s = activeSelection();
                 if (!s) { return false; }
@@ -325,8 +375,11 @@ public final class PreviewHtml {
                   var item = childOfContaining(block, range.startContainer);
                   if (tagOf(item) !== 'li') { return false; }
                   var lifted = makeTag(tag);
+                  // li 里的块级孩子（Tab 缩进的子列表等）不能进新块——摘出来跟在后面
+                  var blocks = pullOutBlocks(item);
                   moveChildren(item, lifted);
                   block.parentNode.insertBefore(lifted, block.nextSibling);
+                  appendBlocksAfter(blocks, lifted);
                   block.removeChild(item);
                   if (!block.querySelector('li')) { block.parentNode.removeChild(block); }
                   collapseInto(lifted);
@@ -335,10 +388,42 @@ public final class PreviewHtml {
 
                 if (tagOf(block) === tag) { collapseInto(block); return true; }
                 var fresh = makeTag(tag);
+                var movedBlocks = [];
+                if (tag === 'p' || tag === 'h1' || tag === 'h2' || tag === 'h3') {
+                  // 引用块转段落等场景：块级孩子绝不能塞进行内容器（p>p 同样非法）
+                  movedBlocks = pullOutBlocks(block);
+                }
                 moveChildren(block, fresh);
                 block.parentNode.replaceChild(fresh, block);
+                appendBlocksAfter(movedBlocks, fresh);
                 collapseInto(fresh);
                 return true;
+              }
+
+              // 整个列表退回段落：每个顶层 li 各转成一段，li 内的块级孩子
+              //（子列表等）原样跟在对应段之后——多次点「列表」往返时结构保持合法
+              function listToBlocks(block) {
+                var frag = document.createDocumentFragment();
+                var item = block.firstElementChild;
+                while (item) {
+                  var next = item.nextElementSibling;
+                  if (tagOf(item) === 'li') {
+                    var p = makeTag('p');
+                    var blocks = pullOutBlocks(item);
+                    moveChildren(item, p);
+                    frag.appendChild(p);
+                    appendBlocksAfter(blocks, p);
+                  } else {
+                    frag.appendChild(item);
+                  }
+                  item = next;
+                }
+                // 先取 lastChild 再替换：appendChild(frag) 会把子节点移交进 DOM，
+                // 替换之后 frag 已空，frag.lastChild 恒为 null（踩实过：返回 false
+                // 会让 Java 侧 fallback 往源码区插列表骨架）
+                var last = frag.lastChild;
+                block.parentNode.replaceChild(frag, block);
+                return last;
               }
 
               // 段落 / 标题 / 列表 三者互转；已经是列表了再点一次退回段落；
@@ -346,10 +431,21 @@ public final class PreviewHtml {
               function toggleList(kind) {
                 var s = activeSelection();
                 if (!s || !s.rangeCount) { return false; }
-                var block = topBlock(s.getRangeAt(0).startContainer);
+                var range = s.getRangeAt(0);
+                var block = topBlock(range.startContainer);
                 if (!block) { return false; }
                 if (isList(block)) {
-                  if (tagOf(block) === kind) { return formatBlock('p'); }
+                  if (tagOf(block) === kind) {
+                    // 退回段落。整列表被选中时（起点就是列表本身，如整段选中后再点）
+                    // childOfContaining 找不到 li——此时把每个 li 各转成一段；
+                    // 若这里返回 false，Java 侧会 fallback 去源码区插列表骨架，
+                    // 切 tab 时把可视化改动整个冲掉（多次点列表后内容错乱的根源之一）
+                    var item = childOfContaining(block, range.startContainer);
+                    if (tagOf(item) !== 'li') {
+                      return !!listToBlocks(block);
+                    }
+                    return formatBlock('p');
+                  }
                   var converted = makeTag(kind);
                   moveChildren(block, converted);
                   block.parentNode.replaceChild(converted, block);
@@ -357,11 +453,11 @@ public final class PreviewHtml {
                 }
 
                 var list = makeTag(kind);
-                var item = makeTag('li');
-                moveChildren(block, item);
-                list.appendChild(item);
+                var li = makeTag('li');
+                moveChildren(block, li);
+                list.appendChild(li);
                 block.parentNode.replaceChild(list, block);
-                collapseInto(item);
+                collapseInto(li);
                 return true;
               }
 
@@ -417,6 +513,24 @@ public final class PreviewHtml {
                 return null;
               }
 
+              // 选区是否与 tag 元素相交——选区内只要含有该格式的文字就算命中
+              function selectionTouches(range, tag) {
+                var root = (range.commonAncestorContainer.nodeType === 1)
+                        ? range.commonAncestorContainer
+                        : range.commonAncestorContainer.parentNode;
+                // 选区就落在某个 tag 元素内部（包裹应用后 selectContents 的形态：
+                // commonAncestor 就是包裹本身，getElementsByTagName 在其内部找不到自身）
+                for (var p = root; p && p !== document.body; p = p.parentNode) {
+                  if (tagOf(p) === tag) { return true; }
+                }
+                // 或选区横跨了包裹的边界，在共同祖先的子树里找相交的 tag 元素
+                var els = root.getElementsByTagName(tag);
+                for (var i = 0; i < els.length; i++) {
+                  if (range.intersectsNode(els[i])) { return true; }
+                }
+                return false;
+              }
+
               function unwrapEl(el) {
                 var parent = el.parentNode;
                 if (!parent) { return null; }
@@ -436,8 +550,18 @@ public final class PreviewHtml {
               function toggleInline(tag) {
                 var s = activeSelection();
                 if (!s || !s.rangeCount) { return false; }
-                var existing = findWrap(s.getRangeAt(0).startContainer, tag);
-                if (!existing) { return wrapInline(tag); }
+                var range = s.getRangeAt(0);
+                if (!range.collapsed) {
+                  // 拖选：选区内含有该格式包裹就全部移除（与点亮语义严格对称——
+                  // 亮 ⇔ 选区相交 ⇔ 点击移除），一个都没有才包裹新标签。
+                  // 含锚点在包裹内的情形：锚点链上的包裹也在相交集合里，一并拆掉。
+                  return unwrapCovered(range, tag, s) || wrapInline(tag);
+                }
+                // 光标态：落在包裹内 = 取消该包裹（#54）；否则不做格式化
+                //（避免空标签占位）。返回 true 的原因：false 会让 Java 侧
+                // fallback 去往源码区插片段，把空标签换个地方再犯。
+                var existing = findWrap(range.startContainer, tag);
+                if (!existing) { return true; }
                 var last = null;
                 while (existing) {
                   last = unwrapEl(existing);
@@ -447,18 +571,36 @@ public final class PreviewHtml {
                 return true;
               }
 
-              // 行内包裹：有选区就包起来（选区跨元素时退化为「抽出→包裹→放回」），
-              // 无选区就插一对空标签并把光标落在中间
+              // 拆掉选区命中（祖先链上或子树内相交）的所有 tag 包裹，
+              // 文档序逐个解开，保持选区落在最后解开处
+              function unwrapCovered(range, tag, s) {
+                var root = (range.commonAncestorContainer.nodeType === 1)
+                        ? range.commonAncestorContainer
+                        : range.commonAncestorContainer.parentNode;
+                var targets = [];
+                // 包裹应用后选区常锚定在包裹本身（commonAncestor 就是它），
+                // 子树查找看不到它——祖先链要先并进来
+                for (var p = root; p && p !== document.body; p = p.parentNode) {
+                  if (tagOf(p) === tag) { targets.push(p); }
+                }
+                var all = root.getElementsByTagName(tag);
+                for (var i = 0; i < all.length; i++) {
+                  if (range.intersectsNode(all[i])) { targets.push(all[i]); }
+                }
+                var last = null;
+                for (var j = 0; j < targets.length; j++) { last = unwrapEl(targets[j]); }
+                if (last) { s.removeAllRanges(); s.addRange(last); }
+                return targets.length > 0;
+              }
+
+              // 行内包裹：只在有实际选区时包起来（选区跨元素时退化为「抽出→包裹→放回」）。
+              // 无选区的空标签占位（<em></em>）已废除——空行内标签对 XHTML 是纯噪音，
+              // toggleInline 在光标态直接 no-op。
               function wrapInline(tag) {
                 var s = activeSelection();
                 if (!s) { return false; }
                 var range = s.getRangeAt(0);
                 var el = makeTag(tag);
-                if (range.collapsed) {
-                  range.insertNode(el);
-                  collapseInto(el);
-                  return true;
-                }
                 try {
                   range.surroundContents(el);
                 } catch (err) {
@@ -528,8 +670,8 @@ public final class PreviewHtml {
                 var el = makeTag('a');
                 el.setAttribute('href', safe);
                 if (range.collapsed) {
-                  range.insertNode(el);
-                  collapseInto(el);
+                  // 无选区不插空 <a href="…"></a>（链接没锚文本就没意义）；返回 true
+                  // 同 toggleInline：避免 Java 侧 fallback 去源码区插片段
                   return true;
                 }
                 try {
@@ -577,17 +719,22 @@ public final class PreviewHtml {
                 if (!s) { return ''; }
                 var range = s.getRangeAt(0);
                 var out = [];
-                var n = (range.startContainer.nodeType === 1)
-                        ? range.startContainer : range.startContainer.parentNode;
-                // 拖选时的点亮语义与 toggleInline 一致：选区两端都在同一格式元素内，
-                // 点「斜体」才会把整块包裹拆掉。只看锚点端的话，从斜体文字外起拖、
-                // 把斜体包进选区的「再次选中」不会亮灯（#54 用户实测场景）。
-                while (n && n !== document.body) {
-                  var name = INLINE_FMT[tagOf(n)];
-                  var covered = range.collapsed
-                          || (name && !!n.contains(range.endContainer));
-                  if (name && covered && out.indexOf(name) < 0) { out.push(name); }
-                  n = n.parentNode;
+                if (range.collapsed) {
+                  var n = (range.startContainer.nodeType === 1)
+                          ? range.startContainer : range.startContainer.parentNode;
+                  while (n && n !== document.body) {
+                    var name = INLINE_FMT[tagOf(n)];
+                    if (name && out.indexOf(name) < 0) { out.push(name); }
+                    n = n.parentNode;
+                  }
+                } else {
+                  // 拖选点亮语义：选区内只要含有该格式的文字（相交）就点亮对应按钮，
+                  // 点击由 toggleInline 移除选区内的该格式包裹——亮 ⇔ 可移除，严格对称。
+                  for (var t in INLINE_FMT) {
+                    if (selectionTouches(range, t) && out.indexOf(INLINE_FMT[t]) < 0) {
+                      out.push(INLINE_FMT[t]);
+                    }
+                  }
                 }
                 var block = closestBlock(range.startContainer);
                 var bt = tagOf(block);

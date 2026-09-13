@@ -143,6 +143,16 @@ class VisualEditorToolbarActivationTest {
         assertTrue(toolbarButtonActive("italic"),
                 "重新选中斜体文字时按钮必须点亮");
 
+        // ---- 整段选中（起点在包裹外，三击选段形态）→ 仍点亮 -----------------------
+        runScript("(function () {"
+                + " var p = document.body.querySelector('p');"
+                + " var r = document.createRange(); r.selectNodeContents(p);"
+                + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+                + " document.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));"
+                + " return true; })()");
+        assertTrue(toolbarButtonActive("italic"),
+                "整段选中完整覆盖斜体包裹时按钮必须点亮——#54 用户实测「把斜体字选中」的形态");
+
         // ---- 光标移出斜体范围 → 熄灭 --------------------------------------------
         // 模板只有一个段落（整段已是 em），改用「点进非斜体的标题」模拟移出
         runScript("(function () {"
@@ -162,6 +172,9 @@ class VisualEditorToolbarActivationTest {
                 + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
                 + " return true; })()");
         runOnFx(() -> mainController.onInsertItalic());
+        // 取消也是一次选区变化：unwrapCovered 恢复的选区经异步 selectionchange 上报，
+        // 用同步 mouseup 确定性驱动一次
+        runScript("document.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}))");
 
         Object emCount = runScript("document.body.querySelectorAll('em').length");
         assertEqualsInt(0, emCount, "斜体内再点一次「斜体」应取消斜体（em 清除）");
