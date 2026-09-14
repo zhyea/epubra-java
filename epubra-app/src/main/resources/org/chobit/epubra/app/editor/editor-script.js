@@ -650,21 +650,43 @@
   // ---- 快捷键 ----------------------------------------------------
   // 用捕获阶段：编辑器的默认处理在目标元素上，冒泡阶段拦不住。
   // Ctrl+Z / Ctrl+Y 交给 Java 的应用级快照撤销，避免两套撤销栈打架。
+
+  // 取按键标识。**JavaFX WebView 里不能信 e.key / e.code**：真实按键映射下来两者
+  // 恒为空串（实测 Tab → key=[] code=[] keyCode=9；Ctrl+B → key=[] code=[] keyCode=66），
+  // 于是 `(e.key || '') === 'Tab'` 恒为假 —— Tab 缩进与 Ctrl+B/I/U 全部静默失效，
+  // 而且不 preventDefault 会让 Tab 的默认行为把焦点带出编辑器（#68）。
+  // 可靠的只有 keyCode / which，以及修饰键标志（ctrlKey / shiftKey / altKey）。
+  // 字母键的 keyCode 恒为**大写** ASCII（按住 Shift 也不变），故统一转小写。
+  function keyToken(e) {
+    if (e.key) { return String(e.key); }
+    var code = e.keyCode || e.which || 0;
+    if (code === 9) { return 'Tab'; }
+    if (code === 13) { return 'Enter'; }
+    if (code === 27) { return 'Escape'; }
+    if (code >= 65 && code <= 90) { return String.fromCharCode(code + 32); }
+    if (code >= 48 && code <= 57) { return String.fromCharCode(code); }
+    return '';
+  }
+
   document.addEventListener('keydown', function (e) {
-    // 列表里的 Tab / Shift+Tab = 多层级缩进 / 降级；不在列表里交给默认行为
-    if ((e.key || '') === 'Tab' && !(e.ctrlKey || e.metaKey)) {
+    // 编辑器内**一律吞掉 Tab**（产品决策）：Tab 永远属于编辑器内容，不把焦点带走。
+    //   · 列表里 → 多层级缩进；Shift+Tab → 降级；
+    //   · 不在列表里 → 有意不作为，但**照样拦掉默认行为**。
+    // 不拦的话 JavaFX 的焦点遍历会把焦点送出编辑器（#68 的用户可见症状）。
+    // 键盘用户要跳出编辑器走 Ctrl+Tab —— 带修饰键不进这一段。
+    if (keyToken(e) === 'Tab' && !(e.ctrlKey || e.metaKey)) {
       var s = activeSelection();
       var li = (s && s.rangeCount) ? closestListItem(s.getRangeAt(0).startContainer) : null;
       if (li) {
         var done = e.shiftKey ? outdentListItem(li) : indentListItem(li);
-        e.preventDefault();
-        e.stopPropagation();
         if (done) { push(); }
       }
+      e.preventDefault();
+      e.stopPropagation();
       return;
     }
     if (!(e.ctrlKey || e.metaKey)) { return; }
-    var k = (e.key || '').toLowerCase();
+    var k = keyToken(e).toLowerCase();
     var handled = true;
     if (k === 'b') { window.epubraFormat('bold'); }
     else if (k === 'i') { window.epubraFormat('italic'); }

@@ -445,3 +445,64 @@ frag 随即变空 —— `placed.lastChild` 必须**先取引用再插**，插�
 
 > 测试基线由 473 更新为 **478**。
 
+## 九、第七轮（2026-09-14）：快捷键按键标识 #68
+
+**用户反馈**：列表 Tab 多层级仍不生效；现象更像「在编辑器里按 Tab，操作超出了编辑器」。
+
+**排查（第一版做法被证伪）**：往 Scene 上 `Event.fireEvent(scene, new KeyEvent(…))` —— 诊断显示
+`traversalFiresOnSynthetic=false`、`jsSawKey=NONE`，对照组（焦点在 WebView 外的 Button 上按 Tab）
+焦点原地不动 ⇒ **合成 KeyEvent 既进不了 WebKit，也不触发 Scene 焦点遍历**，无法复现真实按键。
+改用 `javafx.scene.robot.Robot` 真按键后一次命中：
+
+```
+realKeyFields = key=[] keyCode=9 which=9 code=[] ctrl=false shift=false alt=false
+domNested=false   focusEscapedEditor=true   focusOwner=Button'外部按钮'
+ctrlB 字段      = key=[] keyCode=17 … | key=[] keyCode=66 …   docBolded=false
+```
+
+**根因**：JavaFX WebView 把真实按键映射成 `KeyboardEvent` 时 **`e.key` 与 `e.code` 恒为空串**，
+只有 `keyCode` / `which` 有值；修饰键标志可靠。因此
+
+- `(e.key || '') === 'Tab'` 恒为假 → Tab 分支从不进入 → 既不缩进、也不 `preventDefault`
+  → 默认行为让焦点被 JavaFX 焦点遍历**带出编辑器**（用户可见症状）；
+- `(e.key || '').toLowerCase()` 恒为 `''` → **Ctrl+B / Ctrl+I / Ctrl+U 全部静默失效**
+  （三者没有 JavaFX 层 accelerator 兜底）。
+
+**为什么 #67 的 5 条守卫全绿却没生效**：那些用例用 `new KeyboardEvent({key:'Tab'})` 手工塞了
+`key`，断言跑的是测试自己构造的事件而非真机形态 —— 「门禁全绿但功能没生效」的又一例。
+
+**修复**：`editor-script.js` 新增 `keyToken(e)`，优先 `e.key`，为空时按 `keyCode` 反查
+（9→`Tab`、13→`Enter`、27→`Escape`、65–90→小写字母、48–57→数字）。`keydown` 两处判据改用它。
+
+**顺带排查的新风险**：修好后 JS 的 Ctrl+Z 分支从「永不执行」变为「真的执行」，而 FXML 菜单上也有
+`Ctrl+Z` accelerator —— 两条都命中就是「一次撤销撤两步」。真机测量 `bridgeUndo=1 /
+acceleratorFires=0`（单路触发，对照组确认 accelerator 可用），安全。
+
+**验证**：
+
+- `VisualEditorKeyMappingTest`（4 条，复刻映射、无 Robot 依赖，断言 `defaultPrevented`）；
+- `VisualEditorTabFocusEscapeTest`（Robot 端到端：真实 Tab 既缩进又不外逃）；
+- `VisualEditorShortcutSinglePathTest`（Robot：Ctrl+Z 单路触发，防双重撤销）；
+- **负向验证**：退回旧判据 → 3 条红（Tab 映射 / Ctrl+B 映射 / Robot 端到端），另 2 条保持绿；
+- `mvn -B clean test` exit 0，**484**（lib 72 + app 412）；冒烟 `javafx:run` exit 124，零异常命中。
+
+> 测试基线由 478 更新为 **484**。
+>
+> **方法论**：控件层事件（JavaFX `KeyEvent`）与页面层事件（DOM `KeyboardEvent`）是两层——
+> 往 Scene fire 合成 KeyEvent 到不了 WebKit；程序化构造的 DOM 事件也照不出 JavaFX 映射。
+> 跨层缺陷只能用真实输入（Robot）复现。Robot 依赖系统级焦点，需先跑对照组确认，否则跳过
+> 以免门禁假红。
+
+**补充 — 产品决策落地（Tab 一律吞掉）**：与用户对齐后确定「编辑器内一律吞掉 Tab」：列表里缩进、
+不在列表里有意不作为但照样拦默认行为；跳出编辑器的键盘通道是 Ctrl+Tab（带修饰键不进该分支）。
+实现上把 `preventDefault()` / `stopPropagation()` 从 `if (li) {…}` 内移到分支末尾统一调用。
+
+| 项 | 结果 |
+| --- | --- |
+| 受影响单类（4 类 20 条） | ✅ 全绿 |
+| 负向验证 | ✅ 把 `preventDefault` 挪回 `if (li)` 内 → 恰好 2 条红（非列表映射 + 非列表 Robot 端到端） |
+| `mvn -B clean test` | ✅ exit 0，**485**（lib 72 + app 413） |
+| 冒烟 `javafx:run` | ✅ exit 124，零异常命中 |
+
+> 测试基线由 484 更新为 **485**。
+
