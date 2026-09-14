@@ -497,6 +497,24 @@ public class MainController {
     }
 
     /**
+     * 标题栏 X / Alt+F4 的关闭请求入口。
+     *
+     * <p>与菜单「退出」（{@link #onExit()} → 确认丢弃 → {@link #dispose()}）的区别：这条路径
+     * 不做「未保存的修改将丢弃」确认，因此必须在关窗前把<b>已排定但还没到点</b>的自动暂存
+     * 补写一次——否则用户改完立刻关窗，最后那几秒编辑会静默丢失，而工作空间里的
+     * {@code .draft} 是文档本体、没有第二份副本可恢复。
+     *
+     * <p>菜单退出路径<b>不</b>调用本方法：那条路径已经问过用户「是否丢弃修改」，用户选
+     * 「继续」就是明确要丢弃，此时再写一次盘会与用户意图相反。
+     */
+    public void onWindowCloseRequest() {
+        if (autosaveIndicator != null) {
+            autosaveIndicator.flushPending();
+        }
+        dispose();
+    }
+
+    /**
      * 主窗口关闭前的清理入口：统一退订本类与子控制器的总线订阅。
      * 与 {@link WelcomePageController#dispose()} 同一约定，接线点建议放在
      * {@code EpubraApp.start()} 里 stage 的关闭请求处。
@@ -1677,7 +1695,11 @@ public class MainController {
     private void markDirty() {
         ctx.setDirty(true);
         // 内容 / 元数据改动都触发自动暂存节流；loading 期间的内容回填不算真实改动，跳过。
-        autosaveIndicator.onDirty();
+        // 判空是给「autosaveIndicator 接好之前的早期改动」留的：搬迁前这里的条件是
+        // autosaveDebounce != null，同样是空安全的，不能因为换了持有者就漏掉这层保护。
+        if (autosaveIndicator != null) {
+            autosaveIndicator.onDirty();
+        }
         status.refresh();
     }
 

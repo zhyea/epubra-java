@@ -35,7 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>#54 用户实测：把文字设为斜体后，重新选中文字 / 光标落在斜体文字上，
  * 工具条「斜体」按钮不点亮。WebView 层（epubraQuery / notifySelection / stub 桥）
- * 已由 {@code VisualEditorFormatTest} 证明正常，本类把<b>真实 Java 桥</b>与
+ * 已由 {@code VisualEditorInlineFormatTest} 证明正常，本类把<b>真实 Java 桥</b>与
  * <b>updateToolbarState → styleClass</b> 这段接进链路，钉死行为：
  *
  * <ol>

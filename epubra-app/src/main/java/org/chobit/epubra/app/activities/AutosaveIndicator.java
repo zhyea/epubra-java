@@ -1,5 +1,6 @@
 package org.chobit.epubra.app.activities;
 
+import javafx.animation.Animation;
 import javafx.animation.PauseTransition;
 import javafx.scene.control.Label;
 import javafx.util.Duration;
@@ -73,6 +74,26 @@ public final class AutosaveIndicator {
         }
         debounce.playFromStart();
         markSaving();
+    }
+
+    /**
+     * 立刻冲刷「已排定但还没到点」的自动暂存；没有待写内容时什么都不做。
+     *
+     * <p>给窗口关闭路径用：节流窗口是 {@code debounceSeconds} 秒（默认 5s），用户在窗口里
+     * 改完就按标题栏 X / Alt+F4 时，最后一次编辑还躺在内存里没落盘。工作空间里的
+     * {@code .draft} 就是文档本体、没有第二份副本，所以关闭前补一次写盘。
+     *
+     * <p>判定依据是节流器的运行状态而不是 {@code ctx.dirty()}：只有「改动之后计时还没到点」
+     * 才有未落盘的内容；已经写过盘的 dirty 标志不需要再写一遍。
+     */
+    public void flushPending() {
+        if (debounce == null || debounce.getStatus() != Animation.Status.RUNNING) {
+            return;
+        }
+        debounce.stop();
+        Autosave.flushNow(ctx);
+        markIdle();
+        refreshLabel();
     }
 
     /** 把"自动暂存 开 / 关 + 间隔 N 秒"展示到状态栏标签上。 */

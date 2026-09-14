@@ -139,8 +139,14 @@ public class NewDraftDialogController {
         if (title.isBlank()) {
             title = name;
         }
+        // 工作空间路径非法时按「无结果」返回（对话框调用方把它当取消处理），
+        // 不让 InvalidPathException 从 setResultConverter 冒到 showAndWait() 调用方。
+        Path workspace = pathFromField(workspaceText);
+        if (workspace == null) {
+            return Optional.empty();
+        }
         return Optional.of(new NewDraftResult(
-                Path.of(workspaceText), name, title, modeChoice.getValue(),
+                workspace, name, title, modeChoice.getValue(),
                 pathFromField(sourceField.getText())));
     }
 
@@ -148,11 +154,17 @@ public class NewDraftDialogController {
         String wsText = workspaceField.getText() == null ? "" : workspaceField.getText().trim();
         String name = nameField.getText() == null ? "" : nameField.getText().trim();
         String reason = null;
+        Path workspace = null;
         if (wsText.isEmpty()) {
             reason = "请选择工作空间目录";
         } else {
-            Path ws = Path.of(wsText);
-            if (!Files.isDirectory(ws)) {
+            // ⚠ 工作空间输入框是可编辑的 TextField，每次击键都会走到这里。Windows 下
+            //   Path.of("*") / Path.of("C:\\a|b") 会抛 InvalidPathException —— 直接调用会让
+            //   校验中断在半路，OK 按钮停在旧状态，用户还看不到任何原因。
+            workspace = pathFromField(wsText);
+            if (workspace == null) {
+                reason = "工作空间路径包含非法字符";
+            } else if (!Files.isDirectory(workspace)) {
                 reason = "工作空间目录不存在";
             }
         }
@@ -166,8 +178,7 @@ public class NewDraftDialogController {
             }
         }
         if (reason == null) {
-            Path ws = Path.of(wsText);
-            Path target = ws.resolve(name + ".draft");
+            Path target = workspace.resolve(name + ".draft");
             if (Files.exists(target)) {
                 reason = "同名图书草稿已存在：" + target;
             }

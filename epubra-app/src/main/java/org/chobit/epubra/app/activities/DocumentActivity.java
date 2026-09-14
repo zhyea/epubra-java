@@ -130,6 +130,10 @@ public class DocumentActivity {
     }
 
     public void onSave() {
+        if (ctx.book() == null) {
+            reportNothingToSave();
+            return;
+        }
         if (ctx.currentFile() == null) {
             onSaveAs();
             return;
@@ -138,11 +142,28 @@ public class DocumentActivity {
     }
 
     public void onSaveAs() {
+        if (ctx.book() == null) {
+            reportNothingToSave();
+            return;
+        }
         File file = dialogs.showSaveDialog(defaultFileName());
         if (file == null) {
             return;
         }
         saveTo(file.toPath());
+    }
+
+    /**
+     * 空书守卫的提示。
+     *
+     * <p>「保存 / 另存为」是文件菜单里的全局项且带 Ctrl+S / Ctrl+Shift+S 加速键，而应用启动后
+     * 刻意不自动建书（欢迎页是初始视图，见 {@code MainController.initialize()}），因此停在书架页
+     * 时 {@code ctx.book()} 就是 null。旧实现在这条路径上直接解引用 {@code ctx.book()} 取书名，
+     * 抛出的 NPE 会从 {@code onAction} 冒到 FX 事件线程——用户看到的是「按了没反应」。
+     * 这里给出明确反馈而不是静默返回。
+     */
+    private void reportNothingToSave() {
+        status.setStatus("当前没有打开的图书，无需保存");
     }
 
     public void onExit(Runnable closeStage) {
@@ -559,9 +580,16 @@ public class DocumentActivity {
         };
     }
 
+    /**
+     * 另存为对话框的默认文件名：书名去掉 {@code \ / : * ? " < > |} 后加 {@value Autosave#DRAFT_SUFFIX}。
+     *
+     * <p>书名可能没有（空书已被 {@link #onSaveAs()} 拦下），这里仍做一次判空：本方法是
+     * 「取默认文件名」的纯查询，不该成为又一个 NPE 出口。
+     */
     private String defaultFileName() {
-        String title = ctx.book().metadata().firstTitle().isBlank() ? "新书籍" : ctx.book().metadata().firstTitle();
-        return title.replaceAll("[\\\\/:*?\"<>|]", "_") + Autosave.DRAFT_SUFFIX;
+        String title = ctx.book() == null ? null : ctx.book().metadata().firstTitle();
+        String stem = title == null || title.isBlank() ? "新书籍" : title;
+        return stem.replaceAll("[\\\\/:*?\"<>|]", "_") + Autosave.DRAFT_SUFFIX;
     }
 
     private static Path draftFile(Path workspace, String name) {
@@ -574,15 +602,24 @@ public class DocumentActivity {
         return workspace.resolve(name + Autosave.DRAFT_SUFFIX);
     }
 
+    /**
+     * 派生工作草稿路径：{@code .draft} 原样返回；{@code .epub} / {@code .txt} 换后缀；
+     * 其它追加 {@value Autosave#DRAFT_SUFFIX}。
+     *
+     * <p><b>后缀比对一律小写化</b>：用户手上的 {@code 三体.EPUB} 若按大小写敏感判断会落到
+     * 最后一个分支，派生出 {@code 三体.EPUB.draft} —— 与 {@link #isTextFile(Path)}、
+     * {@code FileDropActivity.firstBookFile} 的口径不一致，同一本书在工作空间里就会多出一张卡片。
+     */
     private static Path workingDraftTarget(Path file) {
         if (file == null) {
             return null;
         }
         String fileName = file.getFileName() == null ? "" : file.getFileName().toString();
-        if (fileName.endsWith(Autosave.DRAFT_SUFFIX)) {
+        String lower = fileName.toLowerCase();
+        if (lower.endsWith(Autosave.DRAFT_SUFFIX)) {
             return file;
         }
-        String stem = fileName.endsWith(".epub") || fileName.endsWith(".txt")
+        String stem = lower.endsWith(".epub") || lower.endsWith(".txt")
                 ? fileName.substring(0, fileName.lastIndexOf('.'))
                 : Autosave.stripDraftSuffix(fileName);
         Path parent = file.getParent();

@@ -4,6 +4,7 @@ import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.BookFactory;
 import org.chobit.epubra.lib.domain.ChapterTemplates;
 import org.chobit.epubra.lib.domain.Resource;
+import org.chobit.epubra.lib.domain.SpineReference;
 import org.chobit.epubra.lib.domain.TOCReference;
 import org.chobit.epubra.lib.domain.TocEditor;
 import org.chobit.epubra.lib.io.EpubReader;
@@ -142,5 +143,36 @@ class TocEditorTest {
         assertEquals(List.of("第一章", "第二章", "第三章"), spineTitles(reloaded));
 
         assertNotNull(reader.read(target).navResource(), "读回后仍应存在导航文档");
+    }
+
+    @Test
+    void 重建阅读顺序时应保留原有的线性标志() throws IOException {
+        Book book = BookFactory.createEmpty("保留 linear");
+        book.addChapter("第二章", null);
+
+        // 把首个资源标成 linear="no"（封面页/附属页：不进入主阅读流）
+        String nonLinearId = book.spine().get(0).resourceId();
+        List<SpineReference> original = List.copyOf(book.spine().references());
+        book.spine().clear();
+        for (SpineReference reference : original) {
+            book.spine().add(new SpineReference(
+                    reference.resourceId(), !reference.resourceId().equals(nonLinearId)));
+        }
+        assertFalse(book.spine().get(0).linear(), "前置条件：首个 itemref 应为 linear=false");
+
+        // 只挪目录：linear="no" 的条目不能被晋升为线性
+        TocEditor.syncSpineFromToc(book);
+
+        assertFalse(book.spine().get(0).linear(), "同步目录后 linear=false 不应被升为线性");
+        assertTrue(book.spine().get(1).linear(), "普通章节应保持 linear=true");
+
+        // 写盘读回后仍要保留
+        Path target = tempDir.resolve("linear-flag.epub");
+        writer.write(book, target);
+        Book reloaded = reader.read(target);
+
+        assertFalse(reloaded.spine().get(0).linear(), "写回读回后封面仍应是 linear=\"no\"");
+        assertTrue(reloaded.spine().get(1).linear(), "写回读回后普通章节仍应是线性");
+        assertEquals(2, reloaded.spine().size());
     }
 }

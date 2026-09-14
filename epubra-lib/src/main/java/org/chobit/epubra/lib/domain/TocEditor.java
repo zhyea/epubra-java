@@ -2,8 +2,10 @@ package org.chobit.epubra.lib.domain;
 
 import org.chobit.epubra.lib.util.Hrefs;
 
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -153,16 +155,27 @@ public final class TocEditor {
     /**
      * 按目录的深度优先顺序重建阅读顺序。
      * spine 中存在但目录未覆盖的资源会保留在末尾，避免章节丢失。
+     *
+     * <h2>⚠ 必须保留原有的 {@code linear} 标志</h2>
+     * <p>{@link Spine#addResourceId(String)} 恒建 {@code linear=true} 的引用，直接用它重建会把
+     * 封面页、附属页这类 {@code linear="no"}（不进入主阅读流）的条目<b>永久升为线性</b>——
+     * 用户只是挪了一下目录，写盘后阅读器就把这些页纳入线性阅读了。所以重建前先把每个资源 id
+     * 原有的 linear 记下来，新出现的（目录里新增、spine 里没有的）才用默认 {@code true}。
      */
     public static void syncSpineFromToc(Book book) {
         Set<String> ordered = new LinkedHashSet<>();
         collectResourceIds(book, book.toc().roots(), ordered);
+        Map<String, Boolean> linearById = new HashMap<>();
         for (SpineReference reference : book.spine().references()) {
             ordered.add(reference.resourceId());
+            linearById.putIfAbsent(reference.resourceId(), reference.linear());
         }
         String tocId = book.spine().tocResourceId();
         book.spine().clear();
-        ordered.forEach(book.spine()::addResourceId);
+        for (String resourceId : ordered) {
+            book.spine().add(new SpineReference(
+                    resourceId, linearById.getOrDefault(resourceId, Boolean.TRUE)));
+        }
         book.spine().setTocResourceId(tocId);
     }
 

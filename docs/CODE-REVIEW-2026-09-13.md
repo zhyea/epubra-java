@@ -6,6 +6,33 @@
 - 当前基线：`mvn -B clean test` = 439 全绿（lib 67 + app 372）
 - 说明：本报告只做**分析与方案**，未改动任何代码
 
+> **执行状态（2026-09-13 晚补记，#63）**
+>
+> | 项 | 状态 | 结果 |
+> |---|---|---|
+> | B1~B8 | ✅ 全部修复 | 各带守卫测试（新增 8 条）；门禁 448 全绿 + 冒烟零异常 |
+> | 拆分批次 A | ✅ 完成 | `AutosaveIndicator` / `DraftRecoveryActivity` / `FileDropActivity`；MainController **1931 → 1684** |
+> | 拆分批次 D | ✅ 完成 | D1 脚本外置（PreviewHtml **1101 → 355**）；D2 FormatTest 拆 5 类 + 脚手架；门禁 **449** 全绿 |
+> | 拆分批次 B/C | ⏸ 待拍板 | 实测 B≈230 行 / C≈60 行（报告估 400/95），但耦合十余个字段；**收益风险比已变化，先对齐再动手** |
+>
+> 当前基线更新为 **449**（lib 68 + app 381）。
+
+> **第二轮扫描（2026-09-13 夜，#64）** —— 复查后再发现 5 处真实缺陷，已全部修复并补齐守卫
+>
+> | 编号 | 位置 | 缺陷 | 修复 |
+> |---|---|---|---|
+> | #1 | `DocumentActivity.onSave/onSaveAs` | 停在欢迎页（`ctx.book()==null`）按 Ctrl+S → NPE 冒到 FX 事件线程，表现为「按了没反应」 | 入口判空 → `reportNothingToSave()` 明确提示；`defaultFileName()` 同步判空 |
+> | #2 | `EpubraApp` / `MainController` | 关窗只调 `dispose()`，节流窗口内（默认 5s）最后一次编辑**直接丢失** | 新增 `onWindowCloseRequest()` → `AutosaveIndicator.flushPending()`（节流 RUNNING 时补写盘）；`markDirty()` 判空 |
+> | #3 | `TocEditor.syncSpineFromToc` | 用 `addResourceId()` 重建 spine 恒置 `linear=true`，封面等 `linear="no"` 条目被**永久升为线性** | 重建前记录每个 id 的原 `linear`，按原值重建 |
+> | #5 | `NewDraftDialogController` | 工作空间路径含 `\| < > : " ? *` → `Path.of` 抛 `InvalidPathException`，从 `setResultConverter` 冒到 `showAndWait()` | 统一走 `pathFromField()`（try/catch），非法输入按「给原因 / 当取消」处理 |
+> | #8 | `DocumentActivity.workingDraftTarget` | 后缀比对大小写敏感，`三体.EPUB` 派生出 `三体.EPUB.draft` → 工作空间里同一本书**两张卡片** | 比对前 `toLowerCase()`，与 `isTextFile` / `FileDropActivity` 口径对齐 |
+>
+> 守卫测试：`onSaveAndSaveAsWithNoBookReportInsteadOfThrowing`、`openFileTreatsUpperCaseEpubSuffixAsDraftSource`、`AutosaveIndicatorTest`(2)、`重建阅读顺序时应保留原有的线性标志`、`NewDraftDialogControllerTest`(2) —— 共 7 条。
+>
+> 本轮门禁：**456** 全绿（lib 69 + app 387）+ 冒烟零异常（`javafx:run` exit 143 = `timeout` 杀进程，属预期）。
+>
+> 判定为**非缺陷**：#4（locale 相关小写化，理论问题）、#6（FX 线程自动暂存 = 既有架构选择）、#7 `ValidationController.selectRange` 选区过伸、#9 `Resources` 同 href/id 静默覆盖、#10 `WelcomePageController` FX 线程图片解码、#11 `MetadataViewController.loadIntoFields` 缺判空 —— 均为轻微健壮性项，未纳入本轮。
+
 ---
 
 ## 一、规模盘点（Top 15）

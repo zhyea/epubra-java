@@ -309,4 +309,52 @@ class DocumentActivityTest {
 
         assertNull(ctx.book());
     }
+
+    /**
+     * 空书守卫：停在欢迎页时 {@code ctx.book()} 为 null，而「保存 / 另存为」是文件菜单里
+     * 带 Ctrl+S / Ctrl+Shift+S 的全局项。旧实现在这条路径上直接解引用取书名 →
+     * NPE 从 {@code onAction} 冒到 FX 事件线程，用户看到的是「按了没反应」。
+     */
+    @Test
+    void onSaveAndSaveAsWithNoBookReportInsteadOfThrowing() {
+        BookContext ctx = new BookContext();
+        AtomicReference<String> status = new AtomicReference<>();
+        AtomicInteger saveEvents = new AtomicInteger();
+        ctx.bus().subscribe(BookSavedEvent.class, e -> saveEvents.incrementAndGet());
+        DocumentActivity doc = new DocumentActivity(ctx, status::set, () -> true,
+                noopDialogs(), AsyncTasks.NOOP_PROGRESS, s -> {});
+
+        assertNull(ctx.book(), "前置条件：初始无书");
+
+        doc.onSave();
+        assertEquals("当前没有打开的图书，无需保存", status.get());
+
+        doc.onSaveAs();
+        assertEquals("当前没有打开的图书，无需保存", status.get());
+
+        assertEquals(0, saveEvents.get(), "无书时不应广播「已保存」事件");
+        assertNull(ctx.currentFile());
+    }
+
+    /**
+     * 后缀比对必须大小写不敏感：Windows 上 {@code 三体.EPUB} 是很常见的写法。旧实现按
+     * 大小写敏感判断会落到「其它后缀」分支，派生出 {@code 三体.EPUB.draft}——与
+     * {@code isTextFile} / {@code FileDropActivity} 的口径不一致，同一本书在工作空间里
+     * 就会多出一张卡片。
+     */
+    @Test
+    void openFileTreatsUpperCaseEpubSuffixAsDraftSource() throws IOException {
+        Path source = workspace.resolve("三体.EPUB");
+        new EpubWriter().write(BookFactory.createEmpty("三体"), source);
+
+        BookContext ctx = new BookContext();
+        DocumentActivity doc = new DocumentActivity(ctx, s -> {}, () -> true,
+                noopDialogs(), AsyncTasks.NOOP_PROGRESS, s -> {});
+
+        doc.openFile(source);
+
+        assertEquals(workspace.resolve("三体.draft"), ctx.currentFile());
+        assertTrue(Files.exists(workspace.resolve("三体.draft")));
+        assertEquals("三体", ctx.book().metadata().firstTitle());
+    }
 }

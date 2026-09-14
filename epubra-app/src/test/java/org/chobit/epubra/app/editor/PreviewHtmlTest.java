@@ -262,4 +262,31 @@ class PreviewHtmlTest {
         assertTrue(doc.contains("href=\"file:///tmp/a&amp;b/OEBPS/\""), doc);
         assertFalse(doc.contains("a&b"), "裸 & 会破坏 XML 解析：" + doc);
     }
+
+    /**
+     * D1 守卫：编辑脚本与纸面配色已外置为类路径资源
+     * （{@code editor-script.js} / {@code editor-paper.css}），
+     * 占位符仍由 {@code INJECTED_*_ID} 代入。
+     *
+     * <p>这条守的是「资源真的被读进来了」——资源路径写错、文件漏提交、被截断，
+     * 都会让可视化编辑器整条链路失灵，而只断言 {@code <script} 存在是看不出来的。
+     */
+    @Test
+    @DisplayName("编辑脚本与纸面配色来自外置资源，id 占位符由常量代入")
+    void editorAssetsComeFromClasspathResources() {
+        String doc = PreviewHtml.editableDocument(FULL_DOC, Theme.LIGHT);
+
+        // 脚本本体（外置文件）确实在文档里
+        assertTrue(doc.contains("var INJECTED_IDS = ['" + PreviewHtml.INJECTED_STYLE_ID + "', '"
+                        + PreviewHtml.INJECTED_BASE_ID + "', '" + PreviewHtml.INJECTED_SCRIPT_ID + "'];"),
+                "三个 id 占位符必须由 INJECTED_*_ID 常量代入：" + doc.substring(0, 200));
+        for (String marker : new String[]{"tidyHeadWhitespace", "rescueStrayNodes",
+                "pruneEmptyInline", "pruneEmptyLists", "epubraSerialize", "safeUrl"}) {
+            assertTrue(doc.contains(marker), "外置脚本应包含 " + marker + "，疑似资源读空或截断");
+        }
+        // 纸面配色（外置 css）确实生效
+        assertTrue(doc.contains("html, body { background: #faf9f5 !important;"),
+                "editor-paper.css 未被读入");
+        assertTrue(doc.contains("</style>"), doc.substring(Math.max(0, doc.length() - 120)));
+    }
 }
