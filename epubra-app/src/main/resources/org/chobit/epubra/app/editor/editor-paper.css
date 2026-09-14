@@ -4,3 +4,14 @@
     hr, table, th, td, pre, img { border-color: #dedbd2 !important; }
     pre, code { background: #f1efe8 !important; color: #2b2b28 !important; }
     ::selection { background: #cfe0f5 !important; color: #2b2b28 !important; }
+    /* 滚动条：与目录侧栏同样的 7px 细条口径（WebView 的滚动条引擎自己画，
+       JavaFX 样式表够不到，只能在这里用 ::-webkit-scrollbar 覆盖）。
+       滑块固定取浅色中灰而不跟随主题——画布永远是浅色纸面（见 #47 口径），
+       深色主题的深滑块压在这张纸上会显得比纸本身还重。
+       轨道必须显式刷成纸面色：滚动条在页面视口之外，html/body 的背景铺不过去，
+       写 transparent 会露出 WebView 自带的白色底，右缘多一条 7px 白边。 */
+    ::-webkit-scrollbar { width: 7px; height: 7px; }
+    ::-webkit-scrollbar-track { background: #faf9f5; }
+    ::-webkit-scrollbar-thumb { background: #c8c8c8; border: 1px solid transparent; background-clip: content-box; border-radius: 4px; }
+    ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+    ::-webkit-scrollbar-corner { background: #faf9f5; }

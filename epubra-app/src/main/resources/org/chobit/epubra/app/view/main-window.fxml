@@ -2,9 +2,12 @@
 
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ColorPicker?>
+<?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.Menu?>
 <?import javafx.scene.control.MenuBar?>
+<?import javafx.scene.control.MenuButton?>
 <?import javafx.scene.control.MenuItem?>
 <?import javafx.scene.control.ProgressBar?>
 <?import javafx.scene.control.RadioMenuItem?>
@@ -271,6 +274,42 @@
                                                         <Button id="image" text="图片"
                                                                 styleClass="flat-button, toolbar-action"
                                                                 onAction="#onInsertImageFromDisk"/>
+
+                                                        <!-- 字体 / 字号 / 文字颜色：XHTML 里没有对应标签，
+                                                             只能落到受控内联 style 上（属性白名单在
+                                                             editor-script.js，见 EditorStyleControls 类注释）。
+                                                             下拉项与命令装配在 Java 侧——FXML 的 onAction
+                                                             只能绑无参方法，而字体/颜色要带值。
+
+                                                             字体下拉列本机全部字体族（JavaFX Font.getFamilies()），
+                                                             可输入筛选，也能直接手输列表外的族名。
+
+                                                             字号不做下拉框：放大 / 缩小两个按钮按固定档位表跳档
+                                                             （10…72px），结果是整齐值。 -->
+                                                        <ComboBox fx:id="fontCombo" id="font"/>
+                                                        <Button id="size-up" text="放大字号"
+                                                                styleClass="flat-button, toolbar-action"
+                                                                onAction="#onSizeUp"/>
+                                                        <Button id="size-down" text="缩小字号"
+                                                                styleClass="flat-button, toolbar-action"
+                                                                onAction="#onSizeDown"/>
+                                                        <!-- 颜色用 ColorPicker：自带标准色板与「Custom Color…」，
+                                                             取色器里把不透明度拖到 0 即清除该声明。 -->
+                                                        <ColorPicker fx:id="colorPicker" id="color"
+                                                                     styleClass="toolbar-color"/>
+                                                        <!-- 对齐：MenuButton 而非普通按钮——三个方向各是一条命令 -->
+                                                        <MenuButton fx:id="alignButton" id="align"/>
+
+                                                        <!-- 撤销 / 重做在工具条上是「动作」而非「生效格式」：
+                                                             没有当前状态可点亮，标记 toolbar-action 让
+                                                             updateToolbarState 跳过它们。与菜单「编辑 →
+                                                             撤销/重做」共用同一本快照账（BookHistory）。 -->
+                                                        <Button id="undo" text="撤销"
+                                                                styleClass="flat-button, toolbar-action"
+                                                                onAction="#onUndo"/>
+                                                        <Button id="redo" text="重做"
+                                                                styleClass="flat-button, toolbar-action"
+                                                                onAction="#onRedo"/>
                                                     </FlowPane>
                                                     <WebView fx:id="visualEditorView" VBox.vgrow="ALWAYS"/>
                                                 </VBox>

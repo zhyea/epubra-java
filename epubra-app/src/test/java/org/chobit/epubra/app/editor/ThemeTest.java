@@ -108,6 +108,23 @@ class ThemeTest {
     }
 
     @Test
+    @DisplayName("预览样式带 WebView 滚动条规则：7px 细条 + 按主题取滑块色")
+    void previewStyleNarrowsWebViewScrollbar() {
+        for (Theme theme : Theme.values()) {
+            String css = theme.previewStyleCss();
+            assertTrue(css.contains("::-webkit-scrollbar"), "预览样式必须覆盖滚动条：" + theme);
+            assertTrue(css.contains("width: 7px"), "滚动条须收窄到目录侧栏口径（7px）：" + theme);
+            assertTrue(css.contains("::-webkit-scrollbar-button"),
+                    "引擎默认的端部箭头按钮必须关掉，否则细轨道会被撑回去：" + theme);
+            assertTrue(css.contains(theme.previewScrollThumb()),
+                    "滑块色应取自主题：" + theme);
+        }
+        // 滑块色要跟着主题变，否则深色主题下预览区的滚动条会是一道浅色亮条
+        assertNotEquals(Theme.LIGHT.previewScrollThumb(), Theme.DARK.previewScrollThumb());
+        assertNotEquals(Theme.LIGHT.previewScrollThumb(), Theme.SEPIA.previewScrollThumb());
+    }
+
+    @Test
     @DisplayName("Scene 尚未创建或主题为 null 时应用主题不抛异常")
     void applyIsDefensive() {
         assertDoesNotThrow(() -> ThemeManager.apply(null, Theme.DARK));

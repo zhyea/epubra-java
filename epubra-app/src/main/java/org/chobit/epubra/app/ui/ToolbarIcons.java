@@ -3,6 +3,7 @@ package org.chobit.epubra.app.ui;
 import javafx.scene.Group;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
+import javafx.scene.control.MenuButton;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.Pane;
 import javafx.scene.shape.SVGPath;
@@ -32,7 +33,7 @@ public final class ToolbarIcons {
     private static final double ICON_SCALE = 0.72;
 
     /** Tooltip 显示延迟：默认 1s 对无文字的图标按钮太迟钝，压到 200ms。 */
-    private static final Duration TOOLTIP_SHOW_DELAY = Duration.millis(100);
+    private static final Duration TOOLTIP_SHOW_DELAY = Duration.millis(200);
 
     /** 按钮 id → SVG 路径（24×24，描边风格）。id 与 FXML 按钮及 epubraQuery 格式名一致。 */
     private static final Map<String, String> PATHS = Map.ofEntries(
@@ -53,7 +54,21 @@ public final class ToolbarIcons {
             Map.entry("code", "M8 6l-6 6 6 6 M16 6l6 6-6 6"),
             Map.entry("link", "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71 "
                     + "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"),
-            Map.entry("image", "M3 5h18v14H3z M7.5 12a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3 M21 15l-5-5-11 9"));
+            Map.entry("image", "M3 5h18v14H3z M7.5 12a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3 M21 15l-5-5-11 9"),
+            // 字号放大 / 缩小：一个 A 加一支上下箭头（不画「A+/A-」，加号在 17px 下会和 A 糊在一起）
+            Map.entry("size-up", "M3 18.5 L7.5 7.5 L12 18.5 M4.7 15 h5.6 M17.5 18 V6.5 M14.2 9.8 L17.5 6.5 L20.8 9.8"),
+            Map.entry("size-down", "M3 18.5 L7.5 7.5 L12 18.5 M4.7 15 h5.6 M17.5 6.5 V18 M14.2 14.7 L17.5 18 L20.8 14.7"),
+            Map.entry("undo", "M9 14 4 9l5-5 M4 9h10.5a5.5 5.5 0 0 1 0 11H11"),
+            Map.entry("redo", "M15 14l5-5-5-5 M20 9H9.5a5.5 5.5 0 0 0 0 11H13"),
+            // 对齐：工具条按当前生效值换用其中一张（见 EditorStyleControls#syncAlignIcon）
+            Map.entry("align", "M4 6h16 M4 12h10 M4 18h13"),
+            Map.entry("align-center", "M4 6h16 M7 12h10 M5.5 18h13"),
+            Map.entry("align-right", "M4 6h16 M10 12h10 M7 18h13"));
+
+    /** id → SVG 路径；不在 {@link #PATHS} 里的 id 返回 null。 */
+    static String path(String id) {
+        return PATHS.get(id);
+    }
 
     /** 按钮 id → 悬停提示（沿用 FXML 里的原中文文案）。 */
     private static final Map<String, String> LABELS = Map.ofEntries(
@@ -69,14 +84,44 @@ public final class ToolbarIcons {
             Map.entry("strike", "删除线"),
             Map.entry("code", "行内代码"),
             Map.entry("link", "链接"),
-            Map.entry("image", "插入图片（从本机选择）"));
+            Map.entry("image", "插入图片（从本机选择）"),
+            Map.entry("size-up", "放大字号"),
+            Map.entry("size-down", "缩小字号"),
+            Map.entry("undo", "撤销"),
+            Map.entry("redo", "重做"),
+            Map.entry("align", "对齐"),
+            Map.entry("font", "字体（可输入筛选）"),
+            // 颜色控件是 ColorPicker（自带色板与「Custom Color…」），不需要图标，
+            // 但提示文案仍从这里取，保证「提示只有一个来源」。
+            Map.entry("color", "文字颜色（不透明度拖到 0 = 清除）"));
 
     private ToolbarIcons() {
     }
 
     /**
+     * 按 id 造一个工具条提示（统一 200ms 延迟）。下拉框 / 取色器这类非图标控件也用它，
+     * 保证「提示文案 + 延迟」只有一个来源。
+     *
+     * @return 未知 id 也会给一个提示（文案取 id 本身），不会是 null
+     */
+    public static Tooltip tooltip(String id) {
+        return tooltipText(LABELS.getOrDefault(id, id));
+    }
+
+    /** 任意文案的工具条提示，延迟与 {@link #tooltip(String)} 一致（色板上的色块用它）。 */
+    public static Tooltip tooltipText(String text) {
+        Tooltip tooltip = new Tooltip(text);
+        tooltip.setShowDelay(TOOLTIP_SHOW_DELAY);
+        return tooltip;
+    }
+
+    /**
      * 把工具条里的文字按钮换成图标按钮：清空文字、挂图形与 Tooltip。
      * 已处理过（无文字且有图形）的按钮直接跳过，重复调用无副作用。
+     *
+     * <p>只认 {@link #PATHS} 里登记过的 id，<b>未登记的控件原样跳过</b>——
+     * 所以新增按钮必须同时补 PATHS / LABELS，否则它既没图标也没提示
+     * （接线守卫 {@code VisualEditorTabUiTest} 会拦住这种漏配）。
      */
     public static void install(Pane toolbar) {
         if (toolbar == null) {
@@ -92,12 +137,36 @@ public final class ToolbarIcons {
             }
             button.setText(null);
             button.setGraphic(graphic(path));
-            String label = LABELS.getOrDefault(button.getId(), button.getId());
-            Tooltip tooltip = new Tooltip(label);
-            tooltip.setShowDelay(TOOLTIP_SHOW_DELAY);
-            button.setTooltip(tooltip);
-            button.setAccessibleText(label);
+            button.setTooltip(tooltip(button.getId()));
+            button.setAccessibleText(LABELS.getOrDefault(button.getId(), button.getId()));
         }
+    }
+
+    /**
+     * 给图标化的 {@link MenuButton}（「对齐」）挂图形、提示与无障碍文案；文字清空，
+     * 弹出菜单里的条目仍保留文字。
+     *
+     * <p>单独一个入口而不是并进 {@link #install(Pane)}：对齐按钮的图形会随当前生效值
+     * 变化（左/中/右三张），生命周期由 {@code EditorStyleControls} 管。
+     */
+    public static void installMenuButton(MenuButton button) {
+        if (button == null || button.getId() == null) {
+            return;
+        }
+        String path = PATHS.get(button.getId());
+        if (path == null) {
+            return;
+        }
+        button.setText(null);
+        button.setGraphic(graphic(path));
+        button.setTooltip(tooltip(button.getId()));
+        button.setAccessibleText(LABELS.getOrDefault(button.getId(), button.getId()));
+    }
+
+    /** 按 id 取图标图形；id 未登记返回 null（调用方据此决定换不换图形）。 */
+    public static Node graphicFor(String id) {
+        String path = PATHS.get(id);
+        return path == null ? null : graphic(path);
     }
 
     static Node graphic(String svgPath) {

@@ -6,6 +6,10 @@ import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.ColorPicker;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.MenuButton;
+import javafx.scene.control.MenuItem;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.layout.FlowPane;
@@ -14,6 +18,7 @@ import javafx.stage.Stage;
 import org.chobit.epubra.app.context.BookContext;
 import org.chobit.epubra.app.controller.view.ResourceController;
 import org.chobit.epubra.app.controller.view.TocController;
+import org.chobit.epubra.app.editor.EditorStyleControls;
 import org.chobit.epubra.app.ui.model.ChapterNode;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.BookFactory;
@@ -28,6 +33,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -35,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -123,8 +130,9 @@ class VisualEditorTabUiTest {
             TabPane tabs = field(mainController, "editorTabs");
             FlowPane toolbar = field(mainController, "editorToolbar");
             assertNotNull(toolbar, "editorToolbar 字段应被 FXML 注入");
-            assertEquals(13, toolbar.getChildren().size(),
-                    "工具条应有 段落/标题/引用/列表/编号/分隔线/加粗/斜体/下划线/删除线/行内代码/链接/图片 十三个按钮");
+            assertEquals(20, toolbar.getChildren().size(),
+                    "工具条应有 十二个格式按钮 + 图片/撤销/重做 + 放大字号/缩小字号 + 字体/文字颜色/对齐"
+                            + " 共二十个控件");
 
             Node tabContent = tabs.getTabs().get(0).getContent();
             assertSame(tabContent, toolbar.getParent(),
@@ -144,8 +152,11 @@ class VisualEditorTabUiTest {
             FlowPane toolbar = field(mainController, "editorToolbar");
             java.util.List<String> ids = new java.util.ArrayList<>();
             for (Node child : toolbar.getChildren()) {
-                assertTrue(child instanceof Button, "工具条里应只有按钮，实际：" + child);
-                Button button = (Button) child;
+                // 字体（ComboBox）/ 颜色（ColorPicker）/ 对齐（MenuButton）不是 Button，
+                // 在这里跳过；它们的契约见下一个测试。
+                if (!(child instanceof Button button)) {
+                    continue;
+                }
                 assertNotNull(button.getId(), "按钮缺少 id，工具条状态反射就找不到它");
                 ids.add(button.getId());
                 // 文字已换成图标（ToolbarIcons.install）：断言图形存在 + 中文提示可悬停
@@ -160,20 +171,101 @@ class VisualEditorTabUiTest {
                         "Tooltip 显示延迟必须压到 300ms 内，实际："
                                 + button.getTooltip().getShowDelay() + "（" + button.getId() + "）");
             }
+            // 「撤销 / 重做」是动作按钮（无「当前生效格式」可言），排在新增批次的最后；
+            // 顺序 = main-window.fxml 的声明顺序。
             assertEquals(java.util.List.of("paragraph", "heading", "quote", "list", "ol", "rule",
-                            "bold", "italic", "underline", "strike", "code", "link", "image"),
-                    ids, "按钮 id（= 格式名）与顺序必须与 window.epubraQuery() 的返回值一致");
+                            "bold", "italic", "underline", "strike", "code", "link",
+                            "image", "size-up", "size-down", "undo", "redo"),
+                    ids, "格式按钮的 id（= 格式名）与顺序必须与 window.epubraQuery() 的返回值一致");
 
-            // 「图片」是动作按钮（弹文件选择器），不是格式状态：必须带 toolbar-action 标记，
-            // 否则 updateToolbarState 会把它当格式按钮参与点亮——而 epubraQuery 永远不会
-            // 返回它的 id，它就只是一个永不点亮的摆设（P3 修复的回归守卫）。
+            // 「图片」「撤销」「重做」「放大/缩小字号」是动作按钮（弹文件选择器 / 走快照栈 /
+            // 相对跳档），不是格式状态：必须带 toolbar-action 标记，否则 updateToolbarState
+            // 会把它们当格式按钮参与点亮——而 epubraQuery 永远不会返回它们的 id，
+            // 它们就只是永不点亮的摆设（P3 修复的回归守卫）。
+            java.util.Set<String> actions = java.util.Set.of(
+                    "image", "size-up", "size-down", "undo", "redo");
             for (Node child : toolbar.getChildren()) {
-                Button button = (Button) child;
+                if (!(child instanceof Button button)) {
+                    continue;
+                }
                 boolean isAction = button.getStyleClass().contains("toolbar-action");
-                assertEquals("image".equals(button.getId()), isAction,
-                        "只有「图片」应是动作按钮，实际：" + button.getId()
+                assertEquals(actions.contains(button.getId()), isAction,
+                        "只有「图片 / 撤销 / 重做」应是动作按钮，实际：" + button.getId()
                                 + " styleClass=" + button.getStyleClass());
             }
+        });
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("样式控件组：字体下拉跟随本机全部字体族，颜色用取色器，对齐三向各一条命令")
+    void styleControlsCarryOptionsAndCommands() throws Exception {
+        runOnFx(() -> {
+            assertNotNull(field(mainController, "editorStyleControls"),
+                    "样式控件组必须被构造——它是 onStyleChanged 的回显通道，漏了就到不了界面");
+
+            // ---- 字体：可编辑下拉；列表 = 默认档 + 常用档置顶 + 本机全量字体族
+            ComboBox<String> font = field(mainController, "fontCombo");
+            assertNotNull(font, "字体下拉应被 FXML 注入");
+            assertTrue(font.isEditable(),
+                    "字体下拉必须可编辑：换台机器打开时，装不到的族名要能原样显示，也能直接手输");
+            assertEquals(EditorStyleControls.FONT_DEFAULT, font.getValue(), "初始应停在默认档");
+            assertFalse(font.getItems().isEmpty(), "下拉不能是空的");
+            assertNotNull(font.getTooltip(), "下拉框要有 Tooltip（无文字图标控件的可发现性来源）");
+            assertTrue(font.getTooltip().getShowDelay().toMillis() <= 300,
+                    "Tooltip 显示延迟口径与图标按钮一致");
+            assertFalse(font.isFocusTraversable(),
+                    "Tab 键要留给编辑器内的列表缩进（JS 的 Tab 处理），不能被工具条控件截走");
+
+            // 「选择计算机上所有的字体」是本轮的核心诉求：列表必须真的跟随 Font.getFamilies()
+            assertTrue(EditorStyleControls.systemFontCount() > 0,
+                    "本机字体枚举不该为空，否则「全量跟随」无从谈起");
+            assertTrue(font.getItems().containsAll(EditorStyleControls.systemFonts()),
+                    "字体下拉应列全本机字体族，实际 " + font.getItems().size()
+                            + " 项 / 本机 " + EditorStyleControls.systemFontCount() + " 项");
+            assertEquals(EditorStyleControls.FONT_DEFAULT, font.getItems().get(0),
+                    "「默认」档必须排在最前（常用档置顶＋全量跟随）");
+            // 输入筛选：命中项保留、条数明显收窄
+            java.util.List<String> filtered = EditorStyleControls.fontItems("yahei");
+            assertTrue(filtered.contains("Microsoft YaHei"), "输入筛选应能命中常用档：" + filtered);
+            assertTrue(filtered.size() < EditorStyleControls.systemFontCount(),
+                    "筛选后条数应少于全量，实际 " + filtered.size());
+            assertEquals(EditorStyleControls.FONT_DEFAULT, EditorStyleControls.fontItems("").get(0),
+                    "空输入 = 全量列表，且仍以「默认」档打头");
+
+            // ---- 颜色：取色器（自带标准色板与「自定义颜色…」）；null = 正文没有 color 声明
+            ColorPicker color = field(mainController, "colorPicker");
+            assertNotNull(color, "颜色控件应被 FXML 注入");
+            assertNull(color.getValue(),
+                    "初始应为「无颜色」（null）——写进正文的是空串，而不是白色声明");
+            assertNotNull(color.getTooltip(), "取色器要有 Tooltip（不透明度拖到 0 = 清除）");
+            assertTrue(color.getTooltip().getShowDelay().toMillis() <= 300,
+                    "Tooltip 显示延迟口径与图标按钮一致");
+            assertFalse(color.isFocusTraversable(), "Tab 键留给编辑器内的列表缩进");
+
+            // ---- 字号：没有下拉框了，只有「放大 / 缩小」两个档位按钮
+            assertThrows(NoSuchFieldException.class, () -> field(mainController, "sizeCombo"),
+                    "字号下拉已移除（#72 二轮：改成放大/缩小两个按档位跳档的按钮）");
+            FlowPane toolbar = field(mainController, "editorToolbar");
+            Button sizeUp = buttonById(toolbar, "size-up");
+            Button sizeDown = buttonById(toolbar, "size-down");
+            assertNotNull(sizeUp, "工具条应有「放大字号」按钮");
+            assertNotNull(sizeDown, "工具条应有「缩小字号」按钮");
+            assertTrue(org.chobit.epubra.app.ui.ToolbarIcons.covers("size-up")
+                            && org.chobit.epubra.app.ui.ToolbarIcons.covers("size-down"),
+                    "两个档位按钮都要在 ToolbarIcons 里登记图标与提示文案");
+
+            MenuButton align = field(mainController, "alignButton");
+            assertNotNull(align, "对齐控件应被 FXML 注入");
+            assertEquals(java.util.List.of("左对齐", "居中", "右对齐"),
+                    align.getItems().stream().map(MenuItem::getText).collect(Collectors.toList()),
+                    "对齐应有且只有左 / 中 / 右三个方向");
+            for (MenuItem item : align.getItems()) {
+                assertNotNull(item.getGraphic(), "对齐项要带方向图标：" + item.getText());
+                assertNotNull(item.getOnAction(), "对齐项必须接了命令：" + item.getText());
+            }
+            assertNull(align.getText(), "对齐控件应已是图标（文字清空）");
+            assertNotNull(align.getGraphic(), "对齐控件缺少图标图形");
         });
     }
 
@@ -238,6 +330,21 @@ class VisualEditorTabUiTest {
             }
         }
         return false;
+    }
+
+    /**
+     * 按 id 在工具条里找按钮。
+     *
+     * <p>FXML 里只写了 {@code id="size-up"}（{@code Node.getId()}），没写 {@code fx:id}，
+     * 所以它不会被注入成控制器字段，只能这样按 id 捞。
+     */
+    private static Button buttonById(FlowPane toolbar, String id) {
+        for (Node child : toolbar.getChildren()) {
+            if (child instanceof Button button && id.equals(button.getId())) {
+                return button;
+            }
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")

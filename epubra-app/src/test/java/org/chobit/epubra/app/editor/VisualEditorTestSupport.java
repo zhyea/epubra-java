@@ -31,17 +31,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>刻意不用 {@code document.execCommand}，因此也不依赖页面获得焦点：选区由脚本手动建立
  * （{@code getSelection().addRange()}）。<b>手动选区 + 合成事件</b>是这套测试能在无头环境跑的前提。
  *
- * <p>原先 39 条用例挤在一个 1090 行的类里，按主题拆成 5 个测试类后，WebView 启动、文档加载、
+ * <p>原先 39 条用例挤在一个 1090 行的类里，按主题拆成 6 个测试类后，WebView 启动、文档加载、
  * 选区清理与全部 DOM 断言助手集中到这里，子类只写用例。
  *
  * <h2>⚠ 跨 class 共享 JavaFX Platform</h2>
- * <p>{@code Platform.startup} 全 JVM 只允许一次，5 个子类各自继承 {@link #bootFx()}，
- * 后 4 次会抛 {@code IllegalStateException}——这里吞掉异常并 {@code countDown} 放行；
+ * <p>{@code Platform.startup} 全 JVM 只允许一次，6 个子类各自继承 {@link #bootFx()}，
+ * 后 5 次会抛 {@code IllegalStateException}——这里吞掉异常并 {@code countDown} 放行；
  * {@code setImplicitExit(false)} 保证最后一个 {@code Stage} 关掉也不会把 toolkit 关掉。
  * <b>子类别写 {@code @AfterAll} 调 {@code Platform.exit()}</b>，否则后面的类全起不来。
  *
  * <p>WebView / Stage 只建一次（静态字段持有）：{@code bootFx} 每个子类都会跑一遍，
- * 不判空就会为 5 个类各建一套窗口。
+ * 不判空就会为 6 个类各建一套窗口。
  */
 abstract class VisualEditorTestSupport {
 

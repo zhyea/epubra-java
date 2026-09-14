@@ -33,7 +33,8 @@ import java.util.function.Supplier;
  * <p>副作用一律经构造期注入的钩子走出，本类不持有 {@code undoActivity} / 状态栏：
  * {@code undoStep}（一次输入编辑步，与源码区共用同一本账）、{@code undoAction} /
  * {@code redoAction}（走应用级快照）、{@code markDirty}、{@code statusRefresh}、
- * {@code toolbarState}。
+ * {@code toolbarState}（有无状态的格式按钮点亮）、{@code styleState}（字体 / 字号 /
+ * 颜色 / 对齐四个带值控件的回显）。
  */
 public final class VisualEditorSession {
 
@@ -58,6 +59,7 @@ public final class VisualEditorSession {
     private final Runnable markDirty;
     private final Runnable statusRefresh;
     private final Consumer<String> toolbarState;
+    private final Consumer<String> styleState;
 
     /** 编辑视图当前内容是否<b>对应当前章节</b>；口径见类注释第 1 条。 */
     private boolean loaded;
@@ -68,7 +70,8 @@ public final class VisualEditorSession {
                                Supplier<Theme> theme,
                                Runnable undoStep, Runnable undoAction, Runnable redoAction,
                                Runnable markDirty, Runnable statusRefresh,
-                               Consumer<String> toolbarState) {
+                               Consumer<String> toolbarState,
+                               Consumer<String> styleState) {
         this.ctx = ctx;
         this.visualEditorView = visualEditorView;
         this.contentArea = contentArea;
@@ -81,6 +84,7 @@ public final class VisualEditorSession {
         this.markDirty = markDirty;
         this.statusRefresh = statusRefresh;
         this.toolbarState = toolbarState;
+        this.styleState = styleState;
     }
 
     /**
@@ -289,6 +293,19 @@ public final class VisualEditorSession {
          */
         public void onSelectionChanged(String activeFormats) {
             toolbarState.accept(activeFormats);
+        }
+
+        /**
+         * 光标 / 选区处的内联样式（字体 / 字号 / 颜色）与块级对齐，格式
+         * {@code "font-size=18px;text-align=center"}；空串表示全是默认档。
+         *
+         * <p>与 {@link #onSelectionChanged(String)} 同源、同时机上报，只是走的通道不同：
+         * 那一条点亮「加粗 / 斜体」这类有无状态的按钮，这一条回显字体、字号、颜色、对齐
+         * 四个带值控件。分开是因为消费方不同——{@code EditorToolbarController} 与
+         * {@code EditorStyleControls} 各管一摊，不该为了省一次回调把两者拴在一起。
+         */
+        public void onStyleChanged(String state) {
+            styleState.accept(state);
         }
 
         /**

@@ -545,3 +545,47 @@ Word 大纲），只删被点的那一个章节。
 > `flushCurrentChapter()` 把旧章节正文**永久回写进新章节的 XHTML**。目录类测试必须走真实
 > select，让 `showChapter` 正常 flush 旧的、加载新的。
 
+## 十一、第九轮（2026-09-14）：应用图标 #70
+
+**诉求**：为应用创建一个图标。
+
+**决策**：走**几何极简 + 合上的书本**，用 Pillow 程序化绘制（2048 基准 4× 超采样 → LANCZOS
+降采样），刻意不用 AI 生图——16px 任务栏下要能辨、配色要可控可复现。设计 = 蓝色圆角底 +
+白色封面 + 蓝色书脊缝 + 白色底部页块（深蓝取主题强调色 `#1a5fb4`）。
+
+**改动**：`epubra-app/tools/make-icon.py`（生成器）→ `resources/.../app/icon/`（7 档 PNG +
+`.ico`）；运行时 `EpubraApp.loadIcons()` → `stage.getIcons()`，打包 `pom.xml` 的 `dist` profile
+补 `jpackage --icon`（此前缺，exe 会用默认图标）。
+
+**验证**：`AppIconTest` 3 条（尺寸清单 / 512px 像素几何 / ICO 已打包）。像素断言必须用 512px——
+书脊缝只占边长 1.8%，128px 下宽 2.3px 会被 LANCZOS 振铃污染（实测缝中心 `0x004cabff`，比主色
+更暗，是 undershoot 而非配色）。反证：缝移位 → 断言红；还原复绿。打包后按 ICO 目录项逐块比对
+`Epubra.exe`，**7/7 尺寸命中**。基线 495 → **498**。
+
+## 十二、第十轮（2026-09-14）：编辑窗口滚动条对齐目录侧栏 #71
+
+**诉求**：参考侧边栏目录，调整编辑窗口的滚动条宽度。
+
+**根因**：不一致有两层。①「源码」tab 是 `TextArea`（`app.css` 已定 7px），而「编辑」tab 与
+「预览」都是 WebView —— **滚动条由渲染引擎画，JavaFX 样式表够不到**；② 引擎默认是**覆盖式**
+滚动条（约 15px 浮条，且**不占布局宽度**），只有显式写了 `::-webkit-scrollbar` 才切换成占位的
+经典滚动条。于是编辑器右缘是浮条、侧栏是 7px 细条。
+
+**改动**：`Theme.scrollbarCss()`（接入 `previewStyleCss()`，预览与编辑器共用；新增
+`previewScrollThumb` 与 `theme.css` 的 `-epubra-scrollbar-thumb` 成对维护）+
+`editor-paper.css`（编辑器那份，滑块固定浅灰）。口径 = 7px 轨道 / 5px 滑块
+（`border: 1px solid transparent` + `background-clip: content-box`）/ 关掉端部箭头按钮。
+
+**渲染层踩坑**（字符串断言全绿也照样存在的两类问题，靠真机快照才发现）：
+
+1. **轨道写 `transparent` 会露 WebView 白底** —— 滚动条在页面视口之外，`html`/`body` 背景
+   铺不到，画布右缘多一条 7px 白边（实测条带众数色 `rgb(255,255,255)`，纸面 `rgb(250,249,245)`）；
+2. **`webView.snapshot()` 会落后一帧** —— 表现为「滑块改成黑色，像素断言却照样通过」。
+   改为连续两次快照的条带指纹一致才认。
+
+**验证**：`EditorScrollbarWidthTest`（新，6 条，真实 WebView + 像素）——编辑器/预览占用宽度
+7px、滑块真被画出（按**颜色**判，用「非纸面」会把轨道与白底算成已绘制而失效）、轨道色 ==
+页面实算背景色的众数、深色预览轨道跟随主题、裸文档对照组（实测 0，证明 7px 来自注入样式）；
+`ThemeTest` +1 条守字符串层。负向验证三种改法各自精确转红（宽度 14px / 滑块改黑 / 轨道改
+`transparent`）；连跑 3 轮防抖动全绿。基线 498 → **505**（lib 75 + app 430），冒烟 exit 124 零异常。
+

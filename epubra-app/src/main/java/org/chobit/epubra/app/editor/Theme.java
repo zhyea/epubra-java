@@ -13,13 +13,13 @@ package org.chobit.epubra.app.editor;
 public enum Theme {
 
     /** 浅色：现有的 WPS / Office 蓝风格，也是默认值。 */
-    LIGHT("theme-light", "浅色", "#ffffff", "#1f1f1f", "#1a5fb4", "#dcdcdc", "#f2f2f2"),
+    LIGHT("theme-light", "浅色", "#ffffff", "#1f1f1f", "#1a5fb4", "#dcdcdc", "#f2f2f2", "#c8c8c8"),
 
     /** 深色：低亮度中性灰底 + 浅色文字，弱化边框，夜间阅读不刺眼。 */
-    DARK("theme-dark", "深色", "#1e1e1e", "#dcdcdc", "#7fb2f0", "#3a3a3a", "#2a2a2a"),
+    DARK("theme-dark", "深色", "#1e1e1e", "#dcdcdc", "#7fb2f0", "#3a3a3a", "#2a2a2a", "#4a4a4a"),
 
     /** 护眼米黄：低饱和暖色，背景米黄、文字深棕灰，避免高饱和刺激。 */
-    SEPIA("theme-sepia", "护眼米黄", "#f5ecd9", "#3f3524", "#9a6b34", "#d6c8a8", "#e8dcc0");
+    SEPIA("theme-sepia", "护眼米黄", "#f5ecd9", "#3f3524", "#9a6b34", "#d6c8a8", "#e8dcc0", "#cfc09c");
 
     private final String styleClass;
     private final String displayName;
@@ -28,9 +28,11 @@ public enum Theme {
     private final String previewLink;
     private final String previewBorder;
     private final String previewCodeBackground;
+    private final String previewScrollThumb;
 
     Theme(String styleClass, String displayName, String previewBackground, String previewForeground,
-          String previewLink, String previewBorder, String previewCodeBackground) {
+          String previewLink, String previewBorder, String previewCodeBackground,
+          String previewScrollThumb) {
         this.styleClass = styleClass;
         this.displayName = displayName;
         this.previewBackground = previewBackground;
@@ -38,6 +40,7 @@ public enum Theme {
         this.previewLink = previewLink;
         this.previewBorder = previewBorder;
         this.previewCodeBackground = previewCodeBackground;
+        this.previewScrollThumb = previewScrollThumb;
     }
 
     /** 打在 Scene 根节点上的样式类名，与 app.css 中的主题规则对应。 */
@@ -76,6 +79,17 @@ public enum Theme {
     }
 
     /**
+     * 预览滚动条滑块色。
+     *
+     * <p>与 {@code theme.css} 里 JavaFX 侧的 {@code -epubra-scrollbar-thumb} 取值一一对应：
+     * 预览区是 WebView，吃不到那张样式表，但滚动条要和界面里的控件滚动条看起来是同一条，
+     * 因此两处必须成对维护——改了这里别忘了 {@code theme.css}。
+     */
+    public String previewScrollThumb() {
+        return previewScrollThumb;
+    }
+
+    /**
      * 注入到预览 HTML 的内联样式。
      *
      * <p>作者自己的 XHTML 常常带内联配色，这里统一用 {@code !important} 压过文档自带样式，
@@ -101,8 +115,36 @@ public enum Theme {
                 pre, code { background: %s !important; color: %s !important; padding: 2px 4px; }
                 img { max-width: 100%%; height: auto; }
                 em, i, dfn, cite, var { font-style: italic !important; font-family: "Segoe UI", "Times New Roman", "KaiTi", "楷体", serif !important; }
+                %s
                 """.formatted(previewBackground, previewForeground, previewForeground, previewBorder,
-                previewLink, previewBorder, previewCodeBackground, previewForeground);
+                previewLink, previewBorder, previewCodeBackground, previewForeground, scrollbarCss());
+    }
+
+    /**
+     * WebView 内滚动条的样式：对齐 JavaFX 侧的目录侧栏口径（7px 细条、无箭头按钮）。
+     *
+     * <p>WebView 里的滚动条由渲染引擎自己画，JavaFX 样式表够不到，只能用 WebKit 的
+     * {@code ::-webkit-scrollbar} 伪元素；不写这段的话，编辑器画布会带着引擎默认的
+     * 宽滚动条，与旁边的目录侧栏、「源码」标签页形成明显落差。
+     *
+     * <p><b>轨道必须显式上色</b>：滚动条占的是页面视口<b>之外</b>的布局空间，
+     * {@code html} / {@code body} 的背景铺不到那里，写 {@code transparent} 会露出 WebView
+     * 自带的白色底 —— 画布右缘出现一条 7px 白边（实测快照确认）。所以轨道取页面背景色。
+     *
+     * <p>滑块用 {@code border: 1px solid transparent} + {@code background-clip: content-box}
+     * 做出 1px 内缩——和 JavaFX 侧 {@code -fx-background-insets: 0 1px 0 1px} 是同一个
+     * 「细条居中」效果（7px 轨道里画 5px 滑块）。
+     *
+     * <p>注意：这段 CSS 会被当作 XML 文本解析，不能出现 {@code <}、{@code >}、{@code &}。
+     */
+    private String scrollbarCss() {
+        return """
+                ::-webkit-scrollbar { width: 7px; height: 7px; }
+                ::-webkit-scrollbar-track { background: %s; }
+                ::-webkit-scrollbar-thumb { background: %s; border: 1px solid transparent; background-clip: content-box; border-radius: 4px; }
+                ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+                ::-webkit-scrollbar-corner { background: %s; }
+                """.formatted(previewBackground, previewScrollThumb, previewBackground).stripTrailing();
     }
 
     /**

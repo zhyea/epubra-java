@@ -131,6 +131,93 @@
     -fx-stroke-width: 2.1;
 }
 
+/* 样式控件组（字体下拉 / 文字颜色取色器 / 对齐按钮；字号走两个图标按钮）。
+ * JavaFX 默认的 combo-box / menu-button / color-picker 都是「立体底 + 凹槽边框」，
+ * 直接塞进扁平的编辑工具条很突兀，统一压成与图标按钮同高同观感。
+ * 命令本身不在这里——候选项与命令由 EditorStyleControls 装配。 */
+.editor-toolbar .combo-box,
+.editor-toolbar .menu-button,
+.editor-toolbar .color-picker {
+    -fx-background-color: transparent;
+    -fx-background-radius: 2;
+    -fx-border-color: -epubra-border;
+    -fx-border-radius: 2;
+    -fx-border-width: 1;
+    -fx-effect: null;
+    -fx-padding: 1 4 1 4;
+    -fx-cursor: hand;
+}
+
+.editor-toolbar .combo-box:hover,
+.editor-toolbar .menu-button:hover,
+.editor-toolbar .color-picker:hover {
+    -fx-background-color: -epubra-hover-bg;
+    -fx-border-color: -epubra-hover-bg;
+}
+
+.editor-toolbar .combo-box > .list-cell {
+    -fx-background-color: transparent;
+    -fx-text-fill: -epubra-fg;
+    -fx-font-size: 12px;
+    -fx-padding: 1 2 1 4;
+}
+
+.editor-toolbar .combo-box:hover > .list-cell,
+.editor-toolbar .menu-button:hover > .label {
+    -fx-text-fill: -epubra-hover-fg;
+}
+
+.editor-toolbar .menu-button > .label {
+    -fx-text-fill: -epubra-fg;
+}
+
+.editor-toolbar .combo-box .arrow,
+.editor-toolbar .menu-button > .arrow-button > .arrow {
+    -fx-background-color: -epubra-fg;
+}
+
+.editor-toolbar .menu-button:hover > .arrow-button > .arrow {
+    -fx-background-color: -epubra-hover-fg;
+}
+
+.editor-toolbar .menu-button > .arrow-button {
+    -fx-background-color: transparent;
+    -fx-padding: 0 2 0 4;
+}
+
+/* 文字颜色取色器（ColorPicker）：自带标准色板与「自定义颜色…」，不需要自造色板。
+ * 它没有文字，显示的就是那一枚色块；不透明度滑到 0 = 清除该声明（见 EditorStyleControls）。
+ * 色块本身要描一圈细边，否则白底 / 浅色主题下看不出那里有个控件。 */
+.editor-toolbar .color-picker > .color-picker-label {
+    -fx-text-fill: -epubra-fg;
+    -fx-padding: 1 2 1 2;
+}
+
+.editor-toolbar .color-picker .picker-color {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.editor-toolbar .color-picker .picker-color-rect {
+    -fx-stroke: -epubra-border;
+    -fx-stroke-width: 1;
+    -fx-arc-width: 2;
+    -fx-arc-height: 2;
+}
+
+.editor-toolbar .color-picker > .arrow-button {
+    -fx-background-color: transparent;
+    -fx-padding: 0 2 0 4;
+}
+
+.editor-toolbar .color-picker > .arrow-button > .arrow {
+    -fx-background-color: -epubra-fg;
+}
+
+.editor-toolbar .color-picker:hover > .arrow-button > .arrow {
+    -fx-background-color: -epubra-hover-fg;
+}
+
 /* ---------------------------------------------------------------- 活动栏 */
 
 .activity-bar {

@@ -50,7 +50,10 @@ class InsertImageEntryWiringTest {
         XPath xpath = XPathFactory.newInstance().newXPath();
         NodeList buttons = (NodeList) xpath.evaluate(
                 "//FlowPane[@styleClass='editor-toolbar']//Button", fxml, XPathConstants.NODESET);
-        assertEquals(13, buttons.getLength(), "工具条应有 13 个按钮");
+        // 12 个格式按钮 + 图片 / 撤销 / 重做三个动作按钮 + 放大字号 / 缩小字号两个档位按钮。
+        // 字体（ComboBox）与颜色（ColorPicker）、对齐（MenuButton）不是 Button，不在这个 XPath 里——
+        // 它们的契约由 VisualEditorTabUiTest#styleControlsCarryOptionsAndCommands 守。
+        assertEquals(17, buttons.getLength(), "工具条应有 17 个按钮");
         for (int i = 0; i < buttons.getLength(); i++) {
             String id = ((Element) buttons.item(i)).getAttribute("id");
             assertTrue(ToolbarIcons.covers(id),

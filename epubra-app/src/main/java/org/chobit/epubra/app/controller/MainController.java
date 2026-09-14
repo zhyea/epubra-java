@@ -24,6 +24,7 @@ import org.chobit.epubra.app.ui.model.ChapterNode;
 import org.chobit.epubra.app.ui.ToolbarIcons;
 import org.chobit.epubra.app.context.AppEventBus;
 import org.chobit.epubra.app.context.BookContext;
+import org.chobit.epubra.app.editor.EditorStyleControls;
 import org.chobit.epubra.app.editor.EditorToolbarController;
 import org.chobit.epubra.app.editor.TextSearch;
 import org.chobit.epubra.app.editor.Theme;
@@ -40,9 +41,12 @@ import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.ColorPicker;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.IndexRange;
 import javafx.scene.control.Label;
+import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.Menu;
 import javafx.scene.control.ProgressBar;
@@ -90,6 +94,19 @@ public class MainController {
     /** 格式化工具条：只挂在「编辑」tab 内，作用于 {@link #visualEditorView}。 */
     @FXML
     private FlowPane editorToolbar;
+    /**
+     * 工具条上的样式控件：字体 / 文字颜色 / 对齐。
+     *
+     * <p>候选项与命令在 {@link EditorStyleControls} 里装配——FXML 的 {@code onAction}
+     * 只能绑无参方法，而这三个控件下发的命令都要带值，所以在 Java 侧接线。
+     * 字号不在此列：它由 {@code size-up} / {@code size-down} 两个按钮驱动，见 {@link #onSizeUp()}。
+     */
+    @FXML
+    private ComboBox<String> fontCombo;
+    @FXML
+    private ColorPicker colorPicker;
+    @FXML
+    private MenuButton alignButton;
     @FXML
     private TabPane editorTabs;
     /**
@@ -293,6 +310,13 @@ public class MainController {
     private EditorToolbarController editorToolbarController;
 
     /**
+     * 工具条上的样式控件组（字体 / 字号 / 颜色 / 对齐）。实现搬到
+     * {@link EditorStyleControls}。构造点同样必须早于 {@link VisualEditorSession}——
+     * 会话持的是它的方法引用（回显通道）。
+     */
+    private EditorStyleControls editorStyleControls;
+
+    /**
      * 可视化编辑会话（WebView ↔ 正文的双向同步、JS 桥、序列化回写、格式命令）。
      * 实现搬到 {@link VisualEditorSession}（纯搬迁，拆分批次 B）。
      */
@@ -371,6 +395,10 @@ public class MainController {
                 this::currentChapter, () -> themeActivity.current(),
                 SOURCE_TAB_INDEX, PREVIEW_TAB_INDEX);
         editorToolbarController = new EditorToolbarController(editorToolbar);
+        // 样式控件（字体 / 文字颜色 / 对齐）：同样要先于会话构造——会话持它的方法引用。
+        // 命令经 this::applyVisualFormat 出去，与十二个格式按钮走同一条路。
+        editorStyleControls = new EditorStyleControls(fontCombo, colorPicker, alignButton,
+                this::applyVisualFormat);
         visualEditorSession = new VisualEditorSession(ctx, visualEditorView, contentArea,
                 this::currentChapter, this::previewBaseHref,
                 () -> themeActivity.current(),
@@ -388,7 +416,8 @@ public class MainController {
                     undoActivity.redo();
                 },
                 this::markDirty, () -> status.refresh(),
-                editorToolbarController::update);
+                editorToolbarController::update,
+                editorStyleControls::update);
 
         // window 在每次文档加载后都是新对象，桥必须跟着重装，否则 loadContent 之后
         // 旧 window 上的 epubraBridge 就没了，页面里的改动再也回不来。
@@ -1267,6 +1296,11 @@ public class MainController {
 
     /** 把当前章节载入可视化编辑器；实现搬到 {@link VisualEditorSession#reload()}。 */
     private void reloadVisualEditor() {
+        // 新文档是全新的一棵树：上一章残留的格式高亮与字体/字号/颜色回显都不再成立。
+        // 放在这里而不是各调用点——切章节（showChapter）、撤销回读（reloadEditor）、
+        // 切回编辑 tab 三条路都会经过它，漏一处就会显示上一章的样式。
+        editorToolbarController.clear();
+        editorStyleControls.clear();
         visualEditorSession.reload();
     }
 
@@ -1289,6 +1323,7 @@ public class MainController {
                 flushVisualEditor();
                 visualEditorSession.invalidate();
                 editorToolbarController.clear();
+                editorStyleControls.clear();
             }
             if (index < 0 || currentChapter() == null) {
                 return;
@@ -1300,8 +1335,7 @@ public class MainController {
             // 这里的 flushVisualEditor 必然 no-op，写进资源的就是源码区文本。
             flushCurrentChapter();
             if (index == VISUAL_TAB_INDEX) {
-                // 新文档是全新的一棵树，旧的高亮不再成立
-                editorToolbarController.clear();
+                // reloadVisualEditor 内部会把旧的高亮与样式回显清掉（新树不继承旧状态）
                 reloadVisualEditor();
             } else if (index == PREVIEW_TAB_INDEX) {
                 refreshPreview();
@@ -1323,6 +1357,25 @@ public class MainController {
     // 命令实现与工具条点亮已分别迁往 editor/VisualEditorSession 与
     // editor/EditorToolbarController（拆分批次 B，纯搬迁）。下面只留一行委派——
     // FXML 的 onAction 与 ResourceController 的 XhtmlInserter 只能指到主控制器。
+
+    /**
+     * 字号放大一档（工具条「放大字号」按钮）。
+     *
+     * <p>档位表与边界处理都在 JS 侧（{@code editor-script.js} 的 {@code SIZE_STEPS} /
+     * {@code stepFontSize}）：以<b>当前计算后的字号</b>为锚点跳到下一个更大档，已到顶则
+     * 有意不动。返回值这里不看——它属于「样式」而非「插入标签」，编辑器未就绪时不做
+     * 源码区兜底（往 XHTML 里塞一个没有对应标签的样式毫无意义），与字体 / 颜色一致。
+     */
+    @FXML
+    public void onSizeUp() {
+        applyVisualFormat("size-up");
+    }
+
+    /** 字号缩小一档（工具条「缩小字号」按钮）；到最小档时有意不动。 */
+    @FXML
+    public void onSizeDown() {
+        applyVisualFormat("size-down");
+    }
 
     /**
      * 对可视化编辑器施加一次富文本操作。

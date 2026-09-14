@@ -33,6 +33,8 @@
     stripInjected(clone);
     tidyHeadWhitespace(clone);
     rescueStrayNodes(clone);
+    mergeStyledSpans(clone);
+    unwrapBareSpans(clone);
     pruneEmptyInline(clone);
     pruneEmptyLists(clone);
     var body = clone.querySelector('body');
@@ -59,9 +61,11 @@
   // 空行内标签是纯噪音（无锚文本的强调、无内容的强调壳），回写前剔除。
   // 循环到不动点，处理 <strong><em></em></strong> 这类嵌套空壳：
   // 内层删掉后外层变空，下一轮接着删。只清强调类语义标签，
-  // <a>（有 href 属性语义）与 <span>（可能有 class）不碰。
+  // <a>（有 href 属性语义）不碰。
+  // <span> 也一并清：工具条「字体/字号/颜色」写的受控内联样式就挂在 span 上，
+  // 一个没有文字的 span 无论带不带 style / class 都是纯噪音（#72）。
   function pruneEmptyInline(root) {
-    var tags = 'strong,em,u,del,code,b,i,s';
+    var tags = 'strong,em,u,del,code,b,i,s,span';
     var changed = true;
     while (changed) {
       changed = false;
@@ -96,6 +100,53 @@
           changed = true;
         }
       }
+    }
+  }
+  // 工具条写进来的受控内联样式（字体 / 字号 / 颜色）都挂在 span 上，这些 span 只带
+  // 一个 style 属性——有 class / id 的是作者自己的标签，一律不碰（styleOnly）。
+  function styleOnly(el) {
+    var attrs = el.attributes;
+    for (var i = 0; i < attrs.length; i++) {
+      if (attrs[i].name !== 'style') { return false; }
+    }
+    return true;
+  }
+  // 「整段重选后再改一次样式」：选区内容恰好是上一次那个 span，包围操作会再套一层，
+  // 嵌套层数随编辑轮次增长。style-only 的 span 套 style-only 的 span 可以无损合并 ——
+  // 内层属性并入外层（内层已有值不覆盖外层），再把内层子节点上提。
+  // 与 pruneEmptyInline 同层：DOM 里允许编辑中间态，只保证不写进书。
+  function mergeStyledSpans(root) {
+    var changed = true;
+    while (changed) {
+      changed = false;
+      var spans = root.querySelectorAll('span');
+      for (var i = 0; i < spans.length; i++) {
+        var outer = spans[i];
+        if (outer.childNodes.length !== 1) { continue; }
+        var inner = outer.firstChild;
+        if (inner.nodeType !== 1 || inner.nodeName.toLowerCase() !== 'span') { continue; }
+        if (!styleOnly(outer) || !styleOnly(inner)) { continue; }
+        // 内层带着作者自己的声明时放弃合并：合并只搬受管四类，会把它弄丢
+        if (hasForeignStyle(outer) || hasForeignStyle(inner)) { continue; }
+        var merged = readStyle(outer);
+        var extra = readStyle(inner);
+        for (var k in extra) { if (!merged[k]) { merged[k] = extra[k]; } }
+        writeStyle(outer, merged);
+        while (inner.firstChild) { outer.insertBefore(inner.firstChild, inner); }
+        outer.removeChild(inner);
+        changed = true;
+      }
+    }
+  }
+  // 清档（工具条上的「默认」）会把 span 上最后一个受控样式删掉，留下一个不带任何属性的
+  // 空壳。无属性的 <span> 对渲染零影响（作者自己写的那种也一样），回写前剥掉。
+  function unwrapBareSpans(root) {
+    var spans = root.querySelectorAll('span');
+    for (var i = 0; i < spans.length; i++) {
+      var el = spans[i];
+      if (!styleOnly(el) || el.getAttribute('style') || !el.parentNode) { continue; }
+      while (el.firstChild) { el.parentNode.insertBefore(el.firstChild, el); }
+      el.parentNode.removeChild(el);
     }
   }
   function push() {
@@ -493,6 +544,240 @@
     return true;
   }
 
+  // ---- 受控内联样式：字体 / 字号 / 颜色 / 对齐（#72） --------------
+  //
+  // XHTML 里字体、字号、颜色、对齐都没有对应标签，只能落到内联 style 上。
+  // 工具条**只管下面这四个属性**：writeStyle 按 STYLE_ORDER 统一重排它们，
+  // 其余声明**原样保留**——正文里作者自己写的 text-indent / line-height / margin
+  // 是货真价实的排版信息，改个对齐就把它抹掉是不可接受的损失。
+  // （引擎私货与粘贴残留由 sanitize 在入口拦掉，走不到这里。）
+  // 粘贴通道不受影响：sanitize 仍然把外来内容的内联样式全部剥掉——
+  // 「作者导入的外来样式不进正文」与「作者自己选的样式进正文」是两件事。
+  var INLINE_STYLE_PROPS = { 'font-family': 1, 'font-size': 1, 'color': 1 };
+  var BLOCK_STYLE_PROPS = { 'text-align': 1 };
+  // 固定输出顺序：同一处改多次字体/颜色后 style 串保持稳定，便于比对与断言
+  var STYLE_ORDER = ['font-family', 'font-size', 'color', 'text-align'];
+
+  function managedProp(name) {
+    return !!(INLINE_STYLE_PROPS[name] || BLOCK_STYLE_PROPS[name]);
+  }
+
+  // 只读受管属性：工具条关心的就这四类，别的声明不该影响它的判断
+  function readStyle(el) {
+    var out = {};
+    var raw = el.getAttribute('style') || '';
+    var parts = raw.split(';');
+    for (var i = 0; i < parts.length; i++) {
+      var at = parts[i].indexOf(':');
+      if (at <= 0) { continue; }
+      var k = parts[i].slice(0, at).trim().toLowerCase();
+      var v = parts[i].slice(at + 1).trim();
+      if (v && managedProp(k)) { out[k] = v; }
+    }
+    return out;
+  }
+
+  // 把当前 style 串切成「受管 / 非受管」两拨。非受管那一拨按原顺序、原拼写带回去。
+  function splitStyle(el) {
+    var managed = [];
+    var foreign = [];
+    var raw = el.getAttribute('style') || '';
+    var parts = raw.split(';');
+    for (var i = 0; i < parts.length; i++) {
+      var at = parts[i].indexOf(':');
+      if (at <= 0) { continue; }
+      var name = parts[i].slice(0, at).trim();
+      var value = parts[i].slice(at + 1).trim();
+      if (!value) { continue; }
+      if (managedProp(name.toLowerCase())) { managed.push({ k: name.toLowerCase(), v: value }); }
+      else { foreign.push(name + ': ' + value); }
+    }
+    return { managed: managed, foreign: foreign };
+  }
+
+  // 重建 style 串：受管的四类排在前（固定顺序），非受管声明原样跟在后面
+  function writeStyle(el, props) {
+    var owned = [];
+    for (var i = 0; i < STYLE_ORDER.length; i++) {
+      var k = STYLE_ORDER[i];
+      if (props[k]) { owned.push(k + ': ' + props[k]); }
+    }
+    var all = owned.concat(splitStyle(el).foreign);
+    if (all.length) { el.setAttribute('style', all.join('; ')); }
+    else { el.removeAttribute('style'); }
+  }
+
+  // 除了受管四类之外还有别的声明吗？合并 style-only span 之前用它把关：
+  // 内层一旦带着作者自己的声明，合并就会把它弄丢，宁可放弃合并（留着嵌套也无害）。
+  function hasForeignStyle(el) {
+    return splitStyle(el).foreign.length > 0;
+  }
+
+  // 置/清一个属性：value 为空串 = 清除（工具条上的「默认」档）。
+  // 四类属性同处一条 style 串，所以必须「读出来改一处再整体写回」，
+  // 不能直接 setAttribute 覆盖——那样改颜色会把同一处的字体设置冲掉。
+  function setStyleProp(el, prop, value) {
+    var props = readStyle(el);
+    if (value) { props[prop] = value; } else { delete props[prop]; }
+    writeStyle(el, props);
+  }
+
+  // 选区边界是否完整覆盖 el 的全部内容（用于「就地改已有 span」而不套新的）
+  function fullyCovers(range, el) {
+    var r = document.createRange();
+    r.selectNodeContents(el);
+    return range.compareBoundaryPoints(Range.START_TO_START, r) <= 0
+            && range.compareBoundaryPoints(Range.END_TO_END, r) >= 0;
+  }
+
+  function inlineStyleHost(range) {
+    var root = (range.commonAncestorContainer.nodeType === 1)
+            ? range.commonAncestorContainer : range.commonAncestorContainer.parentNode;
+    if (tagOf(root) === 'span' && fullyCovers(range, root)) { return root; }
+    return null;
+  }
+
+  // 行内样式（字体 / 字号 / 颜色）：
+  //   有选区时包一层带 style 的 span（选区已完整落在一个 span 内则就地改它，
+  //   于是「先设字体再设颜色」落在同一层，不会套成 span 叠 span）；
+  //   光标收起时落到所在块上——用户改字体/颜色常常不划选，落在块上才有反馈。
+  function applyInlineStyle(prop, value) {
+    var s = activeSelection();
+    if (!s || !s.rangeCount) { return false; }
+    var range = s.getRangeAt(0);
+    if (range.collapsed) {
+      var block = topBlock(range.startContainer);
+      if (block) { setStyleProp(block, prop, value); }
+      return true;
+    }
+    var host = inlineStyleHost(range);
+    if (host) { setStyleProp(host, prop, value); return true; }
+    var el = makeTag('span');
+    setStyleProp(el, prop, value);
+    if (!el.getAttribute('style')) { return true; }
+    try {
+      range.surroundContents(el);
+    } catch (err) {
+      el.appendChild(range.extractContents());
+      range.insertNode(el);
+    }
+    // 清档（「默认」）时不留下空包裹：剥掉刚建的 span 还原原样
+    if (!el.getAttribute('style')) { unwrapEl(el); return true; }
+    selectContents(el);
+    return true;
+  }
+
+  // 选区（或光标）触及的块：跨块选区取最外层命中块，避免父块已经设过、
+  // 内部的 li / p 又各设一遍。
+  function touchedBlocks(range) {
+    var out = [];
+    if (range.collapsed) {
+      var one = closestBlock(range.startContainer) || topBlock(range.startContainer);
+      if (one) { out.push(one); }
+      return out;
+    }
+    var all = document.body.getElementsByTagName('*');
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (!BLOCK_NAMES[tagOf(el)] || !range.intersectsNode(el)) { continue; }
+      var nested = false;
+      for (var j = 0; j < out.length; j++) {
+        if (out[j].contains(el)) { nested = true; break; }
+      }
+      if (!nested) { out.push(el); }
+    }
+    return out;
+  }
+
+  // 块级样式（对齐）：left 是默认值，写进正文纯属噪音 —— 直接清掉该声明。
+  function applyBlockStyle(prop, value) {
+    var s = activeSelection();
+    if (!s || !s.rangeCount) { return false; }
+    var blocks = touchedBlocks(s.getRangeAt(0));
+    var effective = (prop === 'text-align' && value === 'left') ? '' : value;
+    for (var i = 0; i < blocks.length; i++) {
+      setStyleProp(blocks[i], prop, effective);
+    }
+    return true;
+  }
+
+  // ---- 字号放大 / 缩小：固定档位跳档（#72 二轮） ------------------
+  //
+  // 工具条上没有字号下拉框了，相对步进是唯一入口。用**固定档位表**而不是倍率：
+  // 倍率会产出 16.8px → 20.16px 这种碎值，多按几次正文里就全是脏数字；
+  // 跳档的结果永远是整齐值，作者能预期、我们也便于断言。
+  var SIZE_STEPS = [10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 56, 72];
+
+  // 锚点处**实际生效**的字号（px）。可能是内联的，也可能是从块 / 主题继承下来的，
+  // 所以只能问计算样式——只看 style 属性会把「继承来的 16px」当成 0 或 undefined。
+  function effectiveFontSizePx(node) {
+    var el = (node && node.nodeType === 1) ? node : (node ? node.parentNode : null);
+    if (!el || !window.getComputedStyle) { return 16; }
+    var px = parseFloat(window.getComputedStyle(el).fontSize);
+    return isNaN(px) ? 16 : px;
+  }
+
+  // 从光标处往上找**已经显式设过该属性**的最内层元素。步进要改这一处，而不是外层块：
+  // 块上写了 20px、里面的 span 还挂着 18px 时改块会被 span 盖住，看起来像「按了没反应」。
+  function styledAncestorAt(node, prop) {
+    var el = (node && node.nodeType === 1) ? node : (node ? node.parentNode : null);
+    while (el && el.nodeType === 1 && el.parentNode && el !== document.body) {
+      if (readStyle(el)[prop]) { return el; }
+      el = el.parentNode;
+    }
+    return null;
+  }
+
+  // 选区锚点最内层的元素（文本节点取父元素）。
+  function anchorElement(range) {
+    var node = range && range.startContainer;
+    return (node && node.nodeType === 1) ? node : (node ? node.parentNode : null);
+  }
+
+  // 步进的落点。**读当前值与写新值必须落在同一处**——读 A 改 B 就会出现
+  // 「档位算对了但画面没变化」。光标收起时优先就地改已设过字号的行内元素，
+  // 否则改所在块（与字体 / 颜色的光标态一致）；有选区时复用 applyInlineStyle 的判据。
+  function stepFontSizeTarget(range) {
+    if (range.collapsed) {
+      return styledAncestorAt(range.startContainer, 'font-size') || topBlock(range.startContainer);
+    }
+    return inlineStyleHost(range);
+  }
+
+  // 档位表里紧邻的一档：delta > 0 取第一个更大的，delta < 0 取最后一个更小的；
+  // 越界返回 null（由调用方决定「有意不作为」）。
+  function nextSizeStep(cur, delta) {
+    var next = null;
+    for (var i = 0; i < SIZE_STEPS.length; i++) {
+      var step = SIZE_STEPS[i];
+      if (delta > 0) {
+        if (step > cur + 0.01) { return step; }
+      } else if (step < cur - 0.01) {
+        // 升序遍历里「最后一个仍小于当前值」的档就是上一档
+        next = step;
+      } else {
+        break;
+      }
+    }
+    return next;
+  }
+
+  // 放大 / 缩小一档。已经到顶或到底时**有意不作为**——但必须返回 true：
+  // 返回 false 会让 Java 侧判定「命令被拒」而退回源码区插片段（#61 口径）。
+  function stepFontSize(delta) {
+    var s = activeSelection();
+    if (!s || !s.rangeCount) { return false; }
+    var range = s.getRangeAt(0);
+    var host = stepFontSizeTarget(range);
+    // 落点认不出（跨块选区且没有现成的行内 span）时，退回读锚点元素的字号
+    var cur = effectiveFontSizePx(host || anchorElement(range));
+    var next = nextSizeStep(cur, delta);
+    if (next === null) { return true; }
+    if (host) { setStyleProp(host, 'font-size', next + 'px'); return true; }
+    // 没有现成落点 → 交给既有路径（包一层带 style 的 span 包住选区）
+    return applyInlineStyle('font-size', next + 'px');
+  }
+
   // ---- 命令表（工具条 / 快捷键共用） ------------------------------
   window.epubraFormat = function (kind, value) {
     var ok = false;
@@ -509,6 +794,13 @@
     else if (kind === 'code') { ok = toggleInline('code'); }
     else if (kind === 'link') { ok = wrapLink(value); }
     else if (kind === 'unlink') { ok = unwrapLink(); }
+    else if (kind === 'font') { ok = applyInlineStyle('font-family', value); }
+    // size = 指定字号（内部 API，测试与将来的字号输入框用）；size-up / size-down = 工具条按钮的跳档
+    else if (kind === 'size') { ok = applyInlineStyle('font-size', value); }
+    else if (kind === 'size-up') { ok = stepFontSize(1); }
+    else if (kind === 'size-down') { ok = stepFontSize(-1); }
+    else if (kind === 'color') { ok = applyInlineStyle('color', value); }
+    else if (kind === 'align') { ok = applyBlockStyle('text-align', value); }
     if (ok) { push(); }
     return ok;
   };
@@ -639,9 +931,39 @@
     return found ? (found.getAttribute('href') || '') : '';
   };
 
+  // 光标 / 选区起点处生效的内联样式，格式为「属性=值」以分号相连（如
+  // "font-size=18px;text-align=center"）。供工具条的字体、字号、颜色、对齐全下拉/色板回显。
+  // 四类属性的取值都是我们自己的受控字面量（字体名不含分号，颜色是 #rrggbb），
+  // 所以不需要做转义。内层 span 先读到，再往外补块级声明，到最近的块为止。
+  window.epubraQueryStyle = function () {
+    var s = activeSelection();
+    if (!s || !s.rangeCount) { return ''; }
+    var range = s.getRangeAt(0);
+    var found = {};
+    var n = (range.startContainer.nodeType === 1)
+            ? range.startContainer : range.startContainer.parentNode;
+    while (n && n !== document.body) {
+      var props = readStyle(n);
+      for (var i = 0; i < STYLE_ORDER.length; i++) {
+        var k = STYLE_ORDER[i];
+        if (props[k] && !found[k]) { found[k] = props[k]; }
+      }
+      if (BLOCK_NAMES[tagOf(n)]) { break; }
+      n = n.parentNode;
+    }
+    var buf = [];
+    for (var j = 0; j < STYLE_ORDER.length; j++) {
+      if (found[STYLE_ORDER[j]]) { buf.push(STYLE_ORDER[j] + '=' + found[STYLE_ORDER[j]]); }
+    }
+    return buf.join(';');
+  };
+
   function notifySelection() {
-    if (!window.epubraBridge || !window.epubraBridge.onSelectionChanged) { return; }
-    window.epubraBridge.onSelectionChanged(window.epubraQuery());
+    var b = window.epubraBridge;
+    if (!b || !b.onSelectionChanged) { return; }
+    b.onSelectionChanged(window.epubraQuery());
+    // 桥桩（测试里的 stub）可能没实现样式上报，缺了就只报格式名
+    if (b.onStyleChanged) { b.onStyleChanged(window.epubraQueryStyle()); }
   }
   document.addEventListener('selectionchange', notifySelection);
   document.addEventListener('keyup', notifySelection);
