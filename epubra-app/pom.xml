@@ -140,6 +140,15 @@
                                         <argument>Epubra</argument>
                                         <argument>--app-version</argument>
                                         <argument>1.0.0</argument>
+                                        <!--
+                                          打包产物的 exe / 安装包图标。取 target/classes 下的 ICO
+                                          （由 tools/make-icon.py 生成、多尺寸 16~256），跟着资源复制
+                                          走，不用源码树路径。窗口左上角与任务栏的图标另由
+                                          EpubraApp.loadIcons() 从 PNG 多尺寸列表提供——两处都要有，
+                                          漏了前者就是 exe 默认图标，漏了后者就是运行时咖啡杯。
+                                        -->
+                                        <argument>--icon</argument>
+                                        <argument>${project.build.outputDirectory}/org/chobit/epubra/app/icon/epubra.ico</argument>
                                         <argument>--dest</argument>
                                         <argument>${project.build.directory}/dist</argument>
                                         <argument>--input</argument>

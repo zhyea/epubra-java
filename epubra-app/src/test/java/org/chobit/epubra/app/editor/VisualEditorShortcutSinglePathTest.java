@@ -36,8 +36,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>实测结论：焦点在编辑器内时 JS 路径命中（{@code bridgeUndo=1}）且 accelerator
  * <b>不触发</b>（{@code acceleratorFires=0}）→ 单路触发，安全。
  *
- * <p>Robot 依赖窗口的系统级焦点：无交互会话里先跑对照组确认 accelerator 会响应，
- * 不响应则 {@code Assumptions} 跳过，避免门禁假红。
+ * <p>Robot 依赖窗口的系统级焦点，因此有两道前置检查：先跑对照组确认 Scene accelerator 会响应，
+ * 再用一个无副作用的 Shift 探针确认按键<b>真的能进到 WebView 页面</b>；任一不满足即
+ * {@code Assumptions} 跳过，避免门禁假红（「测不了」与「坏了」必须分开）。
  */
 class VisualEditorShortcutSinglePathTest {
 
@@ -121,10 +122,33 @@ class VisualEditorShortcutSinglePathTest {
                 "Robot 或 accelerator 在本环境不生效，跳过该守卫");
 
         // 正式测量：焦点在编辑器内
-        onFx(() -> view.getEngine().executeScript("window.__bridgeUndo = 0; true"));
-        int accelBefore = acceleratorFires.get();
         onFx(view::requestFocus);
         Thread.sleep(300);
+
+        // 前置探针：控件级 requestFocus **不等于** WebKit 页面拿到 DOM 焦点。无交互会话里
+        // 按键可能根本进不了页面，此时量到的「JS 桥 0 次」是「测不了」而不是「坏了」。
+        // 送一个无副作用的 Shift（editor-script 只认 Tab 与 Ctrl 组合，Shift 直接放行），
+        // 看 document 上的 keydown 计数器是否 +1：收不到就跳过，把前置条件不满足与功能回归
+        // 分开。少了这一步，本用例会在窗口未获得前台焦点时以「expected 1 but was 0」假红
+        // （2026-09-14 实测：全量跑时 skip、单跑时 fail，同一份代码）。
+        onFx(() -> view.getEngine().executeScript(
+                "window.__probeKeys = 0;"
+                        + " document.addEventListener('keydown',"
+                        + " function () { window.__probeKeys++; }, true);"
+                        + " true"));
+        onFx(() -> {
+            javafx.scene.robot.Robot robot = new javafx.scene.robot.Robot();
+            robot.keyPress(KeyCode.SHIFT);
+            robot.keyRelease(KeyCode.SHIFT);
+        });
+        Thread.sleep(400);
+        int probeKeys = ((Number) fromFx(() -> view.getEngine()
+                .executeScript("Number(window.__probeKeys)"))).intValue();
+        Assumptions.assumeTrue(probeKeys > 0,
+                "按键未能进入 WebView 页面（DOM 焦点未就位），跳过该守卫");
+
+        onFx(() -> view.getEngine().executeScript("window.__bridgeUndo = 0; true"));
+        int accelBefore = acceleratorFires.get();
         pressCtrlOnFx(KeyCode.Z);
         Thread.sleep(600);
 
