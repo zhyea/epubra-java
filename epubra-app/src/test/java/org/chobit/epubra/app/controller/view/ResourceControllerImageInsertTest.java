@@ -278,7 +278,8 @@ class ResourceControllerImageInsertTest {
                         finished.countDown();
                     },
                     warnings::add,
-                    () -> true,
+                    // 确认通道现带文案（Function<String, Boolean>）：harness 一律确认
+                    message -> true,
                     (title, message, e) -> warnings.add(title + ": " + message),
                     AsyncTasks.NOOP_PROGRESS,
                     xhtml -> {

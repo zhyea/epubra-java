@@ -376,6 +376,24 @@ class VisualEditorFormatTest {
 
     @Test
     @Timeout(60)
+    @DisplayName("head 不会被残留节点收编逻辑误搬进 body")
+    void headStaysOutsideBodyThroughStrayRescue() throws Exception {
+        // rescueStrayNodes 曾用 root.head 判定哪个节点是 head，而文档按 XML 解析时
+        // Element 上并不保证有 head 属性（那是 HTMLDocument 的接口）：取到 undefined 后
+        // 判定恒真，head 就会被当成「body 之外的残留」搬进 body，注入的样式与脚本全乱。
+        loadEditable("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<html xmlns=\"http://www.w3.org/1999/xhtml\">"
+                + "<head><title>第一章</title></head>"
+                + "<body><p>正文</p></body></html>");
+        String out = serialized();
+
+        assertTrue(out.contains("<head"), "序列化结果应当仍带 head：" + out);
+        assertTrue(out.indexOf("<head") < out.indexOf("<body"), "head 必须排在 body 之前：" + out);
+        assertFalse(bodyOf(out).contains("head"), "head 不得被收编进 body：" + bodyOf(out));
+    }
+
+    @Test
+    @Timeout(60)
     @DisplayName("标题把光标所在块转成 <h2>（不新增空块）")
     void headingConvertsCurrentBlock() throws Exception {
         caretIntoParagraph();

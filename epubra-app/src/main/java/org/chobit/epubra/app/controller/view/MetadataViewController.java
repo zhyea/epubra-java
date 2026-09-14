@@ -4,10 +4,10 @@ import org.chobit.epubra.app.context.BookContext;
 import org.chobit.epubra.app.resource.CoverImageInfo;
 import org.chobit.epubra.app.resource.CoverOps;
 import org.chobit.epubra.app.resource.CoverOps.CoverState;
+import org.chobit.epubra.app.resource.ResourceOps;
 import org.chobit.epubra.app.editor.MetadataDraft;
 import org.chobit.epubra.app.editor.MetadataOps;
 import org.chobit.epubra.lib.domain.Book;
-import org.chobit.epubra.lib.domain.MediaTypes;
 import org.chobit.epubra.lib.domain.Metadata;
 import org.chobit.epubra.lib.domain.Resource;
 import org.chobit.epubra.app.resource.CoverImageInfo.Dimension;
@@ -179,11 +179,21 @@ public class MetadataViewController {
     /** 把 5 个表单字段打包成不可变 {@link MetadataDraft}，留给 {@link MetadataOps} 处理。 */
     public MetadataDraft draftFromFields() {
         return new MetadataDraft(
-                titleField.getText(),
-                authorField.getText(),
-                languageField.getText(),
-                publisherField.getText(),
-                descriptionArea.getText());
+                textOf(titleField),
+                textOf(authorField),
+                textOf(languageField),
+                textOf(publisherField),
+                textOf(descriptionArea));
+    }
+
+    /**
+     * 读字段文本；字段未注入（不经 FXML 直接 new 的场景）时按空串处理。
+     *
+     * <p>与 {@link #editableFields()} 的 null 过滤口径保持一致——同类里两套判空标准
+     * 迟早会漏掉一处。
+     */
+    private static String textOf(TextInputControl field) {
+        return field == null ? "" : field.getText();
     }
 
     /**
@@ -360,8 +370,12 @@ public class MetadataViewController {
     }
 
     /**
-     * 把选中的图片作为封面导入：若书内已有同 href 资源（一般没有，刚选的文件不会撞名）则
-     * 复用，否则走 {@link Book#addResource(java.nio.file.Path)}。失败时弹错误并返回 null。
+     * 把选中的图片作为封面导入：若书内已有<b>字节完全相同</b>的图片则复用，否则走
+     * {@link Book#addResource(java.nio.file.Path)} 新挂一份。失败时提示并返回 null。
+     *
+     * <p>判据是内容而不是文件名：同名不同图必须换得掉，同图不同名则不该重复挂。旧实现比
+     * 「文件名 + 媒体类型」，用户从别的目录选了张同名但内容不同的图时会复用旧资源，
+     * 表现为「换了封面但封面没变」。
      */
     private Resource importCoverFile(File file) {
         if (ctx == null || ctx.book() == null) {
@@ -369,14 +383,9 @@ public class MetadataViewController {
         }
         try {
             byte[] data = Files.readAllBytes(file.toPath());
-            String fileName = file.getName();
-            String mediaType = MediaTypes.guessByExtension(fileName);
-            // 优先复用同 href + mediaType 的资源
-            for (Resource existing : ctx.book().resources().all()) {
-                if (fileName.equals(existing.fileName())
-                        && mediaType.equals(existing.mediaType())) {
-                    return existing;
-                }
+            Resource existing = ResourceOps.findByContent(ctx.book(), data);
+            if (existing != null) {
+                return existing;
             }
             return ctx.book().addResource(file.toPath());
         } catch (IOException e) {

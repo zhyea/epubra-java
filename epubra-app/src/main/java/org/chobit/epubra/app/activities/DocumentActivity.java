@@ -488,6 +488,23 @@ public class DocumentActivity {
             errorReporter.accept("没有可保存的书籍");
             return;
         }
+        // 正式文件不能带草稿痕迹：自动暂存（Autosave.flushNow）给 Book 打过
+        // dcterms:status=draft + epubra:autosaved-at，另存为 .epub 时必须擦掉，
+        // 否则发布出去的包里留着「草稿」标记。目标是 .draft 时反而要保留——
+        // 它就是草稿本体。
+        //
+        // ⚠ 必须在 writer.write 之前擦：写盘读的是内存 Book 的 metadata，
+        // 写后再擦只改了内存（磁盘字节里标记还在，B2 守卫就是这么抓到的）。
+        // 擦之前先快照两个属性值，写盘失败原样回填——不能因为一次失败的另存为
+        // 把草稿状态丢掉（否则下次自动暂存前的 isMarkedDraft 二次校验会失配）。
+        String previousStatus = null;
+        String previousAutosavedAt = null;
+        boolean stripMarkers = !Autosave.isDraftFile(target) && Autosave.isMarkedDraft(book);
+        if (stripMarkers) {
+            previousStatus = book.metadata().property(Autosave.STATUS_PROPERTY);
+            previousAutosavedAt = book.metadata().property(Autosave.AUTOSAVED_AT_PROPERTY);
+            Autosave.unmarkDraft(book);
+        }
         try {
             writer.write(book, target);
             ctx.setCurrentFile(target);
@@ -496,7 +513,20 @@ public class DocumentActivity {
             status.setStatus("已保存到 " + target.getFileName());
             ctx.bus().publish(new AppEventBus.BookSavedEvent());
         } catch (IOException e) {
+            if (stripMarkers) {
+                restoreProperty(book, Autosave.STATUS_PROPERTY, previousStatus);
+                restoreProperty(book, Autosave.AUTOSAVED_AT_PROPERTY, previousAutosavedAt);
+            }
             errorReporter.accept("保存失败：无法写入 " + target + "（" + e.getMessage() + "）");
+        }
+    }
+
+    /** 回填 metadata 属性；值为 null 时移除该项。 */
+    private static void restoreProperty(Book book, String key, String value) {
+        if (value == null) {
+            book.metadata().properties().remove(key);
+        } else {
+            book.metadata().setProperty(key, value);
         }
     }
 

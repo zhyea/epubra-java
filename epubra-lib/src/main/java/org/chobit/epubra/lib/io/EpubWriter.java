@@ -138,6 +138,12 @@ public class EpubWriter {
                     .filter(r -> !r.isNavDocument())
                     .forEach(r -> book.spine().addResourceId(r.id()));
         }
+        if (book.spine().size() == 0) {
+            // 全书连一个文本资源都没有（罕见，例如只塞了图片的书）：EPUB 3 规范要求
+            // spine 至少含一个 itemref，不补的话写出的是阅读器打不开的不合法包。
+            // 补一个空章节兜底，元数据与目录一并由 addChapter 登记。
+            book.addChapter(metadata.firstTitle(), null);
+        }
         if (book.toc().isEmpty()) {
             for (Resource chapter : book.spineResources()) {
                 book.toc().add(ChapterTemplates.extractTitle(chapter.asString()),

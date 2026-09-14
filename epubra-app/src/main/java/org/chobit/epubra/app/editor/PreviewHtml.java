@@ -276,7 +276,12 @@ public final class PreviewHtml {
                 if (!body) { return; }
                 var stray = [];
                 for (var c = root.firstChild; c; c = c.nextSibling) {
-                  if (c.nodeType === 1 && c !== root.head && c !== body) { stray.push(c); }
+                  // 这里用 nodeName 判定，不用 root.head：文档按 XML 解析时 Element 上
+                  // 不保证有 head 属性（那是 HTMLDocument 的接口），取不到就是 undefined，
+                  // 判定恒真 → 会把 head 当成 body 之外的残留节点搬进 body
+                  if (c.nodeType === 1 && c.nodeName.toLowerCase() !== 'head' && c !== body) {
+                    stray.push(c);
+                  }
                 }
                 for (var i = 0; i < stray.length; i++) { body.appendChild(stray[i]); }
               }

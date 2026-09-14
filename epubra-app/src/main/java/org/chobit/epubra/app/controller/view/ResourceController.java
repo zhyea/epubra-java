@@ -21,8 +21,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -52,7 +52,15 @@ public class ResourceController {
     private Runnable updateStatus;
     private Consumer<String> setStatus;
     private Consumer<String> warn;
-    private BooleanSupplier confirm;
+    /**
+     * 带文案的确认通道：传入要展示的正文，返回用户是否确认。
+     *
+     * <p><b>必须带文案</b>——早先这里是无参的 {@code BooleanSupplier}，接线时只能复用
+     * 主控制器的「未保存的修改」确认框，导致删除/清理两条路径各自拼好的确认文案
+     * （资源名 + 引用警告 + 待清理清单）成了<b>死代码</b>：用户要么被问一个与资源无关的
+     * 问题，要么在书籍无改动时被静默删除。
+     */
+    private Function<String, Boolean> confirm;
     private ErrorReporter showError;
     private AsyncTasks.ProgressController progress;
     /**
@@ -95,7 +103,7 @@ public class ResourceController {
                      Runnable refreshAll, Runnable refreshResources,
                      Runnable refreshCoverCard,
                      Runnable updateStatus, Consumer<String> setStatus,
-                     Consumer<String> warn, BooleanSupplier confirm,
+                     Consumer<String> warn, Function<String, Boolean> confirm,
                      ErrorReporter showError,
                      AsyncTasks.ProgressController progress,
                      XhtmlInserter insertXhtml,
@@ -146,7 +154,7 @@ public class ResourceController {
 
     /** 资源列表初始化/重渲染：nav/NCX 资源不展示，由 {@link BookContext} 的 Epub 写出流程维护。 */
     public void refresh() {
-        if (resourceTable == null || ctx.book() == null || ctx.book().resources() == null) {
+        if (resourceTable == null || ctx == null || ctx.book() == null) {
             return;
         }
         Resource nav = ctx.book().navResource();
@@ -261,11 +269,8 @@ public class ResourceController {
             return;
         }
         Resource resource = row.getResource();
-        String message = "确定删除资源「" + row.getName() + "」？";
-        if (ResourceOps.isReferencedByChapters(ctx.book(), resource)) {
-            message += "\n\n注意：正文中存在对它的引用，删除后相关图片或样式将无法显示。";
-        }
-        if (!confirm.getAsBoolean()) {
+        boolean referenced = ResourceOps.isReferencedByChapters(ctx.book(), resource);
+        if (!confirmWith(deleteConfirmMessage(row.getName(), referenced))) {
             return;
         }
         beginChange.run();
@@ -483,7 +488,7 @@ public class ResourceController {
         if (orphans.size() > 12) {
             names += " 等";
         }
-        if (!confirm.getAsBoolean()) {
+        if (!confirmWith(cleanupConfirmMessage(orphans.size(), names))) {
             return;
         }
         beginChange.run();
@@ -499,6 +504,45 @@ public class ResourceController {
             return null;
         }
         return resourceTable.getSelectionModel().getSelectedItem();
+    }
+
+    /**
+     * 走带文案的确认通道。
+     *
+     * <p>确认回调缺失（未经 {@link #bind} 就被调用）时按「不确认」处理——宁可什么都不做，
+     * 也不能在没有用户确认的情况下删掉资源。
+     */
+    private boolean confirmWith(String message) {
+        return confirm != null && Boolean.TRUE.equals(confirm.apply(message));
+    }
+
+    /**
+     * 删除单个资源前的确认文案。
+     *
+     * <p>抽成静态纯函数是为了能无头单测——这段文案曾经<b>拼完即弃</b>：确认通道当时是无参的
+     * {@code BooleanSupplier}，文案根本传不进去，用户既看不到资源名，也永远看不到
+     * 「正文中存在对它的引用」这条警告。现在它直接作为 {@link #confirmWith} 的实参出现，
+     * 结构上不可能再被丢掉。
+     *
+     * @param fileName             资源展示名
+     * @param referencedByChapters 是否被正文引用（决定是否追加裂图警告）
+     */
+    static String deleteConfirmMessage(String fileName, boolean referencedByChapters) {
+        String message = "确定删除资源「" + fileName + "」？";
+        if (referencedByChapters) {
+            message += "\n\n注意：正文中存在对它的引用，删除后相关图片或样式将无法显示。";
+        }
+        return message;
+    }
+
+    /**
+     * 清理未引用资源前的确认文案：条数 + 前若干项文件名。
+     *
+     * <p>与 {@link #deleteConfirmMessage} 同款纪律——这份清单同样曾是死代码，用户被问了
+     * 一个与清理无关的问题，却不知道自己将删掉哪些文件。
+     */
+    static String cleanupConfirmMessage(int count, String names) {
+        return "确定清理以下 " + count + " 个未被引用的资源？\n\n" + names;
     }
 
     /**

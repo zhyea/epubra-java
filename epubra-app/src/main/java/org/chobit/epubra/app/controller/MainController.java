@@ -2,7 +2,10 @@ package org.chobit.epubra.app.controller;
 
 import netscape.javascript.JSObject;
 import org.chobit.epubra.app.EpubraApp;
+import org.chobit.epubra.app.activities.AutosaveIndicator;
 import org.chobit.epubra.app.activities.DocumentActivity;
+import org.chobit.epubra.app.activities.DraftRecoveryActivity;
+import org.chobit.epubra.app.activities.FileDropActivity;
 import org.chobit.epubra.app.activities.InsertActivity;
 import org.chobit.epubra.app.activities.StatusCoordinator;
 import org.chobit.epubra.app.activities.ThemeActivity;
@@ -21,8 +24,6 @@ import org.chobit.epubra.app.ui.FxNodes;
 import org.chobit.epubra.app.ui.ToolbarIcons;
 import org.chobit.epubra.app.context.AppEventBus;
 import org.chobit.epubra.app.context.BookContext;
-import org.chobit.epubra.app.document.Autosave;
-import org.chobit.epubra.app.document.AutosaveConfig;
 import org.chobit.epubra.app.editor.PreviewHtml;
 import org.chobit.epubra.app.editor.PreviewMirror;
 import org.chobit.epubra.app.editor.TextSearch;
@@ -30,7 +31,6 @@ import org.chobit.epubra.app.editor.Theme;
 import org.chobit.epubra.app.platform.AppPaths;
 import org.chobit.epubra.app.platform.AsyncTasks;
 import org.chobit.epubra.app.resource.ResourceOps;
-import org.chobit.epubra.app.workspace.WorkspaceStore;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.Resource;
 import org.chobit.epubra.lib.io.EpubReader;
@@ -38,13 +38,9 @@ import org.chobit.epubra.lib.io.EpubWriter;
 import org.chobit.epubra.lib.util.Hrefs;
 import org.chobit.epubra.lib.util.ResourceReferences;
 import org.chobit.epubra.lib.validation.EpubValidator;
-import javafx.animation.PauseTransition;
 import javafx.application.Platform;
-import javafx.beans.value.ChangeListener;
-import javafx.beans.value.ObservableValue;
 import javafx.fxml.FXML;
 import javafx.scene.Node;
-import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBar;
@@ -65,27 +61,17 @@ import javafx.scene.control.ToggleButton;
 import javafx.scene.control.ToggleGroup;
 import javafx.geometry.Insets;
 import javafx.scene.layout.VBox;
-import javafx.scene.input.Dragboard;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
-import javafx.scene.input.TransferMode;
 import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
-import javafx.scene.layout.VBox;
 import javafx.scene.web.WebEngine;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
-import javafx.stage.DirectoryChooser;
-import javafx.util.Duration;
 
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -263,13 +249,21 @@ public class MainController {
     private final List<Unsubscriber> busSubscribers = new ArrayList<>();
 
     /**
-     * 自动暂存的「停顿 N 秒后落盘」节流器。每次内容变更时调 {@link PauseTransition#playFromStart()}
-     * 重置计时；计时器到点才真正写盘——避免每按一个键都 IO。
-     *
-     * <p>由 {@code ctx.autosaveConfig().debounceSeconds()} 驱动；外部禁用开关
-     * {@code ctx.autosaveConfig().enabled() == false} 时干脆不挂监听（见 {@link #wireAutosave}）。
+     * 自动暂存节流器 + 状态栏指示灯。实现搬到 {@link AutosaveIndicator}（纯搬迁）；
+     * 主控制器只在 {@code markDirty()} 里调 {@link AutosaveIndicator#onDirty()}。
      */
-    private PauseTransition autosaveDebounce;
+    private AutosaveIndicator autosaveIndicator;
+
+    /**
+     * 启动草稿恢复（扫描 → 提示 → 收编进工作空间）。触发点在 {@link #setStage(Stage)} 末尾，
+     * 实现搬到 {@link DraftRecoveryActivity}（纯搬迁）。
+     */
+    private DraftRecoveryActivity draftRecoveryActivity;
+
+    /**
+     * 「拖图书文件到窗口即打开」。实现搬到 {@link FileDropActivity}（纯搬迁）。
+     */
+    private FileDropActivity fileDropActivity;
 
     /**
      * 当前主题。initialize 时取自持久化配置，切换后预览区与整个界面同步换色。
@@ -311,7 +305,9 @@ public class MainController {
             metadataViewController.setStage(stage);
         }
         workspaceActivity.refreshRecentMenu();
-        promptRecoveryIfAny();
+        if (draftRecoveryActivity != null) {
+            draftRecoveryActivity.promptIfAny();
+        }
     }
 
     /**
@@ -421,7 +417,7 @@ public class MainController {
                 this::refreshAll, this::refreshResources,
                 () -> metadataViewController.refreshCoverCard(),
                 status::refresh, status::set, this::warn,
-                this::confirmDiscardChanges, status::showError,
+                message -> confirm("请确认", message), status::showError,
                 status.progressSink(), this::insertXhtmlIntoActiveEditor,
                 // 插图要拿章节 href 算相对路径；这里必须接目录树的「当前章节」，
                 // 漏接会让工具条/资源面板插图恒报「请先选择章节」（曾真实发生）
@@ -450,8 +446,17 @@ public class MainController {
                 status::set, this::refreshPreview);
         themeActivity.initialize();
 
-        wireAutosave();
-        wireFileDropWhenSceneReady();
+        autosaveIndicator = new AutosaveIndicator(ctx, autosaveStatusLabel);
+        autosaveIndicator.wire();
+
+        fileDropActivity = new FileDropActivity(statusLabel, workspaceActivity::openBook);
+        fileDropActivity.wireWhenSceneReady();
+
+        // stage 晚绑定（() -> stage），welcomePageController 此时已 fx:include 注入并 bind 完
+        draftRecoveryActivity = new DraftRecoveryActivity(ctx,
+                status::set, this::warn, () -> stage,
+                welcomePageController::showWorkspace, welcomePageController::currentWorkspace,
+                () -> setCurrentChapter(null));
 
         ensureDocumentActivity();
         setEditorChromeVisible(false);
@@ -747,268 +752,6 @@ public class MainController {
         themeActivity.switchTo(Theme.SEPIA);
     }
 
-    // ------------------------------------------------------------------ 文件拖放
-
-    /**
-     * 装配「拖图书文件到窗口即打开」。
-     *
-     * <p>挂在 Scene 上而不是欢迎页节点上——欢迎页在载入书籍后就隐藏了，挂在那里之后
-     * 再也收不到拖放事件；而拖放打开应该是全流程可用的能力，不限于起始页。
-     */
-    private void wireFileDropWhenSceneReady() {
-        Scene scene = statusLabel.getScene();
-        if (scene != null) {
-            wireFileDropTo(scene);
-            return;
-        }
-        statusLabel.sceneProperty().addListener(new ChangeListener<>() {
-            @Override
-            public void changed(ObservableValue<? extends Scene> obs, Scene oldScene, Scene newScene) {
-                if (newScene == null) {
-                    return;
-                }
-                statusLabel.sceneProperty().removeListener(this);
-                wireFileDropTo(newScene);
-            }
-        });
-    }
-
-    private void wireFileDropTo(Scene scene) {
-        scene.setOnDragOver(event -> {
-            if (firstBookFile(event.getDragboard()) != null) {
-                event.acceptTransferModes(TransferMode.COPY);
-            }
-            event.consume();
-        });
-        scene.setOnDragDropped(event -> {
-            Path file = firstBookFile(event.getDragboard());
-            if (file == null) {
-                event.setDropCompleted(false);
-                event.consume();
-                return;
-            }
-            event.setDropCompleted(true);
-            event.consume();
-            workspaceActivity.openBook(file);
-        });
-    }
-
-    /** 从拖放载体里挑第一个图书文件；没有则返回 null。 */
-    private static Path firstBookFile(Dragboard board) {
-        if (board == null || !board.hasFiles()) {
-            return null;
-        }
-        List<File> files = board.getFiles();
-        if (files == null) {
-            return null;
-        }
-        for (File file : files) {
-            String lower = file.getName().toLowerCase();
-            if (file.isFile() && (lower.endsWith(".draft") || lower.endsWith(".epub"))) {
-                return file.toPath();
-            }
-        }
-        return null;
-    }
-
-     // ------------------------------------------------------------------ 自动暂存
-
-    /**
-     * 装配自动暂存的「停顿 N 秒后写盘」节流器。
-     *
-     * <p>逻辑：
-     * <ul>
-     *   <li>用户每次改动（{@link #markDirty}）都调 {@code playFromStart()} 重置计时；</li>
-     *   <li>计时器到点才调 {@link Autosave#flushNow(BookContext)} 写盘。</li>
-     * </ul>
-     *
-     * <p>若 {@link AutosaveConfig#enabled} 为 false 则完全跳过装配——
-     * Preferences 持久化的「自动暂存开关」是用户的最高优先级。
-     *
-     * <p>状态栏标签走 {@code autosaveStatusLabel}：保存中显示「保存中…」，落盘后回到「自动暂存」。
-     * CSS 类切换由 {@code markAutosaveSaving()} / {@code markAutosaveIdle()} 负责。
-     */
-    private void wireAutosave() {
-        if (!ctx.autosaveConfig().enabled()) {
-            markAutosaveDisabled();
-            return;
-        }
-        autosaveDebounce = new PauseTransition(
-                Duration.seconds(ctx.autosaveConfig().debounceSeconds()));
-        autosaveDebounce.setOnFinished(event -> {
-            Autosave.flushNow(ctx);
-            markAutosaveIdle();
-            updateAutosaveLabel();
-        });
-        markAutosaveIdle();
-        updateAutosaveLabel();
-    }
-
-    /**
-     * 标记为"已禁用"——配置文件说不存就不存，避免给用户错误预期。
-     */
-    private void markAutosaveDisabled() {
-        if (autosaveStatusLabel == null) {
-            return;
-        }
-        autosaveStatusLabel.setText("自动暂存 关");
-        autosaveStatusLabel.getStyleClass().removeAll("status-autosave-saving");
-        if (!autosaveStatusLabel.getStyleClass().contains("status-autosave-off")) {
-            autosaveStatusLabel.getStyleClass().add("status-autosave-off");
-        }
-    }
-
-    /**
-     * 用户刚改了东西——重启节流计时，UI 先翻到"保存中"状态。
-     */
-    private void markAutosaveSaving() {
-        if (autosaveStatusLabel == null) {
-            return;
-        }
-        autosaveStatusLabel.getStyleClass().removeAll("status-autosave-off");
-        if (!autosaveStatusLabel.getStyleClass().contains("status-autosave-saving")) {
-            autosaveStatusLabel.getStyleClass().add("status-autosave-saving");
-        }
-    }
-
-    /**
-     * 节流到点 → 刚写完盘 → 落回"空闲"样式。
-     */
-    private void markAutosaveIdle() {
-        if (autosaveStatusLabel == null) {
-            return;
-        }
-        autosaveStatusLabel.getStyleClass().removeAll("status-autosave-saving", "status-autosave-off");
-    }
-
-    /**
-     * 把"自动暂存 开 / 关 + 间隔 N 秒"展示到状态栏标签上。
-     */
-    private void updateAutosaveLabel() {
-        if (autosaveStatusLabel == null) {
-            return;
-        }
-        if (!ctx.autosaveConfig().enabled()) {
-            markAutosaveDisabled();
-            return;
-        }
-        autosaveStatusLabel.setText("自动暂存 " + ctx.autosaveConfig().debounceSeconds() + "s");
-    }
-
-    /**
-     * 启动时扫描可恢复的草稿：发现就弹 Alert，让用户选恢复到哪个工作空间。
-     *
-     * <p>由 {@link #setStage(Stage)} 调用（而不是 {@code initialize()}）：需要在 stage 就绪后
-     * 才有 owner 窗口，且 GUI 测试链路上不会触发弹窗。
-     *
-     * <h2>为什么恢复必须绑定工作空间</h2>
-     * <p>没有工作空间就无从创建 / 维护图书，反过来"有图书草稿就该有工作空间"。启动扫描
-     * 命中的都是<b>未归属工作空间</b>的孤儿草稿（{@code ~/.Epubra/autosave/*.draft}），
-     * 所以这里的恢复语义是<b>收编</b>：读出来 → 以书名写成
-     * {@code <workspace>/<书名>.draft} → 清掉孤儿。提示里必须写明工作空间的名称与完整路径，
-     * 恢复后 {@code ctx.currentFile()} 指向工作空间里的真实文件（旧实现留 null，
-     * 造成"恢复出来的书不属于任何工作空间，改完又写回孤儿目录"的死循环）。
-     *
-     * <h2>为什么用 {@code show()} 而不是 {@code showAndWait()}</h2>
-     * <p>启动流程跑在 FX 线程上。{@code showAndWait()} 会开一个嵌套事件循环把 FX 线程
-     * 停在原地，一旦没人应答弹窗（无人值守启动、GUI 测试里恰好存在遗留的孤儿草稿），
-     * 整个应用连同测试一起挂死。这里改为 {@code show()} + {@code setOnHidden}：
-     * 弹窗依旧是模态的，用户应答后走同一条回调，但 FX 线程立即返回。
-     */
-    private void promptRecoveryIfAny() {
-        Optional<Path> orphan = Autosave.findRecoverable(ctx);
-        if (orphan.isEmpty()) {
-            return;
-        }
-        Path file = orphan.get();
-        Path workspace = WorkspaceStore.initial().orElse(null);
-
-        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("恢复草稿");
-        alert.setHeaderText(Autosave.recoveryPromptHeader(workspace));
-        alert.setContentText(Autosave.recoveryPromptText(file, workspace, Instant.now()));
-        if (stage != null) {
-            alert.initOwner(stage);
-        }
-        ButtonType acceptBtn = new ButtonType(
-                workspace == null ? "选择工作空间并恢复" : "恢复到此工作空间");
-        ButtonType discardBtn = new ButtonType("丢弃");
-        alert.getButtonTypes().setAll(acceptBtn, discardBtn);
-        alert.setOnHidden(event -> onRecoveryChoice(file, workspace, alert.getResult(), acceptBtn));
-        alert.show();
-    }
-
-    /** 恢复弹窗的应答处理：接受 → 收编进工作空间；其它（含"丢弃"/直接关窗）→ 删掉孤儿。 */
-    private void onRecoveryChoice(Path file, Path workspace, ButtonType result, ButtonType acceptBtn) {
-        if (result != acceptBtn) {
-            // 丢弃：删掉孤儿草稿，让后续启动不再反复提示。
-            deleteQuietly(file);
-            return;
-        }
-        Path targetWorkspace = workspace != null ? workspace : chooseRecoveryWorkspace();
-        if (targetWorkspace == null) {
-            // 没有工作空间就无从归属——保留草稿，下次启动再提示。
-            status.set("未选择工作空间，草稿仍保留在自动暂存目录");
-            return;
-        }
-        adoptOrphanDraft(file, targetWorkspace);
-    }
-
-    /** 让用户为孤儿草稿挑一个工作空间；取消时返回 null。 */
-    private Path chooseRecoveryWorkspace() {
-        DirectoryChooser chooser = new DirectoryChooser();
-        chooser.setTitle("选择草稿要恢复到的工作空间");
-        workspacePathHint().ifPresent(dir -> chooser.setInitialDirectory(dir.toFile()));
-        File selected = chooser.showDialog(stage);
-        return selected == null ? null : selected.toPath();
-    }
-
-    private Optional<Path> workspacePathHint() {
-        return WorkspaceStore.initial().filter(Files::isDirectory);
-    }
-
-    /**
-     * 把孤儿草稿收编进工作空间：读内容 → 以书名写成 {@code <ws>/<书名>.draft} → 删孤儿
-     * → 落到 ctx（{@code currentFile} 指向工作空间内的文件）→ 切首页工作空间 → 广播加载事件。
-     */
-    private void adoptOrphanDraft(Path orphan, Path workspace) {
-        try {
-            Book restored = Autosave.readDraft(orphan);
-            String title = restored.metadata().firstTitle();
-            String stem = title == null || title.isBlank()
-                    ? Autosave.stripDraftSuffix(orphan.getFileName().toString())
-                    : title;
-            Path target = Autosave.writeIntoWorkspace(restored, workspace, stem);
-            deleteQuietly(orphan);
-
-            WorkspaceStore.add(workspace);
-            ctx.setBook(restored);
-            ctx.setCurrentFile(target);
-            restored.setSource(target);
-            setCurrentChapter(null);
-            ctx.setDirty(true);
-            ctx.history().reset();
-            ctx.setEditCaptured(false);
-            if (!workspace.equals(welcomePageController.currentWorkspace())) {
-                welcomePageController.showWorkspace(workspace);
-            }
-            ctx.bus().publish(new AppEventBus.BookLoadedEvent());
-            status.set("已把草稿恢复到工作空间：" + target.getFileName());
-        } catch (IOException e) {
-            warn("草稿恢复失败：" + e.getMessage());
-        }
-    }
-
-    private static void deleteQuietly(Path file) {
-        try {
-            Files.deleteIfExists(file);
-        } catch (IOException e) {
-            System.getLogger(MainController.class.getName())
-                    .log(System.Logger.Level.WARNING,
-                            "Failed to discard draft: " + e.getMessage(), e);
-        }
-    }
-
     // ------------------------------------------------------------------ 活动栏与侧边栏
 
     /**
@@ -1246,29 +989,42 @@ public class MainController {
         }
     }
 
+    /** 引用块：可视化编辑器内切换 blockquote；源码视图退化为包一层 {@code blockquote}。 */
     @FXML
     public void onInsertQuote() {
-        applyVisualFormat("quote");
+        if (!applyVisualFormat("quote")) {
+            insertActivity.wrapTag("blockquote");
+        }
     }
 
+    /** 分隔线：可视化编辑器内插入 hr；源码视图插一行自闭合的 hr 片段。 */
     @FXML
     public void onInsertRule() {
-        applyVisualFormat("rule");
+        if (!applyVisualFormat("rule")) {
+            insertActivity.insertFragment("<hr/>", "<hr/>".length());
+        }
     }
 
     @FXML
     public void onInsertUnderline() {
-        applyVisualFormat("underline");
+        if (!applyVisualFormat("underline")) {
+            insertActivity.wrapTag("u");
+        }
     }
 
+    /** 删除线：可视化编辑器内包裹 del；源码视图用同一标签，保持回写净化口径一致。 */
     @FXML
     public void onInsertStrike() {
-        applyVisualFormat("strike");
+        if (!applyVisualFormat("strike")) {
+            insertActivity.wrapTag("del");
+        }
     }
 
     @FXML
     public void onInsertCode() {
-        applyVisualFormat("code");
+        if (!applyVisualFormat("code")) {
+            insertActivity.wrapTag("code");
+        }
     }
 
     /**
@@ -1921,10 +1677,7 @@ public class MainController {
     private void markDirty() {
         ctx.setDirty(true);
         // 内容 / 元数据改动都触发自动暂存节流；loading 期间的内容回填不算真实改动，跳过。
-        if (!ctx.loading() && autosaveDebounce != null) {
-            autosaveDebounce.playFromStart();
-            markAutosaveSaving();
-        }
+        autosaveIndicator.onDirty();
         status.refresh();
     }
 

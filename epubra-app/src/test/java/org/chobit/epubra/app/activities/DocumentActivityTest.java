@@ -3,6 +3,7 @@ package org.chobit.epubra.app.activities;
 import org.chobit.epubra.app.context.AppEventBus.BookLoadedEvent;
 import org.chobit.epubra.app.context.AppEventBus.BookSavedEvent;
 import org.chobit.epubra.app.context.BookContext;
+import org.chobit.epubra.app.document.Autosave;
 import org.chobit.epubra.app.platform.AsyncTasks;
 import org.chobit.epubra.app.ui.model.NewDraftResult;
 import org.chobit.epubra.app.workspace.WorkspaceStore;
@@ -210,6 +211,70 @@ class DocumentActivityTest {
         assertFalse(ctx.dirty());
         assertEquals("已保存到 saved.draft", status.get());
         assertEquals(1, saveEvents.get());
+    }
+
+    /**
+     * B2 守卫：自动暂存（{@link Autosave#flushNow}）会给 Book 打上
+     * {@code dcterms:status=draft} + {@code epubra:autosaved-at}，另存为正式 {@code .epub}
+     * 时必须擦掉——否则用户把这个文件当正式版发布，包内却留着「草稿」标记。
+     */
+    @Test
+    void saveToFormalEpubStripsDraftMarkers() throws IOException {
+        BookContext ctx = new BookContext();
+        DocumentActivity doc = new DocumentActivity(ctx, s -> {}, () -> true,
+                noopDialogs(), AsyncTasks.NOOP_PROGRESS, s -> {});
+        doc.newBook();
+        Autosave.markDraft(ctx.book());
+        assertTrue(Autosave.isMarkedDraft(ctx.book()), "前置条件：草稿标记应当已打上");
+
+        Path epub = workspace.resolve("正式版.epub");
+        doc.saveTo(epub);
+
+        assertFalse(Autosave.isMarkedDraft(ctx.book()), "另存为正式 EPUB 后不该残留草稿标记");
+        // 不能只看内存对象——落盘的字节里也必须没有，读回来验一遍
+        Book reread = new EpubReader().read(epub);
+        assertFalse(Autosave.isMarkedDraft(reread),
+                "写出的正式包内不得含 dcterms:status=draft");
+    }
+
+    /** 与上一条对称：目标是 {@code .draft} 时标记必须保留，它本身就是草稿。 */
+    @Test
+    void saveToDraftKeepsDraftMarkers() throws IOException {
+        BookContext ctx = new BookContext();
+        DocumentActivity doc = new DocumentActivity(ctx, s -> {}, () -> true,
+                noopDialogs(), AsyncTasks.NOOP_PROGRESS, s -> {});
+        doc.newBook();
+        Autosave.markDraft(ctx.book());
+
+        Path draft = workspace.resolve("续写.draft");
+        doc.saveTo(draft);
+
+        assertTrue(Autosave.isMarkedDraft(ctx.book()),
+                "保存到 .draft 时草稿标记必须保留");
+    }
+
+    /**
+     * B2 反面守卫：正式另存为失败时，预先擦掉的草稿标记必须回填——
+     * 一次失败的另存为不该让「草稿状态」凭空消失。
+     */
+    @Test
+    void saveToFormalEpubFailureRestoresDraftMarkers() throws IOException {
+        BookContext ctx = new BookContext();
+        DocumentActivity doc = new DocumentActivity(ctx, s -> {}, () -> true,
+                noopDialogs(), AsyncTasks.NOOP_PROGRESS, s -> {});
+        doc.newBook();
+        Autosave.markDraft(ctx.book());
+
+        Path unwritable = workspace.resolve("正式版目录.epub");
+        Files.createDirectory(unwritable);
+
+        doc.saveTo(unwritable);
+
+        assertTrue(Files.isDirectory(unwritable));
+        assertTrue(Autosave.isMarkedDraft(ctx.book()),
+                "另存为失败后草稿标记必须回填");
+        assertNotNull(ctx.book().metadata().property(Autosave.AUTOSAVED_AT_PROPERTY),
+                "时间戳属性也要一起回填，否则恢复提示会显示不出暂存时间");
     }
 
     @Test

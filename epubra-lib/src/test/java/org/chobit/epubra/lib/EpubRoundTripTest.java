@@ -42,6 +42,24 @@ class EpubRoundTripTest {
     private final EpubWriter writer = new EpubWriter();
     private final EpubReader reader = new EpubReader();
 
+    /**
+     * B6 守卫：全书没有任何文本资源时 spine 会是空的，而 EPUB 3 规范要求 spine 至少含一个
+     * itemref——不兜底就会写出阅读器打不开的包。{@code normalize} 必须补一个章节。
+     */
+    @Test
+    void 无文本资源时仍然写出至少一个spine条目() throws IOException {
+        Book book = new Book();
+        book.metadata().setFirstTitle("纯图片书");
+
+        Path target = tempDir.resolve("no-text.epub");
+        writer.write(book, target);
+        Book reloaded = reader.read(target);
+
+        assertFalse(reloaded.spine().references().isEmpty(),
+                "spine 不能为空：EPUB 3 要求至少一个 itemref");
+        assertEquals(1, reloaded.spine().size(), "兜底只需要一个章节");
+    }
+
     @Test
     void 写出后读回应保留元数据与章节内容() throws IOException {
         Book book = BookFactory.createEmpty("往返测试书籍");
