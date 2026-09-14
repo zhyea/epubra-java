@@ -12,6 +12,7 @@ import javafx.scene.web.WebView;
 import javafx.stage.Stage;
 import org.chobit.epubra.app.context.BookContext;
 import org.chobit.epubra.app.controller.view.TocController;
+import org.chobit.epubra.app.editor.VisualEditorSession;
 import org.chobit.epubra.app.ui.model.ChapterNode;
 import org.chobit.epubra.lib.domain.Book;
 import org.chobit.epubra.lib.domain.BookFactory;
@@ -189,8 +190,10 @@ class VisualEditorToolbarActivationTest {
         while (System.currentTimeMillis() < deadline) {
             AtomicReference<Boolean> ready = new AtomicReference<>(false);
             runOnFx(() -> {
-                Boolean loaded = field(mainController, "visualEditorLoaded");
-                if (Boolean.TRUE.equals(loaded)) {
+                // loaded 标记已随会话迁往 VisualEditorSession（拆分批次 B）——它必须与
+                // JS 桥、序列化回写同处一地，所以这里从会话上读，而不是主控制器的字段
+                VisualEditorSession session = field(mainController, "visualEditorSession");
+                if (session != null && session.isLoaded()) {
                     Object format = mainControllerRun("typeof window.epubraFormat === 'function'");
                     Object bridge = mainControllerRun("!!window.epubraBridge");
                     ready.set(Boolean.TRUE.equals(format) && Boolean.TRUE.equals(bridge));

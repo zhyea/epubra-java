@@ -1,10 +1,10 @@
 package org.chobit.epubra.app.controller;
 
-import netscape.javascript.JSObject;
 import org.chobit.epubra.app.EpubraApp;
 import org.chobit.epubra.app.activities.AutosaveIndicator;
 import org.chobit.epubra.app.activities.DocumentActivity;
 import org.chobit.epubra.app.activities.DraftRecoveryActivity;
+import org.chobit.epubra.app.activities.EditorShellActivity;
 import org.chobit.epubra.app.activities.FileDropActivity;
 import org.chobit.epubra.app.activities.InsertActivity;
 import org.chobit.epubra.app.activities.StatusCoordinator;
@@ -14,35 +14,30 @@ import org.chobit.epubra.app.activities.WorkspaceActivity;
 import org.chobit.epubra.app.controller.layout.SidebarController;
 import org.chobit.epubra.app.controller.view.FindController;
 import org.chobit.epubra.app.controller.view.MetadataViewController;
+import org.chobit.epubra.app.controller.view.PreviewController;
 import org.chobit.epubra.app.controller.view.ResourceController;
 import org.chobit.epubra.app.controller.view.TocController;
 import org.chobit.epubra.app.controller.view.ValidationController;
 import org.chobit.epubra.app.controller.view.WelcomePageController;
 import org.chobit.epubra.app.context.Unsubscriber;
 import org.chobit.epubra.app.ui.model.ChapterNode;
-import org.chobit.epubra.app.ui.FxNodes;
 import org.chobit.epubra.app.ui.ToolbarIcons;
 import org.chobit.epubra.app.context.AppEventBus;
 import org.chobit.epubra.app.context.BookContext;
-import org.chobit.epubra.app.editor.PreviewHtml;
-import org.chobit.epubra.app.editor.PreviewMirror;
+import org.chobit.epubra.app.editor.EditorToolbarController;
 import org.chobit.epubra.app.editor.TextSearch;
 import org.chobit.epubra.app.editor.Theme;
+import org.chobit.epubra.app.editor.VisualEditorSession;
 import org.chobit.epubra.app.platform.AppPaths;
 import org.chobit.epubra.app.platform.AsyncTasks;
-import org.chobit.epubra.app.resource.ResourceOps;
 import org.chobit.epubra.lib.domain.Book;
-import org.chobit.epubra.lib.domain.Resource;
 import org.chobit.epubra.lib.io.EpubReader;
 import org.chobit.epubra.lib.io.EpubWriter;
-import org.chobit.epubra.lib.util.Hrefs;
-import org.chobit.epubra.lib.util.ResourceReferences;
 import org.chobit.epubra.lib.validation.EpubValidator;
 import javafx.application.Platform;
 import javafx.fxml.FXML;
-import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.control.Alert;
-import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Dialog;
@@ -73,10 +68,8 @@ import javafx.scene.web.WebView;
 import javafx.stage.Stage;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * 主窗口控制器：目录浏览、章节编辑、元数据维护与 EPUB 存取。
@@ -159,8 +152,6 @@ public class MainController {
     @FXML
     private StackPane welcomePage;
 
-    @FXML
-    private MenuItem problemsItem;
     @FXML
     private MenuItem splitPreviewItem;
 
@@ -274,9 +265,28 @@ public class MainController {
     private WorkspaceActivity workspaceActivity;
 
     /**
-     * 编辑区呈现模式：{@code false} = 内容与预览分标签，{@code true} = 左右并排对照。
+     * 编辑器外壳（活动栏 / 状态栏 / 「编辑 · 章节 · 插入 · 工具」四个菜单）的显隐。
+     * 实现搬到 {@link EditorShellActivity}（纯搬迁，拆分批次 C）。
      */
-    private boolean splitPreview = false;
+    private EditorShellActivity editorShellActivity;
+
+    /**
+     * 预览区：渲染 / 资源镜像 / 并排预览模式。实现搬到 {@link PreviewController}
+     * （纯搬迁，拆分批次 C）。构造点必须在任何 {@code refreshPreview()} 调用之前。
+     */
+    private PreviewController previewController;
+
+    /**
+     * 格式化工具条的状态点亮。实现搬到 {@link EditorToolbarController}（纯搬迁，拆分批次 B）。
+     * 构造点必须早于 {@link VisualEditorSession}——会话持的是它的方法引用。
+     */
+    private EditorToolbarController editorToolbarController;
+
+    /**
+     * 可视化编辑会话（WebView ↔ 正文的双向同步、JS 桥、序列化回写、格式命令）。
+     * 实现搬到 {@link VisualEditorSession}（纯搬迁，拆分批次 B）。
+     */
+    private VisualEditorSession visualEditorSession;
 
     /**
      * 主窗口 stage 由 {@code EpubraApp} 在 FXML 加载完成后注入——晚于 {@link #initialize()}。
@@ -305,6 +315,7 @@ public class MainController {
             metadataViewController.setStage(stage);
         }
         workspaceActivity.refreshRecentMenu();
+        installSceneAccelerators(stage);
         if (draftRecoveryActivity != null) {
             draftRecoveryActivity.promptIfAny();
         }
@@ -334,17 +345,45 @@ public class MainController {
         // 编辑视图与预览视图共用同一个 WebView 缓存目录，避免多套 native 缓存
         WebEngine visualEngine = visualEditorView.getEngine();
         visualEngine.setUserDataDirectory(AppPaths.webviewCacheDir().toFile());
+        // 拆分批次 B/C：外壳显隐、预览区、工具条状态、可视化编辑会话各自成类（纯搬迁）。
+        // 构造顺序有硬约束——下面把 editorToolbarController::update 交给会话，
+        // 方法引用在**求值那一刻**就必须拿到非空实例，所以工具条要先建；
+        // previewController 必须早于任何 refreshPreview()（findBar / 主题 / 切 tab 都会调它）。
+        editorShellActivity = new EditorShellActivity(activityBar, statusBar,
+                editMenu, chapterMenu, insertMenu, toolsMenu);
+        // 资源镜像（预览 / 可视化编辑器里相对引用的解析基准，惰性同步、构造不碰磁盘）
+        // 现由 PreviewController 持有，换书时自动清空重建。
+        previewController = new PreviewController(ctx, previewView, contentArea,
+                editorTabs, splitPreviewPane, splitPreviewItem,
+                this::currentChapter, () -> themeActivity.current(),
+                SOURCE_TAB_INDEX, PREVIEW_TAB_INDEX);
+        editorToolbarController = new EditorToolbarController(editorToolbar);
+        visualEditorSession = new VisualEditorSession(ctx, visualEditorView, contentArea,
+                this::currentChapter, this::previewBaseHref,
+                () -> themeActivity.current(),
+                // 一次输入编辑步：与源码区共用同一本账（撤销快照 + 600ms 静默合并）
+                () -> {
+                    ensureUndoActivity();
+                    undoActivity.onTextInput();
+                },
+                () -> {
+                    ensureUndoActivity();
+                    undoActivity.undo();
+                },
+                () -> {
+                    ensureUndoActivity();
+                    undoActivity.redo();
+                },
+                this::markDirty, () -> status.refresh(),
+                editorToolbarController::update);
+
         // window 在每次文档加载后都是新对象，桥必须跟着重装，否则 loadContent 之后
         // 旧 window 上的 epubraBridge 就没了，页面里的改动再也回不来。
         visualEngine.getLoadWorker().stateProperty().addListener((obs, oldState, newState) -> {
             if (newState == javafx.concurrent.Worker.State.SUCCEEDED) {
-                installVisualEditorBridge();
+                visualEditorSession.installBridge();
             }
         });
-
-        // 资源镜像：预览 / 可视化编辑器里的相对引用（图片、字体、CSS）要靠它才有解析基准。
-        // 惰性同步，构造本身不碰磁盘；换书时自动清空重建。
-        previewMirror = PreviewMirror.forUserData();
 
         // 工具条文字换图标：图形 + Tooltip 由 ToolbarIcons 统一管理（见该类 javadoc）。
         ToolbarIcons.install(editorToolbar);
@@ -394,7 +433,6 @@ public class MainController {
         tocViewController.setOnChapterSelected(this::showChapter);
 
         sidebarController.setupDefault();
-        bindProblemsAccelerator();
 
         welcomePageController.bind(
                 this::onNew,
@@ -555,25 +593,13 @@ public class MainController {
     }
 
     /**
-     * 编辑器外壳（活动栏 / 状态栏）与「编辑 · 章节 · 插入 · 工具」四个菜单的整体显隐。
+     * 编辑器外壳（活动栏 / 状态栏 /「编辑 · 章节 · 插入 · 工具」四个菜单）的显隐。
      *
-     * <p>首页是书架（欢迎页），没有打开的图书——这些控件在那里既无操作对象也无意义，一律收起。
-     * 启动时（{@link #initialize()}）与「切回书架」时传 {@code false}；收到
-     * {@link AppEventBus.BookLoadedEvent}（新建 / 打开 / 恢复草稿）时传 {@code true}。
-     * 文件 / 视图 / 帮助 是全局命令，不在此列。
-     *
-     * <p>{@code Menu} 没有 {@code managed} 概念（{@code MenuBar} 本就会过滤掉不可见的菜单），
-     * 故走 {@link FxNodes#setVisible(javafx.scene.control.Menu, boolean)} 只切 {@code visible}。
-     * 附带效果：{@code MenuBarSkin} 只为可见菜单注册加速键，收起后 Ctrl+F、F2 等编辑类
-     * 快捷键在首页随之失效——正是期望行为。
+     * <p>实现搬到 {@link EditorShellActivity}（纯搬迁，拆分批次 C）；FXML 的
+     * {@code onAction} 与事件订阅只能指到主控制器，故这里保留一行委派。
      */
     private void setEditorChromeVisible(boolean visible) {
-        FxNodes.setVisibleManaged(activityBar, visible);
-        FxNodes.setVisibleManaged(statusBar, visible);
-        FxNodes.setVisible(editMenu, visible);
-        FxNodes.setVisible(chapterMenu, visible);
-        FxNodes.setVisible(insertMenu, visible);
-        FxNodes.setVisible(toolsMenu, visible);
+        editorShellActivity.setVisible(visible);
     }
 
     @FXML
@@ -710,46 +736,17 @@ public class MainController {
     /**
      * 「视图 → 并排预览」开关：标签模式 ↔ 左右并排对照。
      *
-     * <p>长文档在标签模式下要反复切 Tab 才能看到改动效果，并排模式让源码与渲染结果同屏，
-     * 省掉切换成本。
+     * <p>模式切换与重渲染都在 {@link PreviewController#toggleSplit()}（拆分批次 C）；
+     * 状态提示留在这里——状态栏归 {@code StatusCoordinator}，预览类不认识它。
      */
     @FXML
     public void onToggleSplitPreview() {
-        splitPreview = !splitPreview;
-        applyPreviewMode();
-        refreshPreview();
-        status.set(splitPreview ? "已切换为并排预览" : "已切换为标签预览");
+        boolean split = previewController.toggleSplit();
+        status.set(split ? "已切换为并排预览" : "已切换为标签预览");
     }
 
-    /**
-     * 把 contentArea 与 previewView 在两个父容器之间搬移。
-     *
-     * <p>一个 Node 只能挂在一个父容器下，所以两种模式不能各持一份，只能切一次搬一次。
-     * 摘 Tab 内容时先 {@code setContent(null)}——直接把节点塞进 SplitPane 会让 JavaFX
-     * 抛「节点已有父容器」异常。
-     */
-    private void applyPreviewMode() {
-        if (splitPreviewPane == null || editorTabs == null || editorTabs.getTabs().size() < 3) {
-            return;
-        }
-        // tab 顺序：0 编辑 / 1 源码 / 2 预览；并排模式仍只搬源码与预览两个节点，
-        // 编辑 tab 留在标签页里（可视化编辑与并排预览互斥使用）。
-        if (splitPreview) {
-            editorTabs.getTabs().get(1).setContent(null);
-            editorTabs.getTabs().get(2).setContent(null);
-            splitPreviewPane.getItems().setAll(contentArea, previewView);
-        } else {
-            splitPreviewPane.getItems().clear();
-            editorTabs.getTabs().get(1).setContent(contentArea);
-            editorTabs.getTabs().get(2).setContent(previewView);
-        }
-        // 两个容器互斥显示：visible 与 managed 必须同步，否则隐藏的那个仍占 StackPane 布局
-        FxNodes.setVisibleManaged(editorTabs, !splitPreview);
-        FxNodes.setVisibleManaged(splitPreviewPane, splitPreview);
-        if (splitPreviewItem != null) {
-            splitPreviewItem.setText(splitPreview ? "标签预览" : "并排预览");
-        }
-    }
+    // 预览区（渲染 / 相对引用基准 / 并排模式节点搬运）已迁往
+    // controller/view/PreviewController（拆分批次 C，纯搬迁）。
 
     // ------------------------------------------------------------------ 主题
     // 实现全部在 ThemeActivity（activities 包）；FXML 的 onAction 只能绑主控制器方法，
@@ -773,16 +770,32 @@ public class MainController {
     // ------------------------------------------------------------------ 活动栏与侧边栏
 
     /**
-     * 给「问题面板」菜单项挂上 Ctrl+` 快捷键。
+     * 安装<b>场景级</b>快捷键：Ctrl+` 切换底部问题面板。
      *
-     * <p>放在 controller 而不是 FXML：{@code KeyCombination} 对反引号的解析在不同实现下并不可靠，
-     * 直接用 {@link KeyCode#BACK_QUOTE} 构造最稳。
+     * <p>这个快捷键原先挂在「视图 → 问题面板」菜单项上。该菜单项已按 UI 精简要求从
+     * 「视图」菜单移除（面板仍可由活动栏「校验」按钮打开），快捷键随之迁到这里——
+     * 入口收敛了，但功能不该跟着丢。
+     *
+     * <p>反引号用 {@link KeyCode#BACK_QUOTE} 直接构造：{@code KeyCombination} 的字符串
+     * 解析对反引号在不同实现下并不可靠（这正是当初没写进 FXML {@code accelerator=} 的原因）。
+     *
+     * <p>{@link #setStage(Stage)} 被调用时 stage 还没有 scene（{@code EpubraApp} 的顺序是
+     * {@code setStage()} → {@code new Scene()} → {@code stage.setScene()}），所以这里补一个
+     * 一次性监听，等 scene 就位再挂。
      */
-    private void bindProblemsAccelerator() {
-        if (problemsItem != null) {
-            problemsItem.setAccelerator(
-                    new KeyCodeCombination(KeyCode.BACK_QUOTE, KeyCombination.CONTROL_DOWN));
+    private void installSceneAccelerators(Stage stage) {
+        KeyCombination toggleProblems =
+                new KeyCodeCombination(KeyCode.BACK_QUOTE, KeyCombination.CONTROL_DOWN);
+        Scene scene = stage.getScene();
+        if (scene != null) {
+            scene.getAccelerators().put(toggleProblems, this::onToggleProblems);
+            return;
         }
+        stage.sceneProperty().addListener((obs, old, now) -> {
+            if (now != null) {
+                now.getAccelerators().put(toggleProblems, this::onToggleProblems);
+            }
+        });
     }
 
     /**
@@ -833,11 +846,11 @@ public class MainController {
     }
 
     /**
-     * 「视图 → 问题面板」：面板与活动栏按钮一起切换，快捷键 Ctrl+`。
-     * <p>保持原入口：底部面板可见性、按钮选中与立即校验这些是同一个编排序列，
-     * 与 {@link #onShowProblems} 不同的是这里按钮选中由 sidebar 内部同步。
+     * 切换底部问题面板，快捷键 Ctrl+`（见 {@link #installSceneAccelerators(Stage)}）。
+     *
+     * <p>面板可见性、活动栏按钮选中与立即校验是同一个编排序列，这里交给 sidebar 内部同步；
+     * 与 {@link #onShowProblems}（活动栏「校验」按钮）的差别是那个入口的按钮选中态自己维护。
      */
-    @FXML
     public void onToggleProblems() {
         if (bottomPanel.isVisible()) {
             sidebarController.hideProblems();
@@ -1119,14 +1132,9 @@ public class MainController {
     /** {@link #onInsertLink()} 结果转换里「取消链接」按钮的哨兵值。 */
     private static final String UNLINK_RESULT = "\u0000unlink";
 
-    /** 读取可视化编辑器里光标所在链接的 href；编辑器未就绪或不在链接内返回空串。 */
+    /** 读取可视化编辑器里光标所在链接的 href；实现搬到 {@link VisualEditorSession#queryLinkHref()}。 */
     private String queryLinkHref() {
-        try {
-            Object href = visualEditorView.getEngine().executeScript("window.epubraQueryLink()");
-            return href instanceof String s ? s : "";
-        } catch (RuntimeException notLoadedYet) {
-            return "";
-        }
+        return visualEditorSession.queryLinkHref();
     }
 
     // ------------------------------------------------------------------
@@ -1178,7 +1186,7 @@ public class MainController {
         flushCurrentChapter();
         setCurrentChapter(node);
         // 编辑视图不会在非「编辑」tab 时自动重载，先标记失效，防止旧章节内容被回写到新章节
-        visualEditorLoaded = false;
+        visualEditorSession.invalidate();
         ctx.setLoading(true);
         try {
             if (node == null || node.resource() == null) {
@@ -1211,7 +1219,7 @@ public class MainController {
         if (onVisualTab()) {
             reloadVisualEditor();
         } else {
-            visualEditorLoaded = false;
+            visualEditorSession.invalidate();
         }
         ctx.setLoading(true);
         try {
@@ -1224,150 +1232,20 @@ public class MainController {
 
     // ------------------------------------------------------------------ 可视化编辑
 
-    /**
-     * 安装 JS 桥：编辑视图里的改动经 {@code window.epubraBridge.onEdited(xhtml)} 回传。
-     *
-     * <p>回调在 FX 线程触发（WebView 的 JS 引擎就在 FX 线程上跑），可直接改 {@code Book}。
-     */
-    private void installVisualEditorBridge() {
-        JSObject window = (JSObject) visualEditorView.getEngine().executeScript("window");
-        window.setMember("epubraBridge", new VisualEditBridge());
-    }
+    // JS 桥 / 序列化回写 / 光标处格式命令（含 VisualEditBridge 内部类与源码区同步）
+    // 已整体迁往 {@link org.chobit.epubra.app.editor.VisualEditorSession}（拆分批次 B，纯搬迁）。
+    // 以下保留一行委派：FXML 的 onAction 与 ResourceController 的 XhtmlInserter 只能指到
+    // 主控制器，caller 侧不因此改动。
 
-    /** 暴露给页面脚本的回写入口；必须是 public 类 + public 方法，桥才能反射调用。 */
-    public final class VisualEditBridge {
-        public void onEdited(String xhtml) {
-            if (xhtml == null || xhtml.isBlank()) {
-                return;
-            }
-            // 三道防线之三（同 flushVisualEditor）：回写进书前再剥一次编辑脚本
-            xhtml = PreviewHtml.stripInjectedScript(xhtml);
-            ChapterNode current = currentChapter();
-            if (current == null || current.resource() == null) {
-                return;
-            }
-            String existing = current.resource().asString();
-            if (existing != null && existing.equals(xhtml)) {
-                return; // 内容没变（例如只是切了焦点）——不打扰撤销栈
-            }
-            // 与源码编辑同样走 onTextInput：一次连续输入只记一次快照，600ms 静默合并。
-            // 不能用 beginChange()——它会 commitPendingEdits() → flushCurrentChapter()
-            // → flushVisualEditor() → 回到这里，构成递归。
-            ensureUndoActivity();
-            undoActivity.onTextInput();
-            current.resource().setString(xhtml);
-            ctx.invalidateWordCounts();
-            markDirty();
-            syncSourceFromVisualEditor(xhtml);
-            status.refresh();
-        }
-
-        /**
-         * 光标 / 选区变化：把当前生效的格式名传给 Java，点亮工具条。
-         *
-         * <p>页面在 {@code selectionchange} / {@code keyup} / {@code mouseup} 时主动上报，
-         * 不需要 Java 轮询。
-         */
-        public void onSelectionChanged(String activeFormats) {
-            updateToolbarState(activeFormats);
-        }
-
-        /**
-         * Ctrl+Z / Ctrl+Y：走应用级快照撤销，与菜单、源码区共用一本账。
-         *
-         * <p>必须挪到下一个脉冲执行——此刻还在 JS 调用栈里，而撤销会重载整个编辑视图
-         * （{@code loadContent}），在 {@code executeScript} 中途换页面是不安全的。
-         */
-        public void onUndo() {
-            Platform.runLater(() -> {
-                ensureUndoActivity();
-                undoActivity.undo();
-            });
-        }
-
-        /** Ctrl+Y / Ctrl+Shift+Z：同 {@link #onUndo()}，只是反转方向。 */
-        public void onRedo() {
-            Platform.runLater(() -> {
-                ensureUndoActivity();
-                undoActivity.redo();
-            });
-        }
-    }
-
-    /** 把可视化编辑的结果同步到源码 tab，避免两个 tab 显示的内容不一致。 */
-    private void syncSourceFromVisualEditor(String xhtml) {
-        if (contentArea == null || contentArea.isDisabled()) {
-            return;
-        }
-        // 用户正停在源码 tab 打字时不要覆盖他的输入——以他为权威，等他改完自然写回正文
-        if (contentArea.isFocused()) {
-            return;
-        }
-        ctx.setLoading(true);
-        try {
-            int caret = contentArea.getCaretPosition();
-            contentArea.setText(xhtml);
-            contentArea.positionCaret(Math.min(caret, xhtml.length()));
-        } finally {
-            ctx.setLoading(false);
-        }
-    }
-
-    /**
-     * 把当前章节载入可视化编辑器。
-     *
-     * <p>只在切到「编辑」tab 或换章节时调用——不为每次击键重建文档，否则输入会被打断。
-     */
+    /** 把当前章节载入可视化编辑器；实现搬到 {@link VisualEditorSession#reload()}。 */
     private void reloadVisualEditor() {
-        ChapterNode current = currentChapter();
-        String xhtml = current == null || current.resource() == null
-                ? ""
-                : current.resource().asString();
-        visualEditorLoaded = current != null && current.resource() != null;
-        visualEditorView.getEngine().loadContent(
-                PreviewHtml.editableDocument(xhtml, themeActivity.current(), previewBaseHref(current)),
-                "application/xhtml+xml");
+        visualEditorSession.reload();
     }
 
-    /**
-     * 主动把编辑器里的最新内容拉回正文（不等 600ms 节流）。
-     *
-     * <p>切章节 / 保存前调用：用户可能刚敲完就点了别处，节流还没到点。
-     *
-     * @return 是否确实写回了内容；调用方据此避免再用旧的源码文本覆盖
-     */
+    /** 主动把编辑器里的最新内容拉回正文；实现搬到 {@link VisualEditorSession#flush()}。 */
     private boolean flushVisualEditor() {
-        if (visualEditorView == null || !visualEditorLoaded) {
-            return false;
-        }
-        try {
-            Object result = visualEditorView.getEngine().executeScript("window.epubraSerialize()");
-            if (result instanceof String raw && !raw.isBlank()) {
-                // 三道防线之三：回写进书前再剥一次编辑脚本——任何序列化层的疏漏
-                // 都不能污染正文（#51：脚本曾整段混进章节源码）
-                String xhtml = PreviewHtml.stripInjectedScript(raw);
-                ChapterNode current = currentChapter();
-                if (current != null && current.resource() != null
-                        && !xhtml.equals(current.resource().asString())) {
-                    // 同 onEdited：复用输入编辑步的合并逻辑，且不能调 beginChange()（递归）
-                    ensureUndoActivity();
-                    undoActivity.onTextInput();
-                    current.resource().setString(xhtml);
-                    // 源码区也要跟上（onEdited 路径做了、这里漏了曾导致两 tab 不同步）：
-                    // 否则紧随其后的切 tab 会经 flushCurrentChapter 用旧源码文本
-                    // 把刚写进资源的可视化改动冲掉
-                    syncSourceFromVisualEditor(xhtml);
-                    ctx.invalidateWordCounts();
-                    markDirty();
-                    return true;
-                }
-            }
-        } catch (RuntimeException ignored) {
-            // 页面尚未加载完 / 脚本不可用：忽略，正文保持原样
-        }
-        return false;
+        return visualEditorSession.flush();
     }
-
     /**
      * 编辑 tab 切换联动：切到「编辑」时把当前章节推给可视化编辑器，
      * 切到「预览」时刷新渲染（编辑期间不重载页面，免得打断输入）。
@@ -1381,8 +1259,8 @@ public class MainController {
             // 离开「编辑」tab：先把最新内容推回正文，再让它失效——不能依赖页面 blur 一定触发
             if (oldIdx != null && oldIdx.intValue() == VISUAL_TAB_INDEX && index != VISUAL_TAB_INDEX) {
                 flushVisualEditor();
-                visualEditorLoaded = false;
-                clearToolbarState();
+                visualEditorSession.invalidate();
+                editorToolbarController.clear();
             }
             if (index < 0 || currentChapter() == null) {
                 return;
@@ -1395,7 +1273,7 @@ public class MainController {
             flushCurrentChapter();
             if (index == VISUAL_TAB_INDEX) {
                 // 新文档是全新的一棵树，旧的高亮不再成立
-                clearToolbarState();
+                editorToolbarController.clear();
                 reloadVisualEditor();
             } else if (index == PREVIEW_TAB_INDEX) {
                 refreshPreview();
@@ -1414,124 +1292,38 @@ public class MainController {
     private static final int PREVIEW_TAB_INDEX = 2;
 
     // ------------------------------------------------------------------ 工具条对可视化编辑器的操作
+    // 命令实现与工具条点亮已分别迁往 editor/VisualEditorSession 与
+    // editor/EditorToolbarController（拆分批次 B，纯搬迁）。下面只留一行委派——
+    // FXML 的 onAction 与 ResourceController 的 XhtmlInserter 只能指到主控制器。
 
     /**
      * 对可视化编辑器施加一次富文本操作。
      *
-     * <p>kind 取值：{@code paragraph} / {@code heading} / {@code quote} / {@code list} /
-     * {@code rule} / {@code bold} / {@code italic} / {@code underline} / {@code strike} /
-     * {@code code} / {@code link}，全部是硬编码的 ASCII 字面量，可直接拼进脚本，无需转义。
-     *
+     * @param kind 格式名（{@code paragraph} / {@code heading} / … / {@code link} / {@code unlink}）
      * @return 是否真的改了内容；false 表示编辑视图还没就绪或命令被拒绝
      */
     private boolean applyVisualFormat(String kind) {
-        return applyVisualFormat(kind, null);
+        return visualEditorSession.format(kind);
     }
 
-    /**
-     * 带参数的格式化命令（目前只有 {@code link} 需要 href）。
-     *
-     * <p>参数经 {@code window} 上的临时成员传入，不拼进脚本——URL 里可能有引号与反斜杠。
-     */
+    /** 带参数的格式化命令（目前只有 {@code link} 需要 href）。 */
     private boolean applyVisualFormat(String kind, String value) {
-        if (!visualEditorReady()) {
-            return false;
-        }
-        WebEngine engine = visualEditorView.getEngine();
-        try {
-            if (value == null) {
-                Object ok = engine.executeScript("window.epubraFormat('" + kind + "')");
-                return Boolean.TRUE.equals(ok);
-            }
-            JSObject window = (JSObject) engine.executeScript("window");
-            window.setMember(PENDING_VALUE_MEMBER, value);
-            Object ok = engine.executeScript(
-                    "window.epubraFormat('" + kind + "', window." + PENDING_VALUE_MEMBER + ")");
-            window.setMember(PENDING_VALUE_MEMBER, null);
-            return Boolean.TRUE.equals(ok);
-        } catch (RuntimeException notLoadedYet) {
-            return false;
-        }
+        return visualEditorSession.format(kind, value);
     }
 
     /** 可视化编辑器是否可用于施加上下文命令（已加载完成且内容对应当前章节）。 */
     private boolean visualEditorReady() {
-        return visualEditorView != null && visualEditorLoaded;
+        return visualEditorSession.ready();
     }
 
     /**
      * 把一段 XHTML 片段插到可视化编辑器的光标处（图片等）。
      *
-     * <p>片段先经 {@code window} 上的临时成员传进去，而不是拼进脚本字符串——
-     * 标签里带引号，手工转义容易出错。
+     * <p>片段经 {@code window} 上的临时成员传入，不拼脚本字符串——标签里带引号。
      */
     private boolean insertHtmlIntoVisualEditor(String xhtml) {
-        if (!visualEditorReady() || xhtml == null) {
-            return false;
-        }
-        WebEngine engine = visualEditorView.getEngine();
-        try {
-            JSObject window = (JSObject) engine.executeScript("window");
-            window.setMember(PENDING_HTML_MEMBER, xhtml);
-            Object ok = engine.executeScript(
-                    "window.epubraInsertHtml(window." + PENDING_HTML_MEMBER + ")");
-            window.setMember(PENDING_HTML_MEMBER, null);
-            return Boolean.TRUE.equals(ok);
-        } catch (RuntimeException notLoadedYet) {
-            return false;
-        }
+        return visualEditorSession.insertHtml(xhtml);
     }
-
-    /** {@link #applyVisualFormat(String, String)} 传参用的临时成员名。 */
-    private static final String PENDING_VALUE_MEMBER = "__epubraPendingValue";
-
-    /** 工具条按钮「当前格式生效」时挂的样式类，见 app.css 的 {@code .flat-button.active}。 */
-    private static final String TOOLBAR_ACTIVE_CLASS = "active";
-
-    /** 动作按钮的标记样式类（如「图片」）：没有「光标处格式生效」状态，不参与点亮。 */
-    private static final String TOOLBAR_ACTION_CLASS = "toolbar-action";
-
-    /**
-     * 按 {@code window.epubraQuery()} 的返回值点亮工具条。
-     *
-     * <p>按钮的 {@code id} 就是格式名（见 main-window.fxml），所以这里不用为每个按钮
-     * 维护一个字段——遍历子节点读 id 即可，加按钮时不必改 Java。
-     *
-     * @param active 空格分隔的生效格式名，如 {@code "bold italic"}；空串表示无
-     */
-    private void updateToolbarState(String active) {
-        if (editorToolbar == null) {
-            return;
-        }
-        Set<String> on = active == null || active.isBlank()
-                ? Set.of()
-                : new HashSet<>(List.of(active.trim().split("\\s+")));
-        for (Node child : editorToolbar.getChildren()) {
-            if (!(child instanceof Button button) || button.getId() == null) {
-                continue;
-            }
-            // 动作按钮（如「图片」= 弹文件选择器）没有「生效格式」状态，
-            // epubraQuery 永远不会返回它的 id；不跳过的话它只是一个永不点亮的摆设。
-            if (button.getStyleClass().contains(TOOLBAR_ACTION_CLASS)) {
-                continue;
-            }
-            boolean shouldBeOn = on.contains(button.getId());
-            boolean isOn = button.getStyleClass().contains(TOOLBAR_ACTIVE_CLASS);
-            if (shouldBeOn && !isOn) {
-                button.getStyleClass().add(TOOLBAR_ACTIVE_CLASS);
-            } else if (!shouldBeOn && isOn) {
-                button.getStyleClass().remove(TOOLBAR_ACTIVE_CLASS);
-            }
-        }
-    }
-
-    /** 离开编辑 tab 时清掉工具条的高亮，避免切回来还留着上一章的状态。 */
-    private void clearToolbarState() {
-        updateToolbarState("");
-    }
-
-    /** {@link #insertHtmlIntoVisualEditor} 传片段用的临时成员名。 */
-    private static final String PENDING_HTML_MEMBER = "__epubraPendingHtml";
 
     /**
      * 把一段 XHTML 片段插到「当前激活的编辑器」。
@@ -1567,78 +1359,22 @@ public class MainController {
         return true;
     }
 
-    /**
-     * 把片段里 {@code <img>} 引用的资源补写进预览镜像。
-     *
-     * <p>src 是相对章节目录的引用，先还原成容器内路径再找资源；找不到（外部地址、
-     * 资源缺失）就跳过——镜像只服务「能解析到的图」，缺资源该裂还是裂，属上游问题。
-     * 写盘是几个小文件的 {@code Files.write}，与章节加载时 {@code baseHrefFor} 的
-     * 同步镜像同一口径，不为此起后台任务。
-     */
+    /** 补写预览镜像；实现搬到 {@link PreviewController#mirrorImagesReferencedBy(String)}（批次 C）。 */
     private void mirrorImagesReferencedBy(String xhtml) {
-        if (previewMirror == null || ctx.book() == null || xhtml == null || xhtml.isEmpty()) {
-            return;
-        }
-        ChapterNode current = currentChapter();
-        if (current == null || current.resource() == null) {
-            return;
-        }
-        String baseDir = Hrefs.parentDirectory(current.resource().href());
-        for (String src : ResourceOps.extractImageSrcs(xhtml)) {
-            String target = ResourceReferences.resolveTarget(baseDir, src);
-            if (target == null) {
-                continue;
-            }
-            Resource resource = ResourceReferences.findResource(ctx.book().resources(), target).resource();
-            if (resource != null) {
-                previewMirror.mirrorResource(ctx.book(), resource);
-            }
-        }
+        previewController.mirrorImagesReferencedBy(xhtml);
     }
 
-    /**
-     * 编辑视图当前内容是否<b>对应当前章节</b>。
-     *
-     * <p>必须严格维护：编辑视图在非「编辑」tab 时不会随章节切换重载，若此时误判为「已加载」
-     * 并拉取内容，会把上一章正文写到新章节里。
-     */
-    private boolean visualEditorLoaded;
+    // 「编辑视图当前内容是否对应当前章节」的 loaded 标记已随会话迁往 VisualEditorSession
+    // （拆分批次 B）——它必须与 JS 桥、序列化回写同处一地，散在外面迟早会被漏掉某处重置。
 
-    /**
-     * 预览 / 可视化编辑器的资源镜像（{@code ~/.Epubra/preview/}）。
-     *
-     * <p>存在意义：{@code loadContent} 的页面源是 {@code about:blank}，不注入 {@code <base>}
-     * 的话正文里的相对图片引用一个也加载不出来。
-     */
-    private PreviewMirror previewMirror;
-
+    /** 重渲染预览区；实现搬到 {@link PreviewController#refresh()}（拆分批次 C，纯搬迁）。 */
     private void refreshPreview() {
-        ChapterNode current = currentChapter();
-        if (current == null || current.resource() == null) {
-            previewView.getEngine().loadContent(PreviewHtml.emptyDocument(themeActivity.current()));
-            return;
-        }
-        // 预览区是 WebView，吃不到 -epubra-* 变量，改为往 XHTML 里注入一段内联主题样式；
-        // 相对引用（图片等）则靠 <base> 指向资源镜像才解析得出来。
-        previewView.getEngine().loadContent(
-                PreviewHtml.withBaseHref(
-                        PreviewHtml.withTheme(current.resource().asString(), themeActivity.current()),
-                        previewBaseHref(current)),
-                "application/xhtml+xml");
+        previewController.refresh();
     }
 
-    /**
-     * 预览 / 可视化编辑器里相对引用的解析基准：当前章节在资源镜像里的目录 URI。
-     *
-     * <p>WebView 走 {@code loadContent}，页面源是 {@code about:blank}，没有基准时正文里的
-     * {@code <img src="../images/a.png"/>} 会静默加载失败。返回 {@code null} 表示镜像不可用，
-     * 此时退回「不注入 base」的老行为——图片显示不出来，但正文一切照常。
-     */
+    /** 相对引用的解析基准；实现搬到 {@link PreviewController#baseHref(ChapterNode)}（拆分批次 C）。 */
     private String previewBaseHref(ChapterNode current) {
-        if (previewMirror == null || current == null || current.resource() == null) {
-            return null;
-        }
-        return previewMirror.baseHrefFor(ctx.book(), current.resource().href());
+        return previewController.baseHref(current);
     }
 
     /**

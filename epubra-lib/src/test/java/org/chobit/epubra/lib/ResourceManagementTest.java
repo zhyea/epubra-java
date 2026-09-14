@@ -141,4 +141,63 @@ class ResourceManagementTest {
         assertTrue(book.unreferencedResources().stream().anyMatch(r -> r == cover),
                 "清除封面后该图片不再被保护，应可被清理");
     }
+
+    /**
+     * {@code Resources} 双索引一致性：同 href 换人时，旧条目的 id 索引必须一起摘掉。
+     *
+     * <p>旧实现只对命中的那张表做 {@code put}，另一张表里会留下一个指向「已不在集合中」
+     * 的对象的僵尸条目，于是 {@code getById(旧 id)} 能查到一个不在 {@code all()} 里的资源。
+     *
+     * <p>计数断言用「相对 before」，因为 {@code createEmpty} 已经带了一个章节资源。
+     */
+    @Test
+    void 同href换人时id索引不得残留僵尸条目() {
+        Book book = BookFactory.createEmpty("双索引");
+        var resources = book.resources();
+        Resource old = new Resource("r-old", "images/pic.png", "image/png");
+        Resource fresh = new Resource("r-new", "images/pic.png", "image/png");
+        int before = resources.size();
+
+        resources.add(old);
+        resources.add(fresh);
+
+        assertTrue(fresh == resources.getByHref("images/pic.png"));
+        assertNull(resources.getById("r-old"), "被换掉的旧 id 不该还能查到");
+        assertTrue(fresh == resources.getById("r-new"));
+        assertEquals(before + 1, resources.size(), "同 href 覆盖不该让资源总数增长");
+    }
+
+    /** 对称场景：同 id 换人（href 不同）时，旧 href 索引必须一起摘掉。 */
+    @Test
+    void 同id换人时href索引不得残留僵尸条目() {
+        Book book = BookFactory.createEmpty("双索引");
+        var resources = book.resources();
+        Resource old = new Resource("r-x", "images/a.png", "image/png");
+        Resource fresh = new Resource("r-x", "images/b.png", "image/png");
+        int before = resources.size();
+
+        resources.add(old);
+        resources.add(fresh);
+
+        assertTrue(fresh == resources.getById("r-x"));
+        assertNull(resources.getByHref("images/a.png"), "被换掉的旧 href 不该还能查到");
+        assertTrue(fresh == resources.getByHref("images/b.png"));
+        assertEquals(before + 1, resources.size(), "同 id 覆盖不该让资源总数增长");
+    }
+
+    /** 重复加入同一个对象必须幂等，不能被上面两条清理逻辑误删。 */
+    @Test
+    void 重复加入同一资源应幂等() {
+        Book book = BookFactory.createEmpty("双索引");
+        var resources = book.resources();
+        Resource only = new Resource("r-1", "images/only.png", "image/png");
+        int before = resources.size();
+
+        resources.add(only);
+        resources.add(only);
+
+        assertTrue(only == resources.getById("r-1"));
+        assertTrue(only == resources.getByHref("images/only.png"));
+        assertEquals(before + 1, resources.size());
+    }
 }

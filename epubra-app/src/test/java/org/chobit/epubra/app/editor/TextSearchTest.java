@@ -166,4 +166,58 @@ class TextSearchTest {
         assertEquals(-1, TextSearch.indexOfIdAttribute(null, "p1"));
         assertEquals(-1, TextSearch.indexOfIdAttribute("", "p1"));
     }
+
+    /**
+     * 问题面板定位的选中长度必须等于「实际匹配到什么」。
+     *
+     * <p>正文里不会出现 {@code text/ch1.xhtml} 这种带路径的整串，于是会退化成末段
+     * {@code ch1.xhtml} 匹配；旧实现无论走哪条降级路径都按整串锚点长度算选区，
+     * 末段匹配时会越过匹配文本多高亮一截。
+     */
+    @Test
+    @DisplayName("末段降级匹配时返回的长度是末段长度，不是整串锚点长度")
+    void locateAnchorTailFallbackKeepsMatchedLength() {
+        String xhtml = "<p><a href=\"ch1.xhtml\">下一章</a></p>";
+        String anchor = "text/ch1.xhtml";
+
+        TextSearch.AnchorMatch match = TextSearch.locateAnchor(xhtml, anchor, false);
+
+        assertTrue(match != null, "整串搜不到时末段应能匹配");
+        assertEquals("ch1.xhtml", xhtml.substring(match.index(), match.end()),
+                "选区必须恰好等于实际匹配到的末段（旧实现按整串长度会多选 5 个字符）");
+    }
+
+    @Test
+    @DisplayName("整串命中时选区就是锚点本身")
+    void locateAnchorFullMatchUsesAnchorLength() {
+        String xhtml = "<img src=\"images/cover.png\"/>";
+        String anchor = "images/cover.png";
+
+        TextSearch.AnchorMatch match = TextSearch.locateAnchor(xhtml, anchor, false);
+
+        assertTrue(match != null, "整串应能直接匹配");
+        assertEquals(anchor, xhtml.substring(match.index(), match.end()));
+    }
+
+    @Test
+    @DisplayName("片段锚点优先按 id 属性定位，选区是 id 本身")
+    void locateAnchorFragmentPrefersIdAttribute() {
+        String xhtml = "<p id=\"sec2\">正文</p>";
+
+        TextSearch.AnchorMatch match = TextSearch.locateAnchor(xhtml, "sec2", true);
+
+        assertTrue(match != null, "id 属性应能定位");
+        assertEquals("sec2", xhtml.substring(match.index(), match.end()));
+        assertEquals(TextSearch.indexOfIdAttribute(xhtml, "sec2"), match.index());
+    }
+
+    @Test
+    @DisplayName("找不到锚点或入参为空时返回 null")
+    void locateAnchorReturnsNullWhenMissing() {
+        assertTrue(TextSearch.locateAnchor("<p>正文</p>", "缺失", false) == null);
+        assertTrue(TextSearch.locateAnchor(null, "a", false) == null);
+        assertTrue(TextSearch.locateAnchor("<p>正文</p>", "", false) == null);
+        assertTrue(TextSearch.locateAnchor("<p>正文</p>", "foo/bar/baz", false) == null,
+                "末段也搜不到时同样返回 null");
+    }
 }

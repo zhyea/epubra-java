@@ -201,15 +201,34 @@ public class MetadataViewController {
      * 并立即刷新封面卡（三态判定 + 缩略图加载）。
      */
     public void loadIntoFields(Metadata metadata) {
-        MetadataDraft draft = MetadataOps.snapshot(metadata);
-        titleField.setText(draft.title());
-        authorField.setText(draft.authors());
-        languageField.setText(draft.language());
-        publisherField.setText(draft.publisher());
-        descriptionArea.setText(draft.description());
-        Metadata.Identifier identifier = metadata.primaryIdentifier();
-        identifierLabel.setText(identifier == null ? "—（保存时自动生成）" : identifier.raw());
+        // 判空口径与 textOf / editableFields() 一致：metadata 为 null（无书）或字段未注入
+        // （不经 FXML 直接 new）都不该抛 NPE——本方法由 refreshAll 等路径无条件下发。
+        // metadata 为 null 时投影成空面板：留着上一本书的值比重置更容易误导用户。
+        MetadataDraft draft = metadata == null
+                ? new MetadataDraft("", "", "", "", "")
+                : MetadataOps.snapshot(metadata);
+        setText(titleField, draft.title());
+        setText(authorField, draft.authors());
+        setText(languageField, draft.language());
+        setText(publisherField, draft.publisher());
+        setText(descriptionArea, draft.description());
+        Metadata.Identifier identifier = metadata == null ? null : metadata.primaryIdentifier();
+        setText(identifierLabel, identifier == null ? "—（保存时自动生成）" : identifier.raw());
         refreshCoverCard();
+    }
+
+    /** 写文本控件；字段未注入（不经 FXML 直接 new）时静默跳过，与 {@link #textOf} 同一套口径。 */
+    private static void setText(TextInputControl field, String value) {
+        if (field != null) {
+            field.setText(value);
+        }
+    }
+
+    /** 写标签；未注入时静默跳过。 */
+    private static void setText(Label field, String value) {
+        if (field != null) {
+            field.setText(value);
+        }
     }
 
     /**

@@ -211,31 +211,24 @@ public class ValidationController {
         return ctx.book().resources().getByHref(Hrefs.resolve(ctx.book().contentDirectory(), href));
     }
 
-    /** 在正文中选中出问题的位置：锚点 id 优先，其次引用原文串，再退化为文件名。 */
+    /** 在正文中选中出问题的位置：锚点 id 优先，其次引用原文串，再退化为末段文件名。 */
     private void highlightIssueAnchor(ValidationIssueRow row) {
         String anchor = row.anchor();
         if (anchor.isEmpty() || contentArea.isDisabled()) {
             contentArea.positionCaret(0);
             return;
         }
-        String text = contentArea.getText();
-        int index = row.anchorIsFragment() ? TextSearch.indexOfIdAttribute(text, anchor) : -1;
-        if (index < 0) {
-            index = TextSearch.indexOf(text, anchor, 0, true);
-        }
-        if (index < 0) {
-            int slash = anchor.lastIndexOf('/');
-            if (slash >= 0 && slash + 1 < anchor.length()) {
-                index = TextSearch.indexOf(text, anchor.substring(slash + 1), 0, true);
-            }
-        }
-        if (index < 0) {
+        TextSearch.AnchorMatch match =
+                TextSearch.locateAnchor(contentArea.getText(), anchor, row.anchorIsFragment());
+        if (match == null) {
             contentArea.positionCaret(0);
             setStatus.accept("已定位到章节，但正文中没找到该引用的位置");
             return;
         }
         contentArea.requestFocus();
-        contentArea.selectRange(index, index + anchor.length());
+        // 选中长度取「实际匹配到什么」，而不是锚点原文长度：末段匹配时后者偏大，
+        // 高亮会越过匹配文本多选中一截（锚点 id 路径下两者恰好相等）
+        contentArea.selectRange(match.index(), match.end());
         setStatus.accept("已定位到问题所在位置");
     }
 }

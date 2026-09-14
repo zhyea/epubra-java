@@ -13,7 +13,7 @@
 > | B1~B8 | ✅ 全部修复 | 各带守卫测试（新增 8 条）；门禁 448 全绿 + 冒烟零异常 |
 > | 拆分批次 A | ✅ 完成 | `AutosaveIndicator` / `DraftRecoveryActivity` / `FileDropActivity`；MainController **1931 → 1684** |
 > | 拆分批次 D | ✅ 完成 | D1 脚本外置（PreviewHtml **1101 → 355**）；D2 FormatTest 拆 5 类 + 脚手架；门禁 **449** 全绿 |
-> | 拆分批次 B/C | ⏸ 待拍板 | 实测 B≈230 行 / C≈60 行（报告估 400/95），但耦合十余个字段；**收益风险比已变化，先对齐再动手** |
+> | 拆分批次 B/C | ✅ 完成（2026-09-14） | B = `VisualEditorSession` + `EditorToolbarController`，C = `PreviewController` + `EditorShellActivity`；MainController **1721 → 1442**；详见文末「第三轮」 |
 >
 > 当前基线更新为 **449**（lib 68 + app 381）。
 
@@ -31,7 +31,46 @@
 >
 > 本轮门禁：**456** 全绿（lib 69 + app 387）+ 冒烟零异常（`javafx:run` exit 143 = `timeout` 杀进程，属预期）。
 >
-> 判定为**非缺陷**：#4（locale 相关小写化，理论问题）、#6（FX 线程自动暂存 = 既有架构选择）、#7 `ValidationController.selectRange` 选区过伸、#9 `Resources` 同 href/id 静默覆盖、#10 `WelcomePageController` FX 线程图片解码、#11 `MetadataViewController.loadIntoFields` 缺判空 —— 均为轻微健壮性项，未纳入本轮。
+> 判定为**非缺陷**：#4（locale 相关小写化，理论问题）、#6（FX 线程自动暂存 = 既有架构选择）；#7 / #9 / #10 / #11 为轻微健壮性项，转入下一轮。
+
+> **第三轮（2026-09-14）** —— 轻微项收口 + 拆分批次 B/C 落地
+>
+> **轻微项**
+>
+> | 编号 | 结果 | 说明 |
+> |---|---|---|
+> | #7 | ✅ 已修 | `ValidationController.highlightIssueAnchor` 改用新增的 `TextSearch.locateAnchor`（返回匹配下标 + **实际匹配长度**）。原先退化到「取最后一个 `/` 之后末段」时仍按锚点原长选区 → 选区过伸 |
+> | #9 | ✅ 已修 | `Resources.add` 覆写时清理**对侧索引**的僵尸条目（同 href 换人 → 清 byId；同 id 换人 → 清 byHref）；同对象重复加入保持幂等 |
+> | #10 | ⛔ **未修** | `Image(InputStream,…)` **没有** backgroundLoading 重载（只有 URL 变体有）。想从内存字节异步解码，只能先落临时文件或转 `data:` URI —— 两者都更差。经 `javap` 核对 `javafx-graphics-24.0.1` 构造器后**维持同步实现 + 注释留证**，不做假修复 |
+> | #11 | ✅ 已修 | `MetadataViewController.loadIntoFields` 判空 `metadata`（null → 投射空 `MetadataDraft`），并加 `setText` 小工具跳过未注入的字段 |
+>
+> 守卫测试：`TextSearchTest`(4)、`ResourceManagementTest`(3)、`MetadataViewControllerTest`(1) —— 共 8 条；门禁 **464** 全绿（lib 72 + app 392）。
+>
+> **拆分批次 C**（预览 / 外壳，纯搬运）
+>
+> | 新类 | 迁出内容 |
+> |---|---|
+> | `controller/view/PreviewController.java` | `refreshPreview` + `previewBaseHref` + `applyPreviewMode` + `onToggleSplitPreview` + `previewMirror` 字段 + `mirrorImagesReferencedBy` |
+> | `activities/EditorShellActivity.java` | `setEditorChromeVisible`（活动栏 / 状态栏 / 4 个编辑类 Menu） |
+>
+> 取舍两处：① 资源镜像与「相对引用解析基准」同处一地才讲得通，故 `previewMirror` 一并搬入预览类；② `onToggleSplitPreview` **不注入状态栏**，只回传布尔值由主控制器写提示——预览类不认识 `StatusCoordinator`。tab 索引经构造参数注入，不复制常量。
+>
+> **拆分批次 B**（可视化编辑簇，纯搬运）
+>
+> | 新类 | 迁出内容 |
+> |---|---|
+> | `editor/VisualEditorSession.java` | `installVisualEditorBridge` + `VisualEditBridge` + `syncSourceFromVisualEditor` + `reloadVisualEditor` + `flushVisualEditor` + `visualEditorLoaded` + `PENDING_*` 常量 |
+> | `editor/EditorToolbarController.java` | `updateToolbarState` + `clearToolbarState` + `TOOLBAR_*` 常量 |
+>
+> 取舍：**`wireEditorTabSwitching` / `onVisualTab` / `insertXhtmlIntoActiveEditor` 留在主控制器**——它们是跨面板编排（先 flush 源码区，再决定 reload 还是刷预览），搬出去会绕成回调环。会话只认「我的 WebView 与正文」，副作用一律经注入钩子走出（`undoStep` / `undoAction` / `redoAction` / `markDirty` / `statusRefresh` / `toolbarState`）。FXML 与 `ResourceController.XhtmlInserter` 侧只留**一行委派**，caller 不变。
+>
+> 构造顺序硬约束：`editorToolbarController` 必须先于 `visualEditorSession` 构造——后者持有 `editorToolbarController::update` 方法引用，**方法引用在求值那一刻就要拿到非空实例**。
+>
+> 结果：`MainController` **1721 → 1442**（-279 行 / -16%）；门禁 **464** 全绿 + 冒烟零异常（`javafx:run` exit 124 = `timeout` 杀进程，属预期）。
+>
+> ⚠ 测试联动：`VisualEditorToolbarActivationTest` 原先反射读 `MainController.visualEditorLoaded`，已改为读 `visualEditorSession.isLoaded()` —— `loaded` 标记必须与 JS 桥同处一地，散在外面迟早漏掉某处重置。
+>
+> 当前基线：**464**（lib 72 + app 392）；拆分批次 A / B / C / D 全部完成。
 
 ---
 

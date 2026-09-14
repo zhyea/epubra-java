@@ -203,6 +203,13 @@ public class WelcomePageController {
     private Node bookCard(ShelfBook book) {
         StackPane cover = coverContainer();
         if (book.coverBytes() != null) {
+            // 同步解码，暂不异步化——⚠ 别再试「给 InputStream 构造器加 backgroundLoading」：
+            // Image(InputStream,…) 只有 1 参 / 5 参两种重载，backgroundLoading 只存在于
+            // URL 变体（Image(String,w,h,preserveRatio,smooth,backgroundLoading)），
+            // javafx-graphics 24.0.1 源码已核实。封面字节来自 .draft 包内，没有现成的
+            // file: URL；要真异步就得先落临时文件、或走 data: URI（base64 + MIME 必须与
+            // 真实格式一致），两者引入的活动部件都多过它省下的那点卡顿。
+            // 若将来书架明显卡顿，按上面任一条路改造，而不是重试这个重载。
             Image image = new Image(new ByteArrayInputStream(book.coverBytes()),
                     COVER_WIDTH, COVER_HEIGHT, true, true);
             if (!image.isError()) {

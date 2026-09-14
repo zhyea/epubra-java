@@ -91,8 +91,6 @@
                     <items>
                         <MenuItem text="刷新预览" onAction="#onRefreshPreview"/>
                         <SeparatorMenuItem/>
-                        <!-- 快捷键 Ctrl+` 在控制器里绑定：FXML 的 accelerator 字符串解析反引号不可靠 -->
-                        <MenuItem fx:id="problemsItem" text="问题面板" onAction="#onToggleProblems"/>
                         <MenuItem fx:id="splitPreviewItem" text="并排预览" onAction="#onToggleSplitPreview"/>
                         <SeparatorMenuItem/>
                         <RadioMenuItem fx:id="themeLightItem" text="浅色" onAction="#onThemeLight"
