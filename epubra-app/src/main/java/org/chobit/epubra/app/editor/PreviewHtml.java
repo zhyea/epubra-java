@@ -235,14 +235,50 @@ public final class PreviewHtml {
                   if (el && el.parentNode) { el.parentNode.removeChild(el); }
                 }
               }
+              // 每次加载都会往 head 注入 base / style / script 三个元素，其中 style 与
+              // script 各带一个换行；stripInjected 只删元素、把相邻的空白文本节点留在
+              // head 里，回写进章节后下一轮再注入再剥离，空行就跨周期线性累积（#59）。
+              // 这里把 head 内的空白收敛成「每个间隙一个换行」：既阻断累积，又能自愈
+              // 历史上已被撑开的 head。head 只放元数据、空白无语义，规范化不影响渲染；
+              // body（含 pre/code 的缩进）一律不动，保留作者排版。
+              function tidyHeadWhitespace(root) {
+                var head = root.querySelector('head');
+                if (!head) { return; }
+                for (var c = head.firstChild; c; ) {
+                  var next = c.nextSibling;
+                  if (c.nodeType === 3 && !c.data.replace(/\\s/g, '')) {
+                    var prev = c.previousSibling;
+                    if (prev && prev.nodeType === 3 && !prev.data.replace(/\\s/g, '')) {
+                      head.removeChild(c);
+                    } else {
+                      c.data = '\\n';
+                    }
+                  }
+                  c = next;
+                }
+              }
               function serialize() {
                 var clone = document.documentElement.cloneNode(true);
                 stripInjected(clone);
+                tidyHeadWhitespace(clone);
+                rescueStrayNodes(clone);
                 pruneEmptyInline(clone);
+                pruneEmptyLists(clone);
                 var body = clone.querySelector('body');
                 if (body) { body.removeAttribute('contenteditable'); }
                 return '<?xml version="1.0" encoding="UTF-8"?>\\n' +
                        new XMLSerializer().serializeToString(clone);
+              }
+              // 把 body 之外的元素节点（历史损坏残留：正文块挂在 html 层）收编回 body，
+              // 挪回后回写的 XHTML 才合法，下次加载内容才能正常展示
+              function rescueStrayNodes(root) {
+                var body = root.querySelector('body');
+                if (!body) { return; }
+                var stray = [];
+                for (var c = root.firstChild; c; c = c.nextSibling) {
+                  if (c.nodeType === 1 && c !== root.head && c !== body) { stray.push(c); }
+                }
+                for (var i = 0; i < stray.length; i++) { body.appendChild(stray[i]); }
               }
               // 空行内标签是纯噪音（无锚文本的强调、无内容的强调壳），回写前剔除。
               // 循环到不动点，处理 <strong><em></em></strong> 这类嵌套空壳：
@@ -258,6 +294,28 @@ public final class PreviewHtml {
                     var el = els[i];
                     var hasMedia = el.querySelector('img,br,hr,video,audio,iframe,object,svg,math');
                     if (!hasMedia && !el.textContent.replace(/\\s/g, '')) {
+                      el.parentNode.removeChild(el);
+                      changed = true;
+                    }
+                  }
+                }
+              }
+              // 空列表是纯噪音：<ul></ul> / <ol></ol>（零 li），以及 li 里空无一物、
+              // 没有任何文字的列表（刚点列表还没写、或把列表项内容删空）。与 pruneEmptyInline
+              // 同层——DOM 里允许短暂存在这种编辑中间态（点列表按钮先给个落脚点），
+              // 但绝不写进书（#55 的块级延伸）。
+              // 循环到不动点：内层空列表删掉后外层 li 可能也空了，下一轮接着删。
+              // 注意「有意义的内容」判定里**不含 br**——contenteditable 会给空块塞 <br/>，
+              // 那是占位不是内容，算进去会让净化在真实使用中失效。
+              function pruneEmptyLists(root) {
+                var changed = true;
+                while (changed) {
+                  changed = false;
+                  var lists = root.querySelectorAll('ul,ol');
+                  for (var i = 0; i < lists.length; i++) {
+                    var el = lists[i];
+                    var hasContent = el.querySelector('img,hr,video,audio,iframe,object,svg,math');
+                    if (!hasContent && !el.textContent.replace(/\\s/g, '')) {
                       el.parentNode.removeChild(el);
                       changed = true;
                     }
@@ -314,13 +372,17 @@ public final class PreviewHtml {
                 s.addRange(r);
               }
 
-              // 光标所在的最外层块（body 的直接子元素）
+              // 光标所在的最外层块（body 的直接子元素）。
+              // node 不在 body 内（body 被删空后光标落在 body/html 层）时必须返回 null——
+              // 旧实现一路上溯会返回 document，后续 moveChildren/replaceChild 就把
+              // 整个文档树搬进节点或在 null 父节点上抛错，标签被打到 body 外（#58）。
               function topBlock(node) {
                 var n = node;
                 if (!n) { return null; }
                 if (n.nodeType !== 1) { n = n.parentNode; }
+                if (!n || n === document.body) { return null; }
                 while (n && n.parentNode && n.parentNode !== document.body) { n = n.parentNode; }
-                return (n && n !== document.body) ? n : null;
+                return (n && n.parentNode === document.body) ? n : null;
               }
 
               // block 里直接包住 node 的那一层（例如 ul 里的某个 li）
@@ -369,11 +431,25 @@ public final class PreviewHtml {
                 if (!s) { return false; }
                 var range = s.getRangeAt(0);
                 var block = topBlock(range.startContainer);
-                if (!block) { return false; }
+                if (!block) {
+                  // body 空 / 光标不在块上：直接在 body 末尾建目标块（同 toggleList，
+                  // 不返回 false——fallback 会把标签插到源码区去）
+                  var blank = makeTag(tag);
+                  document.body.appendChild(blank);
+                  collapseInto(blank);
+                  return true;
+                }
 
                 if (isList(block)) {
                   var item = childOfContaining(block, range.startContainer);
-                  if (tagOf(item) !== 'li') { return false; }
+                  if (tagOf(item) !== 'li') {
+                    // 整列表被选中（起点就是列表本身）：与 toggleList 的「退回段落」同语义，
+                    // 每个 li 各转一段；标题/引用对整列表没有明确语义，按「有意不作为」处理。
+                    // 两条路径都必须返回 true——返回 false 会让 Java 侧 fallback 往源码区
+                    // 插骨架，切 tab 时用源码覆盖章节，可视化改动整个冲掉（#57/#60 同族事故）。
+                    if (tag === 'p') { return !!listToBlocks(block); }
+                    return true;
+                  }
                   var lifted = makeTag(tag);
                   // li 里的块级孩子（Tab 缩进的子列表等）不能进新块——摘出来跟在后面
                   var blocks = pullOutBlocks(item);
@@ -433,7 +509,16 @@ public final class PreviewHtml {
                 if (!s || !s.rangeCount) { return false; }
                 var range = s.getRangeAt(0);
                 var block = topBlock(range.startContainer);
-                if (!block) { return false; }
+                if (!block) {
+                  // body 空 / 光标不在块上：直接在 body 末尾建列表骨架，
+                  // 不返回 false（会触发源码 fallback，骨架会被插到源码区去）
+                  var blankList = makeTag(kind);
+                  var blankItem = makeTag('li');
+                  blankList.appendChild(blankItem);
+                  document.body.appendChild(blankList);
+                  collapseInto(blankItem);
+                  return true;
+                }
                 if (isList(block)) {
                   if (tagOf(block) === kind) {
                     // 退回段落。整列表被选中时（起点就是列表本身，如整段选中后再点）

@@ -1,5 +1,6 @@
 package org.chobit.epubra.app.ui;
 
+import javafx.scene.control.Menu;
 import javafx.scene.layout.Region;
 
 /**
@@ -21,5 +22,18 @@ public final class FxNodes {
         }
         node.setVisible(visible);
         node.setManaged(visible);
+    }
+
+    /**
+     * 只切 {@code visible}，用于 {@link Menu}。
+     *
+     * <p>{@code Menu} 不是 {@link Region}、也没有 {@code managed} 概念——{@code MenuBar} 自身
+     * 就会把不可见的菜单从布局中过滤掉，不存在「隐藏但占位」的间距问题，所以不能套用
+     * 上面的 visible+managed 组合。node 为 null 时静默返回。
+     */
+    public static void setVisible(Menu node, boolean visible) {
+        if (node != null) {
+            node.setVisible(visible);
+        }
     }
 }

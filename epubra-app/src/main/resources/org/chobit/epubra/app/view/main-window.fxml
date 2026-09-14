@@ -61,7 +61,7 @@
                         <MenuItem text="退出" onAction="#onExit"/>
                     </items>
                 </Menu>
-                <Menu text="编辑">
+                <Menu fx:id="editMenu" text="编辑">
                     <items>
                         <MenuItem fx:id="undoItem" text="撤销" onAction="#onUndo" accelerator="Ctrl+Z"/>
                         <MenuItem fx:id="redoItem" text="重做" onAction="#onRedo" accelerator="Ctrl+Shift+Z"/>
@@ -71,7 +71,7 @@
                 </Menu>
                 <!-- 原「开始」。章节是结构操作而非格式化操作，放「开始」不符合常规心智；
                      「重命名章节…」也从「编辑」归并过来，让章节相关操作集中一处。 -->
-                <Menu text="章节">
+                <Menu fx:id="chapterMenu" text="章节">
                     <items>
                         <MenuItem text="添加章节" onAction="#onAddChapter"/>
                         <MenuItem text="重命名章节…" onAction="#onRenameChapter" accelerator="F2"/>
@@ -81,7 +81,7 @@
                         <MenuItem text="下移" onAction="#onMoveDown"/>
                     </items>
                 </Menu>
-                <Menu text="插入">
+                <Menu fx:id="insertMenu" text="插入">
                     <items>
                         <MenuItem text="导入资源…" onAction="#onImportResources"/>
                         <MenuItem text="插入图片" onAction="#onInsertImage"/>
@@ -109,7 +109,7 @@
                 </Menu>
                 <!-- 「清理未引用资源」不是插入动作，「运行校验」是工具性操作而非视图开关，
                      两者从原「插入」「视图」里分出来单独立项。 -->
-                <Menu text="工具">
+                <Menu fx:id="toolsMenu" text="工具">
                     <items>
                         <MenuItem text="运行校验" onAction="#onRunValidation"/>
                         <MenuItem text="清理未引用资源" onAction="#onCleanupResources"/>

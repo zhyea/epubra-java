@@ -183,6 +183,18 @@ public class MainController {
     @FXML
     private MenuItem redoItem;
 
+    // 编辑 / 章节 / 插入 / 工具 四个菜单只对「已打开的图书」有意义——首页（书架）不该展示；
+    // 文件 / 视图 / 帮助 是全局命令（新建 / 打开 / 主题切换 / 关于），两态都保留。
+    // 显隐统一由 setEditorChromeVisible 切换，见该方法注释。
+    @FXML
+    private Menu editMenu;
+    @FXML
+    private Menu chapterMenu;
+    @FXML
+    private Menu insertMenu;
+    @FXML
+    private Menu toolsMenu;
+
     @FXML
     private Label statusLabel;
     /**
@@ -519,9 +531,26 @@ public class MainController {
         workspaceActivity.chooseAndSwitch();
     }
 
+    /**
+     * 编辑器外壳（活动栏 / 状态栏）与「编辑 · 章节 · 插入 · 工具」四个菜单的整体显隐。
+     *
+     * <p>首页是书架（欢迎页），没有打开的图书——这些控件在那里既无操作对象也无意义，一律收起。
+     * 启动时（{@link #initialize()}）与「切回书架」时传 {@code false}；收到
+     * {@link AppEventBus.BookLoadedEvent}（新建 / 打开 / 恢复草稿）时传 {@code true}。
+     * 文件 / 视图 / 帮助 是全局命令，不在此列。
+     *
+     * <p>{@code Menu} 没有 {@code managed} 概念（{@code MenuBar} 本就会过滤掉不可见的菜单），
+     * 故走 {@link FxNodes#setVisible(javafx.scene.control.Menu, boolean)} 只切 {@code visible}。
+     * 附带效果：{@code MenuBarSkin} 只为可见菜单注册加速键，收起后 Ctrl+F、F2 等编辑类
+     * 快捷键在首页随之失效——正是期望行为。
+     */
     private void setEditorChromeVisible(boolean visible) {
         FxNodes.setVisibleManaged(activityBar, visible);
         FxNodes.setVisibleManaged(statusBar, visible);
+        FxNodes.setVisible(editMenu, visible);
+        FxNodes.setVisible(chapterMenu, visible);
+        FxNodes.setVisible(insertMenu, visible);
+        FxNodes.setVisible(toolsMenu, visible);
     }
 
     @FXML

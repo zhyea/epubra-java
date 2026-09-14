@@ -68,6 +68,11 @@ class VisualEditorFormatTest {
 
     @BeforeEach
     void loadEditableDocument() throws Exception {
+        loadEditable(FULL_DOC);
+    }
+
+    /** 把任意章节塞进 WebView 当可编辑文档（跨周期场景需要换不同的源文档）。 */
+    private void loadEditable(String xhtml) throws Exception {
         CountDownLatch loaded = new CountDownLatch(1);
         runOnFx(() -> {
             WebEngine engine = webView.getEngine();
@@ -76,7 +81,7 @@ class VisualEditorFormatTest {
                     loaded.countDown();
                 }
             });
-            engine.loadContent(PreviewHtml.editableDocument(FULL_DOC, Theme.LIGHT),
+            engine.loadContent(PreviewHtml.editableDocument(xhtml, Theme.LIGHT),
                     "application/xhtml+xml");
         });
         assertTrue(loaded.await(20, TimeUnit.SECONDS), "可编辑文档加载超时");
@@ -315,6 +320,57 @@ class VisualEditorFormatTest {
         String body = bodyOf(serialized());
         assertFalse(body.contains("<ul"), "整列表退回后不应残留列表：" + body);
         assertTrue(body.contains("正文"), "文字不能丢：" + body);
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("body 被清空后点格式按钮：直接在 body 内建块，绝不把标签打到 body 外或插去源码区")
+    void emptyBodyFormattingCreatesBlockInsideBody() throws Exception {
+        // 清空 body，光标落在 body 本身（topBlock 的越界形态）
+        runScript("(function () {"
+                + " var b = document.body;"
+                + " while (b.firstChild) { b.removeChild(b.firstChild); }"
+                + " var r = document.createRange(); r.selectNodeContents(b); r.collapse(true);"
+                + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+                + " return true; })()");
+
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('list')")),
+                "空 body 上点「列表」应建列表（返回 true，触发源码 fallback 会把骨架插到源码区）");
+        // 落点看实时 DOM：#58 要守的是「块建在 body 内、不打到 body 外」。而空列表按 #60
+        // 不写进书——所以序列化结果里反而**不该**出现 <ul>。
+        assertTrue(bodyHasTag("ul"), "body 内应出现列表（实时 DOM）：" + bodyOf(serialized()));
+        assertFalse(bodyOf(serialized()).contains("<ul"),
+                "只有空壳的列表不该被回写进书（#60）：" + bodyOf(serialized()));
+        assertWellFormedXhtml(serialized());
+
+        // 再清空，试段落按钮
+        runScript("(function () {"
+                + " var b = document.body;"
+                + " while (b.firstChild) { b.removeChild(b.firstChild); }"
+                + " var r = document.createRange(); r.selectNodeContents(b); r.collapse(true);"
+                + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+                + " return true; })()");
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('paragraph')")),
+                "空 body 上点「段落」应建段落");
+        String paraBody = bodyOf(serialized());
+        assertTrue(paraBody.contains("<p"), "body 内应出现段落：" + paraBody);
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("历史损坏残留：body 之外的元素在回写时收编回 body 内")
+    void strayNodesOutsideBodyRescuedOnSerialize() throws Exception {
+        // 模拟历史损坏：把段落挂到 body 之外（html 层）
+        runScript("(function () {"
+                + " var p = document.body.querySelector('p');"
+                + " document.body.parentNode.appendChild(p);"
+                + " return true; })()");
+        assertFalse(bodyOf(serialized()).isEmpty(), "序列化输出应有 body");
+
+        String body = bodyOf(serialized());
+        assertTrue(body.contains("<p>正文</p>"), "body 外的段落应在回写时收编回 body：" + body);
         assertWellFormedXhtml(serialized());
     }
 
@@ -806,6 +862,111 @@ class VisualEditorFormatTest {
                 "两端都在 em 内的选区应报 italic，实际：" + q);
     }
 
+    @Test
+    @Timeout(120)
+    @DisplayName("head 内的空行不随「加载→回写」周期累积（#59）")
+    void headWhitespaceDoesNotAccumulateAcrossRoundTrips() throws Exception {
+        String chapter = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<html xmlns=\"http://www.w3.org/1999/xhtml\">"
+                + "<head>\n  <title>第一章</title>\n  <meta charset=\"utf-8\"/>\n</head>"
+                + "<body>\n  <p>正文</p>\n</body></html>";
+
+        int baseline = -1;
+        for (int round = 1; round <= 4; round++) {
+            loadEditable(chapter);
+            chapter = serialized();
+            int blanks = headNewlines(chapter);
+            if (round == 1) {
+                baseline = blanks;
+            } else {
+                assertEquals(baseline, blanks,
+                        "第 " + round + " 轮回写后 head 换行数应稳定在 " + baseline
+                                + "，实际 " + blanks + "：\n" + chapter);
+            }
+            assertWellFormedXhtml(chapter);
+        }
+        assertTrue(chapter.contains("<p>正文</p>"), "正文内容应原样保留：" + chapter);
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("空列表（零 li / li 空 / 嵌套空子列表）绝不回写进书，有内容的列表不受影响")
+    void emptyListsAreNeverWrittenBack() throws Exception {
+        // ① 真实可达路径：建列表后把列表项内容删空
+        caretIntoParagraph();
+        runScript("window.epubraFormat('list')");
+        runScript("(function () { var li = document.body.querySelector('li');"
+                + " while (li.firstChild) { li.removeChild(li.firstChild); } return true; })()");
+        assertTrue(bodyHasTag("ul"), "前置：实时 DOM 里列表还在（编辑中的落脚点）");
+        assertFalse(bodyOf(serialized()).contains("<ul"),
+                "列表项被清空后，空列表不该回写：" + bodyOf(serialized()));
+
+        // ② 零 li 的空列表（历史损坏 / 引擎删除残留），同批正文不能受牵连
+        runScript("(function () {"
+                + " var ns = 'http://www.w3.org/1999/xhtml';"
+                + " var b = document.body;"
+                + " while (b.firstChild) { b.removeChild(b.firstChild); }"
+                + " b.appendChild(document.createElementNS(ns, 'ul'));"
+                + " b.appendChild(document.createElementNS(ns, 'ol'));"
+                + " var p = document.createElementNS(ns, 'p');"
+                + " p.appendChild(document.createTextNode('正文'));"
+                + " b.appendChild(p);"
+                + " return true; })()");
+        String bare = bodyOf(serialized());
+        assertFalse(bare.contains("<ul"), "零 li 的空 <ul> 不该回写：" + bare);
+        assertFalse(bare.contains("<ol"), "零 li 的空 <ol> 不该回写：" + bare);
+        assertTrue(bare.contains("<p>正文</p>"), "正文不能被净化牵连：" + bare);
+
+        // ③ 嵌套：内层空子列表删掉，外层（有文字）必须保留
+        runScript("(function () {"
+                + " var ns = 'http://www.w3.org/1999/xhtml';"
+                + " var b = document.body;"
+                + " while (b.firstChild) { b.removeChild(b.firstChild); }"
+                + " var ul = document.createElementNS(ns, 'ul');"
+                + " var li = document.createElementNS(ns, 'li');"
+                + " li.appendChild(document.createTextNode('有条目'));"
+                + " li.appendChild(document.createElementNS(ns, 'ul'));"
+                + " ul.appendChild(li);"
+                + " b.appendChild(ul);"
+                + " return true; })()");
+        String nested = bodyOf(serialized());
+        assertTrue(nested.contains("有条目"), "有内容的列表不能误删：" + nested);
+        assertEquals(1, nested.split("<ul", -1).length - 1,
+                "只该剩外层列表（内层空子列表已净化）：" + nested);
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("整列表选中点「段落」：退回段落且返回 true（绝不触发源码 fallback）")
+    void paragraphCommandOnWholeListSelectionDoesNotFallBackToSource() throws Exception {
+        String selectWholeList = "(function () {"
+                + " var L = document.body.querySelector('ul,ol');"
+                + " var r = document.createRange(); r.selectNodeContents(L);"
+                + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+                + " return true; })()";
+
+        caretIntoParagraph();
+        runScript("window.epubraFormat('list')");
+        runScript(selectWholeList);
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('paragraph')")),
+                "整列表选中点「段落」必须返回 true——false 会让 Java 侧往源码区插 <p></p>，"
+                        + "切 tab 时用源码覆盖章节，可视化改动全丢");
+        String body = bodyOf(serialized());
+        assertFalse(body.contains("<ul"), "整列表应退回段落：" + body);
+        assertTrue(body.contains("正文"), "文字不能丢：" + body);
+
+        // 标题对整列表没有明确语义：按「有意不作为」处理，但同样必须返回 true
+        caretIntoParagraph();
+        runScript("window.epubraFormat('list')");
+        runScript(selectWholeList);
+        assertTrue(Boolean.TRUE.equals(runScript("window.epubraFormat('heading')")),
+                "整列表选中点「标题」也必须返回 true——有意不作为，而不是触发源码 fallback");
+        assertTrue(bodyOf(serialized()).contains("正文"),
+                "「不作为」不等于丢内容：" + bodyOf(serialized()));
+        assertWellFormedXhtml(serialized());
+    }
+
     // ------------------------------------------------------------------ 脚本与断言助手
 
     /** 选中正文段落里的文字（模拟用户划选一段后点工具条）。 */
@@ -864,6 +1025,25 @@ class VisualEditorFormatTest {
      */
     private boolean bodyHasTag(String tag) throws Exception {
         return Boolean.TRUE.equals(runScript("!!document.body.querySelector('" + tag + "')"));
+    }
+
+    /**
+     * 数 {@code <head>} 区间里的换行字符。空行一旦跨周期累积，这个数就会随
+     * 「加载→回写」轮次线性增长——是 #59 最直接的可观测指标。
+     */
+    private static int headNewlines(String xhtml) {
+        int start = xhtml.indexOf("<head");
+        int end = xhtml.indexOf("</head>");
+        if (start < 0 || end < start) {
+            return -1;
+        }
+        int count = 0;
+        for (int i = start; i < end; i++) {
+            if (xhtml.charAt(i) == '\n') {
+                count++;
+            }
+        }
+        return count;
     }
 
     private static void assertWellFormedXhtml(String xhtml) {
