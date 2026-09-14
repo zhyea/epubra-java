@@ -506,3 +506,42 @@ acceleratorFires=0`（单路触发，对照组确认 accelerator 可用），安
 
 > 测试基线由 484 更新为 **485**。
 
+## 十、第八轮（2026-09-14）：目录多级层级 #69
+
+**需求**：目录侧栏支持多级章节，右键菜单增加「降一级 / 升一级」等选项。
+
+**现状**：多级**渲染**本来就通（`TocController.buildTreeItem` 递归 + 逐层 `setExpanded(true)`），
+内核 `TocEditor` 的 `indent` / `outdent` / `moveTo` 也早已备齐并被 `TocEditorTest` 覆盖 ——
+缺的只是**前端接线**（右键菜单只有 添加/重命名/上移/下移/删除）。
+
+**顺带发现的真实缺口**：`Book.removeTocNodesByHref` 只摘除 href 匹配的那一项、不处理它的
+`children`。删除带子章节的父章节时，子章节跟着父的 `children` 一起脱离目录，资源却留在 spine 里
+→ 目录与阅读顺序分叉，校验报 **C09**。与用户对齐后确定语义：**子章节提升为同级**（同 Sigil /
+Word 大纲），只删被点的那一个章节。
+
+**修复**：
+
+- 内核新增 `TocEditor.removeKeepingChildren(book, node)`（复制 children → 清空 → 摘除 → 原位插入
+  → `syncSpineFromToc`）；
+- `onDeleteChapter` 改为**先 `removeKeepingChildren` 再 `removeResource`**（顺序反了会在第一步
+  就按 href 把整棵摘掉，子章节再也没机会提升）；
+- 前端新增 `onIndentChapter` / `onOutdentChapter` / `changeLevel`，右键菜单与「章节」菜单双入口，
+  树内 `Alt+←/→` 快捷键；
+- **层级两项刻意不用 `disableProperty().bind(...)`**（可用性依赖树结构；且 bind 后 `setDisable`
+  会抛 `A bound value cannot be set`），改由 `updateLevelMenuState` 在弹出前先 select 再重算。
+
+**验证**：
+
+- `TocLevelTest`（新，7 条，走真实 main-window：嵌套渲染 / 菜单契约 / 降级 / 升级 / 边界 NoOp /
+  灰化规则 / 删除提升）；
+- `TocEditorTest` +3 条（摘除父节点子节点提升、摘除不在目录的节点、摘除顶层节点子节点留在顶层）；
+- **负向验证**：摘掉菜单两项 + 关掉 `removeKeepingChildren` → 恰好 3 条红，还原后复绿；
+- `mvn -B clean test` exit 0，**495**（lib 75 + app 420）；冒烟 `javafx:run` exit 124，零异常命中。
+
+> 测试基线由 485 更新为 **495**。
+>
+> **坑备忘**：GUI 测试里「静默选中」TreeView（用 `ctx.setLoading(true)` 包住 select 再手动
+> `setCurrentNode`）会制造「currentNode 与编辑区不一致」，随后 `showChapter` 的
+> `flushCurrentChapter()` 把旧章节正文**永久回写进新章节的 XHTML**。目录类测试必须走真实
+> select，让 `showChapter` 正常 flush 旧的、加载新的。
+

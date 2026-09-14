@@ -79,6 +79,13 @@
                         <SeparatorMenuItem/>
                         <MenuItem text="上移" onAction="#onMoveUp"/>
                         <MenuItem text="下移" onAction="#onMoveDown"/>
+                        <SeparatorMenuItem/>
+                        <!-- 层级调整与上移/下移同属「结构」组，菜单与目录树右键保持一致，
+                             避免「右键有、菜单没有」。这两项在菜单里不灰化：可用性取决于
+                             选中节点的层级（顶层不能升级、同级首项不能降级），点击后由
+                             TocController.changeLevel 给出状态提示，与上移/下移的容错方式一致。 -->
+                        <MenuItem text="降一级" onAction="#onIndentChapter"/>
+                        <MenuItem text="升一级" onAction="#onOutdentChapter"/>
                     </items>
                 </Menu>
                 <Menu fx:id="insertMenu" text="插入">

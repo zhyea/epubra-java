@@ -739,6 +739,16 @@ public class MainController {
     }
 
     @FXML
+    public void onIndentChapter() {
+        tocViewController.onIndentChapter();
+    }
+
+    @FXML
+    public void onOutdentChapter() {
+        tocViewController.onOutdentChapter();
+    }
+
+    @FXML
     public void onRenameChapter() {
         tocViewController.onRenameChapter();
     }

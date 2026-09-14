@@ -153,6 +153,39 @@ public final class TocEditor {
     }
 
     /**
+     * 把 node 从目录树中摘除，并把它原有的子节点<b>就地提升为同级</b>（保持相对顺序）。
+     *
+     * <h2>⚠ 不能只把 node 从上层列表里删掉</h2>
+     * <p>{@code children} 是 node 自己的列表：node 一离开上层列表，整棵子树就跟着脱离目录。
+     * 而 {@link Book#removeResource(Resource)} 只清掉 node 自己那一项，子章节的资源仍留在
+     * spine 里——目录与阅读顺序立刻分叉，校验直接报 C09「目录顺序与阅读顺序不一致」。
+     * 提升相当于「删掉一层标题」，与 Sigil / Word 大纲的删除行为一致。
+     *
+     * <p>调用方应先本方法、后 {@code removeResource}；顺序反过来的话，目录节点已按 href
+     * 反查不到，子章节就再也提升不了了。
+     *
+     * @return node 是否本来就在目录中
+     */
+    public static boolean removeKeepingChildren(Book book, TOCReference node) {
+        if (book == null || node == null) {
+            return false;
+        }
+        Location location = locate(book, node);
+        if (location == null) {
+            return false;
+        }
+        List<TOCReference> siblings = location.siblings();
+        int index = location.index();
+        // 先复制再清空：直接在 children 上迭代移除会踩 ConcurrentModificationException
+        List<TOCReference> promoted = List.copyOf(node.children());
+        node.children().clear();
+        siblings.remove(index);
+        siblings.addAll(index, promoted);
+        syncSpineFromToc(book);
+        return true;
+    }
+
+    /**
      * 按目录的深度优先顺序重建阅读顺序。
      * spine 中存在但目录未覆盖的资源会保留在末尾，避免章节丢失。
      *

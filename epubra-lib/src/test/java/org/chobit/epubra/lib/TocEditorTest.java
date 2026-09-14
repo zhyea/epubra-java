@@ -117,6 +117,60 @@ class TocEditorTest {
     }
 
     @Test
+    void 摘除父节点时子节点应提升为同级并同步阅读顺序() {
+        Book book = BookFactory.createEmpty("删除保留子章节");
+        book.addChapter("第二章", null);
+        book.addChapter("第三章", null);
+        book.addChapter("第四章", null);
+
+        // 搭出三级结构：第一章 > 第二章 > 第三章，另有顶层第四章
+        TocEditor.indent(book, book.toc().roots().get(1));                 // 第二章挂到第一章下
+        TocEditor.moveAfter(book, book.toc().roots().get(1),             // 第三章排到第二章后面
+                book.toc().roots().get(0).children().get(0));
+        TocEditor.indent(book, book.toc().roots().get(0).children().get(1)); // 第三章挂到第二章下
+        assertEquals(List.of("第一章", "第四章"), titles(book.toc().roots()));
+        assertEquals(List.of("第二章"), titles(book.toc().roots().get(0).children()));
+        assertEquals(List.of("第三章"),
+                titles(book.toc().roots().get(0).children().get(0).children()));
+
+        // 删中间的「第二章」：第三章应就地提升为第一章的子节点，而不是跟着脱离目录
+        assertTrue(TocEditor.removeKeepingChildren(book, book.toc().roots().get(0).children().get(0)));
+
+        assertEquals(List.of("第一章", "第四章"), titles(book.toc().roots()));
+        assertEquals(List.of("第三章"), titles(book.toc().roots().get(0).children()),
+                "子章节应提升到被摘除节点原来的位置");
+        // 本方法只动目录、不删资源：被摘除的「第二章」资源此刻还在 spine 里，按既定语义留在末尾
+        //（前端随后调 removeResource 清掉它，见 TocController.onDeleteChapter）。
+        assertEquals(List.of("第一章", "第三章", "第四章", "第二章"), spineTitles(book),
+                "提升后剩余章节的阅读顺序应与目录深度优先顺序一致，且第三章跟着上移");
+    }
+
+    @Test
+    void 摘除不在目录中的节点应返回否() {
+        Book book = BookFactory.createEmpty("摘除边界");
+        book.addChapter("第二章", null);
+
+        assertFalse(TocEditor.removeKeepingChildren(book, new TOCReference("野节点", "chapter-x.xhtml")),
+                "不在树中的节点无法摘除");
+        assertFalse(TocEditor.removeKeepingChildren(book, null));
+        assertEquals(List.of("第一章", "第二章"), titles(book.toc().roots()), "结构不应被改动");
+    }
+
+    @Test
+    void 摘除顶层节点时其子节点应留在顶层() {
+        Book book = BookFactory.createEmpty("顶层提升");
+        book.addChapter("第二章", null);
+        TocEditor.indent(book, book.toc().roots().get(1));   // 第二章成为第一章的子节点
+
+        assertTrue(TocEditor.removeKeepingChildren(book, book.toc().roots().get(0)));
+
+        assertEquals(List.of("第二章"), titles(book.toc().roots()),
+                "顶层节点被摘除后，其子节点应就地提升为顶层节点");
+        assertEquals(List.of("第二章", "第一章"), spineTitles(book),
+                "提升后的第二章排在阅读顺序首位，被摘除的第一章资源暂留末尾");
+    }
+
+    @Test
     void 调整后的目录结构应在写回读回后保留() throws IOException {
         Book book = BookFactory.createEmpty("结构往返");
         book.addChapter("第二章", null);

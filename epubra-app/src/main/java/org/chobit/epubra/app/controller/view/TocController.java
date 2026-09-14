@@ -27,12 +27,15 @@ import java.util.Optional;
 import java.util.function.Consumer;
 
 /**
- * 目录树控制器：章节树渲染、选中同步、拖拽排序与重命名。
+ * 目录树控制器：章节树渲染（支持多级嵌套）、选中同步、拖拽排序、层级升降与重命名。
  *
  * <p>作为 {@code toc-view.fxml} 的 {@code fx:controller} 由 FXML 实例化：
  * 目录树节点经 {@code @FXML} 注入，{@link BookContext} 与回调在父控制器
  * {@code initialize()} 阶段通过 {@link #bind} 注入——FXML 加载时子控制器先于父构造，
  * 此时还不能触碰 ctx。因此本类不得定义 {@code initialize()} 方法。
+ *
+ * <p>层级结构本身由内核 {@link TocEditor} 维护（indent / outdent / removeKeepingChildren），
+ * 本类只负责把用户操作转成这些调用，并在成功后重排阅读顺序（内核负责）与刷新树。
  *
  * <p>对外接口：bind 后调 {@link #setOnChapterSelected(Consumer)}（通常是
  * {@code MainController::showChapter}）。本类不直接刷正文 / 预览，只负责目录树。
@@ -161,7 +164,14 @@ public class TocController {
         }
         Resource target = node.resource();
         String title = node.displayTitle();
+        int childCount = node.reference() == null ? 0 : node.reference().children().size();
         beginChange.run();
+        // 顺序要紧：**先按「子章节提升为同级」摘除目录节点，再删资源**。反过来的话
+        // removeResource 会先按 href 把目录节点整棵摘掉（Book.removeTocNodesByHref 只摘匹配项、
+        // 不处理 children），子章节随即脱离目录却仍留在阅读顺序里 → 校验报 C09。
+        if (node.reference() != null) {
+            TocEditor.removeKeepingChildren(ctx.book(), node.reference());
+        }
         // 走 Book.removeResource：它按 href 清理目录节点，并同步 spine 与封面引用。
         // 自己按「资源解析结果」删目录是删不掉的——资源一旦先移除，解析结果就变成 null 了。
         ctx.book().removeResource(target);
@@ -169,7 +179,9 @@ public class TocController {
         currentNode = null;
         markDirty();
         refresh();
-        status.setStatus("已删除章节：" + title);
+        status.setStatus(childCount == 0
+                ? "已删除章节：" + title
+                : "已删除章节：" + title + "，" + childCount + " 个子章节已提升为同级");
     }
 
     public void onMoveUp() {
@@ -178,6 +190,16 @@ public class TocController {
 
     public void onMoveDown() {
         moveChapter(1);
+    }
+
+    /** 降一级：成为前一个同级章节的子章节。 */
+    public void onIndentChapter() {
+        changeLevel(true);
+    }
+
+    /** 升一级：成为父章节的下一个同级章节。 */
+    public void onOutdentChapter() {
+        changeLevel(false);
     }
 
     public void onRenameChapter() {
@@ -349,6 +371,51 @@ public class TocController {
         status.setStatus(delta < 0 ? "章节已上移" : "章节已下移");
     }
 
+    /**
+     * 层级调整：降一级 = 成为前一个同级章节的最后一个子章节；升一级 = 成为父章节的下一个同级章节。
+     *
+     * <p>与 {@link #moveChapter(int)} 同族：都在节点所在的层级内操作，成功后由内核
+     * {@link TocEditor#syncSpineFromToc} 重排阅读顺序，因此嵌套章节不会与 spine 分叉。
+     * 边界不满足时只给状态提示、不动结构——与上移/下移的容错方式保持一致。
+     *
+     * @param deeper true 降一级，false 升一级
+     */
+    private void changeLevel(boolean deeper) {
+        ChapterNode node = currentNode;
+        if (node == null || node.reference() == null) {
+            warner.warn("请先在目录中选择要调整层级的章节");
+            return;
+        }
+        TocEditor.Location location = TocEditor.locate(ctx.book(), node.reference());
+        if (location == null) {
+            warner.warn("该章节还没有加入目录，无法调整层级");
+            return;
+        }
+        if (deeper && location.index() == 0) {
+            status.setStatus("已经是同级中的第一个章节，无法降级");
+            return;
+        }
+        if (!deeper && location.parent() == null) {
+            status.setStatus("已经是顶层章节，无法升级");
+            return;
+        }
+        beginChange.run();
+        boolean changed = deeper
+                ? TocEditor.indent(ctx.book(), node.reference())
+                : TocEditor.outdent(ctx.book(), node.reference());
+        if (!changed) {
+            status.setStatus("无法调整层级");
+            return;
+        }
+        Resource resource = node.resource();
+        markDirty();
+        refresh();
+        if (resource != null) {
+            selectResource(resource);
+        }
+        status.setStatus(deeper ? "章节已降一级" : "章节已升一级");
+    }
+
     // ---- 拖拽 ----
 
     /** 双击目录项进入重命名。 */
@@ -493,20 +560,22 @@ public class TocController {
     // ---- 右键菜单 ----
 
     /**
-     * 给每个单元格挂一个 ContextMenu：添加 / 重命名 / 上移 / 下移 / 删除。
+     * 给每个单元格挂一个 ContextMenu：添加 / 重命名 / 上移 / 下移 / 降一级 / 升一级 / 删除。
      *
      * <p>关键细节：右键时先把单元格选中——若不预先选中，菜单操作的当前目录节点
      * 仍是旧选中节点，会出现「右键 B 实际删 A」的错位。JavaFX 的 MenuItem 没有「目标参数」
      * 概念，最简单的修正是先 select 再弹菜单。
      *
      * <p>菜单项 disable 绑 {@code cell.itemProperty().isNull()}——空单元格（行尾、占位）不
-     * 弹可点击的菜单。
+     * 弹可点击的菜单。层级两项例外，见 {@link #updateLevelMenuState}。
      */
     private void attachContextMenu(TreeCell<ChapterNode> cell) {
         MenuItem addItem = menuItem("添加章节", e -> onAddChapter());
         MenuItem renameItem = menuItem("重命名", e -> onRenameChapter());
         MenuItem upItem = menuItem("上移", e -> onMoveUp());
         MenuItem downItem = menuItem("下移", e -> onMoveDown());
+        MenuItem indentItem = menuItem("降一级", e -> onIndentChapter());
+        MenuItem outdentItem = menuItem("升一级", e -> onOutdentChapter());
         MenuItem deleteItem = menuItem("删除", e -> onDeleteChapter());
 
         addItem.disableProperty().bind(cell.itemProperty().isNull());
@@ -514,6 +583,9 @@ public class TocController {
         upItem.disableProperty().bind(cell.itemProperty().isNull());
         downItem.disableProperty().bind(cell.itemProperty().isNull());
         deleteItem.disableProperty().bind(cell.itemProperty().isNull());
+        // ⚠ 降级 / 升级两项**不能**用 disableProperty().bind(...)：可用性取决于树结构
+        //（同级首项不可降级、顶层不可升级），静态表达式表达不了；而且属性一旦 bind，
+        // 之后 setDisable 会抛「A bound value cannot be set」。改由弹出前逐次重算。
 
         // 右键时先把被点击单元格选中——再弹菜单，避免操作错位
         cell.setOnContextMenuRequested(event -> {
@@ -521,13 +593,33 @@ public class TocController {
             if (item != null) {
                 tocTree.getSelectionModel().select(item);
             }
+            updateLevelMenuState(indentItem, outdentItem,
+                    item == null ? null : item.getValue());
         });
 
         ContextMenu menu = new ContextMenu();
         menu.getItems().addAll(addItem, renameItem,
                 new SeparatorMenuItem(), upItem, downItem,
+                new SeparatorMenuItem(), indentItem, outdentItem,
                 new SeparatorMenuItem(), deleteItem);
         cell.setContextMenu(menu);
+    }
+
+    /**
+     * 按目标节点刷新「降一级 / 升一级」的可用性：同级首项不可降级，顶层不可升级，空单元格两项都禁用。
+     *
+     * <p>包内可见是刻意的——测试可直接校验灰化规则，不必构造 {@code ContextMenuEvent}，
+     * 也不必依赖 {@code TreeCell} 的 skin 是否已经建立。
+     *
+     * @param node 目标节点；{@code null} 表示空单元格（行尾占位）
+     */
+    void updateLevelMenuState(MenuItem indentItem, MenuItem outdentItem, ChapterNode node) {
+        TOCReference reference = node == null ? null : node.reference();
+        TocEditor.Location location = (reference == null || ctx == null || ctx.book() == null)
+                ? null
+                : TocEditor.locate(ctx.book(), reference);
+        indentItem.setDisable(location == null || location.index() == 0);
+        outdentItem.setDisable(location == null || location.parent() == null);
     }
 
     private static MenuItem menuItem(String text, javafx.event.EventHandler<javafx.event.ActionEvent> handler) {
@@ -544,11 +636,13 @@ public class TocController {
      *   <li>{@code Delete} → 删除选中章节</li>
      *   <li>{@code Insert} → 在选中节点后插入新章节</li>
      *   <li>{@code Alt+↑} / {@code Alt+↓} → 上移 / 下移</li>
+     *   <li>{@code Alt+←} / {@code Alt+→} → 升一级 / 降一级</li>
      * </ul>
      *
-     * <p>{@code F2}（重命名）已有 FXML 全局 accelerator；TreeView 默认会把方向键用于导航，
-     * 因此移动用 {@code Alt} 修饰避开冲突。{@code Insert} 与 {@code Delete} 走 TreeView
-     * 默认不消费的键，无需修饰。
+     * <p>{@code F2}（重命名）已有 FXML 全局 accelerator；TreeView 默认会把方向键用于导航与
+     * 折叠/展开，因此移动与层级一律用 {@code Alt} 修饰避开冲突——水平方向不加修饰会被
+     * TreeView 吃掉去折叠节点。{@code Insert} 与 {@code Delete} 走 TreeView 默认不消费的键，
+     * 无需修饰。
      */
     private void attachKeyboardShortcuts() {
         tocTree.setOnKeyPressed(this::handleTreeKey);
@@ -572,6 +666,20 @@ public class TocController {
             case DOWN -> {
                 if (event.isAltDown()) {
                     onMoveDown();
+                    yield true;
+                }
+                yield false;
+            }
+            case LEFT -> {
+                if (event.isAltDown()) {
+                    onOutdentChapter();   // 向左 = 回到上一层
+                    yield true;
+                }
+                yield false;
+            }
+            case RIGHT -> {
+                if (event.isAltDown()) {
+                    onIndentChapter();    // 向右 = 进入下一层
                     yield true;
                 }
                 yield false;
