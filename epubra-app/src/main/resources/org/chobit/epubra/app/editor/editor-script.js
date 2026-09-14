@@ -332,15 +332,36 @@
     return null;
   }
 
-  // Tab：把当前 li 挪进前一项里的同类型子列表（第一项没有前项，缩不了）
+  // 前一项末尾的「同型子列表」（忽略纯空白文本节点），没有返回 null。
+  // 序列化过的章节会在块级元素之间留换行，lastChild 未必是元素节点；
+  // 但若末尾跟着的是**有内容**的文本，就不能认为子列表在末尾——那样新项会插到文字前面。
+  function trailingSublist(li, kind) {
+    var n = li.lastChild;
+    while (n && n.nodeType !== 1) {
+      if (n.nodeType === 3 && n.nodeValue.replace(/\s/g, '')) { return null; }
+      n = n.previousSibling;
+    }
+    return (n && tagOf(n) === kind) ? n : null;
+  }
+
+  // Tab：把当前 li 挪进前一项里的同类型子列表（第一项没有前项，缩不了）。
+  //
+  // 前一项尾部**已有同型子列表时必须并入**，不能每次都新建：新建会并出两个平级列表
+  // `<ul><li>甲<ul><li>乙</li></ul><ul><li>丙</li></ul></li></ul>`——丙 与乙 同级不同表，
+  // 在 `<ol>` 下还会让序号从 1 重来；且该碎片里没有前一项，再按 Tab 缩不下去，
+  // 表现出来就是「只能缩两层」（#67）。
   function indentListItem(li) {
     var list = li.parentNode;
     if (!list || (tagOf(list) !== 'ul' && tagOf(list) !== 'ol')) { return false; }
     var prev = li.previousSibling;
     while (prev && tagOf(prev) !== 'li') { prev = prev.previousSibling; }
     if (!prev) { return false; }
-    var sub = makeTag(tagOf(list));
-    prev.appendChild(sub);
+    var kind = tagOf(list);
+    var sub = trailingSublist(prev, kind);
+    if (!sub) {
+      sub = makeTag(kind);
+      prev.appendChild(sub);
+    }
     sub.appendChild(li);
     collapseInto(li);
     return true;
@@ -750,12 +771,98 @@
     insertFragment(frag);
   }
 
+  // 段落类容器：<p> 不能作为它们的子元素。p>p 是非法嵌套，回写进书的 XHTML 结构会损坏，
+  // 再次加载后内容展示异常（同 formatBlock 对 p>ul / p>p 的处理口径）。
+  var PARAGRAPH_LIKE = { p: 1, h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1,
+                         pre: 1, dt: 1, caption: 1, address: 1 };
+
+  // 某个父容器要装 <p> 时需要的包裹标签：列表项 / 定义列表项只能用它们各自的子元素。
+  // 其余容器（body / div / li / td / blockquote / section…）都能直接容纳 <p>，返回空串。
+  function blockHostFor(parent) {
+    var t = tagOf(parent);
+    if (t === 'ul' || t === 'ol') { return 'li'; }
+    if (t === 'dl') { return 'dd'; }
+    return '';
+  }
+
+  // 「空段落」：没有可见内容。contenteditable 的空行常留一个 <br/> 占位，不算内容。
+  // 只认 <p>——空标题 / 空列表项是用户有意的结构，不动。
+  function isEmptyParagraph(el) {
+    if (tagOf(el) !== 'p') { return false; }
+    if ((el.textContent || '').replace(/\s/g, '').length) { return false; }
+    return !el.querySelector('img,hr,video,audio,iframe,object,svg,math');
+  }
+
+  function collapseAfterSelection(s, node) {
+    if (!s || !node || !node.parentNode) { return; }
+    var r = document.createRange();
+    r.setStartAfter(node);
+    r.collapse(true);
+    s.removeAllRanges();
+    s.addRange(r);
+  }
+
+  // 片段里是否已有块级元素（Java 侧 joinInsertFragments 产出的是 <p>…</p> 串）。
+  // 没有就由这里替调用方补一层 <p>——否则一个裸 <img/> 会直接挂在 body 下，
+  // 既不是段落也不受段落样式约束。
+  function hasBlockChild(frag) {
+    for (var c = frag.firstChild; c; c = c.nextSibling) {
+      if (c.nodeType !== 1) { continue; }
+      var t = tagOf(c);
+      if (isBlockTag(t) || PARAGRAPH_LIKE[t] || t === 'dl' || t === 'figure') { return true; }
+    }
+    return false;
+  }
+
+  // 把片段整段落成「独立段落」，返回是否成功。
+  //
+  // 老实现直接 range.insertNode(frag)，片段落在光标处——图片会紧贴光标前的文字挤在同一行，
+  // 用户看到的就是「图片没有自己的行」。新口径把片段挪到<b>光标所在段落之后</b>：
+  //   · 片段本身没有块级元素 → 先包一层 <p>，保证落进文档的是一个块；
+  //   · 光标不在任何已知块里（表格单元格、body 直属行内元素…）→ 按老行为落在光标处；
+  //   · 光标所在块能容纳 <p>（div / li / td / blockquote…）→ 也按老行为落在光标处，合法；
+  //   · 光标所在块是段落类（p / h1~h6 / pre…）→ 整段插到它<b>后面</b>，避免 p>p；
+  //     若它本身就是个空行占位，插入后被顶替掉（点了空行插图，图片正好落在这一行）。
+  function insertAsOwnBlock(frag) {
+    var s = activeSelection();
+    if (!s || !frag) { return false; }
+    if (!hasBlockChild(frag)) { frag = wrapInTag('p', frag); }
+    var range = s.getRangeAt(0);
+    var block = closestBlock(range.startContainer);
+    if (!block || !PARAGRAPH_LIKE[tagOf(block)]) {
+      return insertFragment(frag);
+    }
+    var parent = block.parentNode;
+    if (!parent) { return insertFragment(frag); }
+    var host = blockHostFor(parent);
+    var placed = host ? wrapInTag(host, frag) : frag;
+    // ⚠ 先取引用：appendChild / insertBefore 会把 DocumentFragment 的子节点移交出去，
+    // frag 随即变空，之后再取 lastChild 恒为 null（#57 踩实）
+    var anchor = placed.lastChild;
+    parent.insertBefore(placed, block.nextSibling);
+    if (isEmptyParagraph(block)) { parent.removeChild(block); }
+    collapseAfterSelection(s, anchor);
+    push();
+    notifySelection();
+    return true;
+  }
+
+  function wrapInTag(tag, frag) {
+    var box = makeTag(tag);
+    box.appendChild(frag);
+    return box;
+  }
+
   // 把一段 XHTML 片段插到光标处（图片等），成功返回 true
+  //
+  // 返回 false 会让 Java 侧退回源码区再插一次（切 tab 时 flush 会把章节冲掉），
+  // 所以「排版策略不成立」不能返回 false——那种情况一律退回内联插入。
   window.epubraInsertHtml = function (html) {
     if (!html) { return false; }
+    var s = activeSelection();
+    if (!s) { return false; }
     try {
-      var range = activeSelection().getRangeAt(0);
-      return insertFragment(range.createContextualFragment(html));
+      return insertAsOwnBlock(s.getRangeAt(0).createContextualFragment(html));
     } catch (err) {
       return false;
     }

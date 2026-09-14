@@ -48,6 +48,7 @@ import javafx.scene.control.Menu;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.RadioMenuItem;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
@@ -152,8 +153,16 @@ public class MainController {
     @FXML
     private StackPane welcomePage;
 
+    // 「视图」菜单里的预览命令：有书才有意义，首页（书架）收起、只留主题三项。
+    // 两条分隔线也要一起收——只藏 MenuItem 会在菜单顶部留两条空档。
+    @FXML
+    private MenuItem refreshPreviewItem;
+    @FXML
+    private SeparatorMenuItem previewSeparatorTop;
     @FXML
     private MenuItem splitPreviewItem;
+    @FXML
+    private SeparatorMenuItem previewSeparatorBottom;
 
     @FXML
     private MenuItem undoItem;
@@ -161,7 +170,8 @@ public class MainController {
     private MenuItem redoItem;
 
     // 编辑 / 章节 / 插入 / 工具 四个菜单只对「已打开的图书」有意义——首页（书架）不该展示；
-    // 文件 / 视图 / 帮助 是全局命令（新建 / 打开 / 主题切换 / 关于），两态都保留。
+    // 文件 / 帮助 是全局命令，两态都保留；「视图」菜单本身两态都在，但其中「有书才有意义」的
+    // 预览命令（刷新预览 / 并排预览 + 两条分隔线）随外壳一起收起，首页只留主题三项。
     // 显隐统一由 setEditorChromeVisible 切换，见该方法注释。
     @FXML
     private Menu editMenu;
@@ -350,7 +360,10 @@ public class MainController {
         // 方法引用在**求值那一刻**就必须拿到非空实例，所以工具条要先建；
         // previewController 必须早于任何 refreshPreview()（findBar / 主题 / 切 tab 都会调它）。
         editorShellActivity = new EditorShellActivity(activityBar, statusBar,
-                editMenu, chapterMenu, insertMenu, toolsMenu);
+                editMenu, chapterMenu, insertMenu, toolsMenu,
+                // 「视图」菜单的预览命令组，顺序 = FXML 声明顺序（刷新预览 / 分隔线 / 并排预览 / 分隔线）
+                List.of(refreshPreviewItem, previewSeparatorTop,
+                        splitPreviewItem, previewSeparatorBottom));
         // 资源镜像（预览 / 可视化编辑器里相对引用的解析基准，惰性同步、构造不碰磁盘）
         // 现由 PreviewController 持有，换书时自动清空重建。
         previewController = new PreviewController(ctx, previewView, contentArea,
@@ -593,7 +606,12 @@ public class MainController {
     }
 
     /**
-     * 编辑器外壳（活动栏 / 状态栏 /「编辑 · 章节 · 插入 · 工具」四个菜单）的显隐。
+     * 「当前有没有打开的图书」这一个判据驱动的显隐，两组元素一起切：
+     *
+     * <ol>
+     *   <li>编辑器外壳：活动栏 / 状态栏 /「编辑 · 章节 · 插入 · 工具」四个菜单；</li>
+     *   <li>「视图」菜单里的预览命令（刷新预览 / 并排预览 + 两条分隔线）——首页只留主题三项。</li>
+     * </ol>
      *
      * <p>实现搬到 {@link EditorShellActivity}（纯搬迁，拆分批次 C）；FXML 的
      * {@code onAction} 与事件订阅只能指到主控制器，故这里保留一行委派。

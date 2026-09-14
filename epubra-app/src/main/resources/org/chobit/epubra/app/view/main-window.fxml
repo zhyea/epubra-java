@@ -87,12 +87,14 @@
                         <MenuItem text="插入图片" onAction="#onInsertImage"/>
                     </items>
                 </Menu>
+                <!-- 「刷新预览 / 并排预览」是**有书才有意义**的命令：首页（书架）由
+                     EditorShellActivity 连同两条分隔线一起收起，只留主题三项，见该类 javadoc。 -->
                 <Menu text="视图">
                     <items>
-                        <MenuItem text="刷新预览" onAction="#onRefreshPreview"/>
-                        <SeparatorMenuItem/>
+                        <MenuItem fx:id="refreshPreviewItem" text="刷新预览" onAction="#onRefreshPreview"/>
+                        <SeparatorMenuItem fx:id="previewSeparatorTop"/>
                         <MenuItem fx:id="splitPreviewItem" text="并排预览" onAction="#onToggleSplitPreview"/>
-                        <SeparatorMenuItem/>
+                        <SeparatorMenuItem fx:id="previewSeparatorBottom"/>
                         <RadioMenuItem fx:id="themeLightItem" text="浅色" onAction="#onThemeLight"
                                        selected="true">
                             <toggleGroup>

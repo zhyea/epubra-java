@@ -58,6 +58,21 @@ class PreviewImageLoadTest {
             "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>图</title></head>"
                     + "<body><p>看图</p><img src=\"../images/pixel.png\" alt=\"图\"/></body></html>";
 
+    /**
+     * 真实 EPUB 里常见的<b>畸形</b>结构：{@code <head>} 被写到整段正文之后，图片在 head 之前。
+     *
+     * <p>不是编出来的边角料——用户实际在编的书就是这个形态（镜像目录里抓到的原始章节）：
+     * <pre>
+     * &lt;html&gt;&lt;body&gt;&lt;h1&gt;贩罪&lt;/h1&gt;&lt;p&gt;作者：…&lt;img src="images/xxx.jpg"/&gt;&lt;/p&gt;
+     * …大段正文… &lt;head&gt;&lt;title&gt;贩罪&lt;/title&gt;&lt;/head&gt;&lt;/body&gt;&lt;/html&gt;
+     * </pre>
+     */
+    private static final String HEAD_AFTER_BODY_XHTML =
+            "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>图</h1>"
+                    + "<p>作者：某人<img src=\"../images/pixel.png\" alt=\"pixel.png\"/></p>"
+                    + "<p>正文正文正文</p>"
+                    + "<head><title>图</title></head></body></html>";
+
     private static final CountDownLatch FX_STARTED = new CountDownLatch(1);
     private static WebView webView;
 
@@ -118,6 +133,42 @@ class PreviewImageLoadTest {
         assertTrue(xhtml.contains("src=\"../images/pixel.png\""),
                 "base 只影响解析，不改 src 属性值；回写必须是原始相对路径：" + xhtml);
         assertFalse(xhtml.contains("file:/"), "正文里不能残留镜像目录的绝对路径：" + xhtml);
+    }
+
+    @Test
+    @Timeout(90)
+    @DisplayName("head 掉在正文之后的畸形章节，图片同样必须解码出来（裂图回归）")
+    void imageLoadsWhenHeadFollowsContent(@TempDir Path dir) throws Exception {
+        Book book = bookWithImage();
+        PreviewMirror mirror = new PreviewMirror(dir);
+        String base = mirror.baseHrefFor(book, CHAPTER_HREF);
+        assertNotNull(base, "镜像可用时必须给出基准地址");
+
+        int width = loadAndAwaitImage(
+                PreviewHtml.editableDocument(HEAD_AFTER_BODY_XHTML, Theme.LIGHT, base));
+        assertTrue(width > 0,
+                "head 排在正文之后时，base 曾被插到文件末尾——<img> 在它前面，相对引用按 "
+                        + "about:blank 解析后静默失败，页面上只剩 alt 文字（图片名）。"
+                        + "naturalWidth=" + width);
+    }
+
+    @Test
+    @Timeout(90)
+    @DisplayName("畸形章节里注入的 base 同样不会被序列化写回正文")
+    void malformedChapterStillDropsInjectedBase(@TempDir Path dir) throws Exception {
+        Book book = bookWithImage();
+        PreviewMirror mirror = new PreviewMirror(dir);
+        String base = mirror.baseHrefFor(book, CHAPTER_HREF);
+
+        loadAndAwaitImage(
+                PreviewHtml.editableDocument(HEAD_AFTER_BODY_XHTML, Theme.LIGHT, base));
+        Object serialized = runScript("window.epubraSerialize()");
+
+        assertTrue(serialized instanceof String, "serialize 应返回字符串，实际：" + serialized);
+        String xhtml = (String) serialized;
+        assertFalse(xhtml.contains("<base"), "注入的 base 绝不能写回畸形章节：" + xhtml);
+        assertTrue(xhtml.contains("src=\"../images/pixel.png\""),
+                "base 只影响解析，不改 src 属性值：" + xhtml);
     }
 
     // ---------------------------------------------------------------- 辅助

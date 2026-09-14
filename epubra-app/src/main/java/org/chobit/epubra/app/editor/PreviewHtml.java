@@ -100,9 +100,12 @@ public final class PreviewHtml {
      * <p>相比把 {@code src} 换成 {@code data:} URI，{@code <base>} 只影响解析、不改
      * {@code src} 的属性值，因此可视化编辑器回写正文时零影响。
      *
-     * <p>插在 {@code <head>} 开标签之后而不是 {@code </head>} 之前：HTML 规定
-     * {@code <base>} 必须先于其他引用 URL 的元素生效，排在 {@code <link>} 前面最稳妥。
-     * 文档没有 head 时退化为插在 {@code </head>} 之前；都没有则原样返回（无处可插）。
+     * <p>插入点由 {@link #baseAnchor(String)} 决定：<b>必须排在文档里第一个引用 URL 的
+     * 元素之前</b>——HTML 规定 {@code <base>} 只对其<b>之后</b>解析的引用生效，排在
+     * {@code <img>} 后面等于白注入。head 在 body 之前时插在 {@code <head>} 开标签之后
+     * （早于 {@code <link>} / {@code <img>}，最稳妥）；head 缺失或掉在正文之后时改插在
+     * {@code <body>} 开标签之后。两者都找不到时退化为插在 {@code </head>} 之前；
+     * 仍无处可插则原样返回。
      *
      * @param xhtml    章节正文
      * @param baseHref 基准地址（通常是 {@code file:} URI，以 {@code /} 结尾）；空则原样返回
@@ -112,15 +115,44 @@ public final class PreviewHtml {
             return xhtml;
         }
         String tag = "<base id=\"" + INJECTED_BASE_ID + "\" href=\"" + escapeAttribute(baseHref) + "\"/>";
-        int headOpen = endOfHeadOpenTag(xhtml);
-        if (headOpen >= 0) {
-            return xhtml.substring(0, headOpen) + tag + xhtml.substring(headOpen);
+        int anchor = baseAnchor(xhtml);
+        if (anchor >= 0) {
+            return xhtml.substring(0, anchor) + tag + xhtml.substring(anchor);
         }
         int headClose = indexOfIgnoringCase(xhtml, "</head>");
         if (headClose >= 0) {
             return xhtml.substring(0, headClose) + tag + xhtml.substring(headClose);
         }
         return xhtml;
+    }
+
+    /**
+     * 选 {@code <base>} 的插入点（返回下标，即插在该位置之前）；无处可插返回 -1。
+     *
+     * <p>规则只有一条：<b>必须早于文档中所有引用 URL 的元素</b>。按顺序尝试：
+     * <ol>
+     *   <li>{@code <head>} 开标签之后——但仅当该 {@code <head>} 确实排在 {@code <body>}
+     *       之前。真实 EPUB 的章节结构经常是畸形的：{@code <head>} 被写到整段正文之后
+     *       （见下方「为什么不能只认 head」）；</li>
+     *   <li>否则 {@code <body>} 开标签之后。</li>
+     * </ol>
+     *
+     * <h2>为什么不能只认 head</h2>
+     * <p>只按「第一个 {@code <head>} 开标签之后」定位时，畸形章节会把 {@code <base>} 插到
+     * 文件<b>最末尾</b>——正文里所有 {@code <img>} 都在它前面，相对引用按 {@code about:blank}
+     * 解析后静默失败，画面上只剩 alt 文字（图片名）。{@code <base>} 落在 body 内虽不合规范，
+     * 但浏览器与 WebKit 的 XML 解析都照常据其设置文档基准 URL（实测 {@code naturalWidth}
+     * 由 0 变 4）；它带 {@link #INJECTED_BASE_ID}，回写时会被剥掉，不污染正文。
+     *
+     * <p>没有 {@code <body>} 时返回 -1，由调用方退回 {@code </head>} 之前的老口径。
+     */
+    private static int baseAnchor(String xhtml) {
+        int headOpen = endOfHeadOpenTag(xhtml);
+        int bodyOpen = indexOfIgnoringCase(xhtml, "<body");
+        if (headOpen >= 0 && (bodyOpen < 0 || headOpen < bodyOpen)) {
+            return headOpen;
+        }
+        return endOfOpenTag(xhtml, "<body");
     }
 
     /**

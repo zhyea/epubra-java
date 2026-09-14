@@ -98,28 +98,35 @@ class ResourceOpsTest {
     }
 
     @Test
-    void joinInsertFragmentsSeparatesMultipleImages() throws Exception {
-        // P2：裸连的 <img/><img/> 是两个行内元素，会挤在同一行。
+    void joinInsertFragmentsWrapsEachImageInItsOwnParagraph() throws Exception {
+        // 裸连的 <img/><img/> 是两个行内元素，会挤在同一行；<br/> 分隔也只是「同段内换行」。
+        // 新口径：每张图各自包一个 <p>，图片才真正与上下文平级、独占一段。
         String joined = ResourceOps.joinInsertFragments(List.of(
                 "<img src=\"a.png\" alt=\"a.png\"/>",
                 "<img src=\"b.png\" alt=\"b.png\"/>",
                 "<img src=\"c.png\" alt=\"c.png\"/>"));
-        assertEquals("<img src=\"a.png\" alt=\"a.png\"/>"
-                        + "<br/>"
-                        + "<img src=\"b.png\" alt=\"b.png\"/>"
-                        + "<br/>"
-                        + "<img src=\"c.png\" alt=\"c.png\"/>",
+        assertEquals("<p><img src=\"a.png\" alt=\"a.png\"/></p>\n"
+                        + "<p><img src=\"b.png\" alt=\"b.png\"/></p>\n"
+                        + "<p><img src=\"c.png\" alt=\"c.png\"/></p>",
                 joined);
-        // 结果仍必须是合法 XHTML——<br/> 在 <p> 内外都允许
+        // 并列的多个 <p> 放在 body / div 下合法；「别插进已有 <p> 里」那一层由
+        // 可视化编辑器的 epubraInsertHtml 负责（它才有 DOM 可以判断）
         assertParsable(joined);
+        assertFalse(joined.contains("<br/>"), "不再靠 <br/> 分隔：" + joined);
     }
 
     @Test
-    void joinInsertFragmentsLeavesSingleFragmentUntouched() {
-        assertEquals("<img src=\"a.png\" alt=\"a.png\"/>",
+    void joinInsertFragmentsWrapsSingleImageAndSkipsEmpty() {
+        assertEquals("<p><img src=\"a.png\" alt=\"a.png\"/></p>",
                 ResourceOps.joinInsertFragments(List.of("<img src=\"a.png\" alt=\"a.png\"/>")));
         assertEquals("", ResourceOps.joinInsertFragments(List.of()));
         assertEquals("", ResourceOps.joinInsertFragments(null));
+        assertEquals("", ResourceOps.joinInsertFragments(List.of("")),
+                "空片段不算一张图——否则会往正文塞一个空段落");
+        assertEquals("<p><img src=\"a.png\" alt=\"a.png\"/></p>",
+                ResourceOps.joinInsertFragments(
+                        java.util.Arrays.asList(null, "<img src=\"a.png\" alt=\"a.png\"/>")),
+                "null 片段同样跳过");
     }
 
     @Test

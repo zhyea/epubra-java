@@ -1,8 +1,11 @@
 package org.chobit.epubra.app.editor;
 
+import org.chobit.epubra.app.resource.ResourceOps;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -66,17 +69,161 @@ class VisualEditorBlockFormatTest extends VisualEditorTestSupport {
 
     @Test
     @Timeout(60)
-    @DisplayName("插入图片：img 元素落在光标处，序列化为自闭合标签")
-    void insertImageAtCaret() throws Exception {
+    @DisplayName("插入单张图：img 独占一个段落，不与光标所在段落内联混排")
+    void insertImageGetsItsOwnParagraph() throws Exception {
         caretIntoParagraph();
         String tag = "<img src=\"images/cover.png\" alt=\"封面\"/>";
         assertTrue(Boolean.TRUE.equals(insertHtml(tag)), "在光标处插入 img 应成功");
 
-        String xhtml = serialized();
-        assertTrue(xhtml.contains("images/cover.png"), "图片地址应在正文里：" + xhtml);
-        assertTrue(xhtml.matches("(?s).*<img[^>]*\\s*/>.*"),
-                "img 必须自闭合，否则回写正文会校验失败：" + xhtml);
-        assertWellFormedXhtml(xhtml);
+        String body = bodyOf(serialized());
+        assertTrue(body.contains("images/cover.png"), "图片地址应在正文里：" + body);
+        assertFalse(hasNestedParagraph(), "绝不能产生 p 套 p：" + body);
+        // 关键断言：装着图片的那个 <p> 里不能有别的文字——否则就是「和正文挤在一段」
+        assertTrue(imageOwnsItsParagraph("images/cover.png"),
+                "图片必须独占一个段落，不能与光标前的文字同段：" + body);
+        assertTrue(body.contains("正文"), "原段落文字必须原样保留：" + body);
+        assertTrue(body.matches("(?s).*<img[^>]*\\s*/>.*"),
+                "img 必须自闭合，否则回写正文会校验失败：" + body);
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("光标落在段落中间插图，图片仍独占段落，且不产生 p 套 p")
+    void insertImageMidParagraphAvoidsNesting() throws Exception {
+        // 光标塞进「正文」两个字中间——插入点在一个 <p> 内部，最容易造出非法嵌套
+        runScript("(function () {"
+                + " var p = document.body.querySelector('p');"
+                + " var r = document.createRange();"
+                + " r.setStart(p.firstChild, 1); r.collapse(true);"
+                + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+                + " return true; })()");
+        assertTrue(Boolean.TRUE.equals(insertHtml("<p><img src=\"images/a.png\" alt=\"a\"/></p>")));
+
+        String body = bodyOf(serialized());
+        assertFalse(hasNestedParagraph(), "p 套 p 会让章节结构损坏：" + body);
+        assertTrue(imageOwnsItsParagraph("images/a.png"), "图片必须独占段落：" + body);
+        assertTrue(body.contains("正文"), "段落文字必须完整保留：" + body);
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("在空行处插图：空行占位被图片顶替，不残留空段落")
+    void insertImageReplacesEmptyParagraph() throws Exception {
+        runScript("(function () {"
+                + " var X = 'http://www.w3.org/1999/xhtml';"
+                + " var p = document.createElementNS(X, 'p');"
+                + " p.appendChild(document.createElementNS(X, 'br'));"
+                + " document.body.appendChild(p);"
+                + " var r = document.createRange(); r.selectNodeContents(p); r.collapse(true);"
+                + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+                + " return true; })()");
+        assertTrue(Boolean.TRUE.equals(insertHtml("<p><img src=\"images/b.png\" alt=\"b\"/></p>")));
+
+        String body = bodyOf(serialized());
+        assertTrue(body.contains("images/b.png"), "图片应在正文里：" + body);
+        assertTrue(imageOwnsItsParagraph("images/b.png"), "图片必须独占段落：" + body);
+        // 空行占位（contenteditable 的 <p><br/></p>）应被图片顶替；整篇里不该再有 <br/>
+        assertFalse(Boolean.TRUE.equals(runScript("!!document.body.querySelector('br')")),
+                "点了空行插图，那个空行占位段落应被顶替掉而不是残留：" + body);
+        assertFalse(hasNestedParagraph(), body);
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("一次插多张图：每张各占一个段落，不挤在同一段")
+    void insertMultipleImagesEachGetsOwnParagraph() throws Exception {
+        caretIntoParagraph();
+        String joined = ResourceOps.joinInsertFragments(List.of(
+                "<img src=\"images/a.png\" alt=\"a\"/>",
+                "<img src=\"images/b.png\" alt=\"b\"/>"));
+        assertTrue(Boolean.TRUE.equals(insertHtml(joined)), "多图插入应成功");
+
+        String body = bodyOf(serialized());
+        assertTrue(body.contains("images/a.png") && body.contains("images/b.png"), body);
+        assertTrue(imageOwnsItsParagraph("images/a.png"), "第一张图必须独占段落：" + body);
+        assertTrue(imageOwnsItsParagraph("images/b.png"), "第二张图必须独占段落：" + body);
+        assertTrue(Boolean.TRUE.equals(runScript(
+                        "document.body.querySelectorAll('img').length === 2")),
+                "两张图都要在，不能互相吞掉：" + body);
+        assertFalse(Boolean.TRUE.equals(runScript(
+                        "document.body.querySelector('img[src=\"images/a.png\"]').parentNode"
+                                + " === document.body"
+                                + ".querySelector('img[src=\"images/b.png\"]').parentNode")),
+                "两张图不能共用同一个父段落：" + body);
+        assertFalse(hasNestedParagraph(), body);
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("在列表项里插图：图片段落在 <li> 内，且不把 <p> 塞到 <ul> 下")
+    void insertImageInsideListItemStaysValid() throws Exception {
+        runScript("(function () {"
+                + " var X = 'http://www.w3.org/1999/xhtml';"
+                + " var li = document.createElementNS(X, 'li');"
+                + " li.appendChild(document.createTextNode('条目'));"
+                + " var ul = document.createElementNS(X, 'ul');"
+                + " ul.appendChild(li);"
+                + " document.body.replaceChild(ul, document.body.querySelector('p'));"
+                + " var r = document.createRange(); r.selectNodeContents(li); r.collapse(true);"
+                + " var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+                + " return true; })()");
+        assertTrue(Boolean.TRUE.equals(insertHtml("<p><img src=\"images/c.png\" alt=\"c\"/></p>")));
+
+        String body = bodyOf(serialized());
+        // li 能容纳 <p>，所以图片段落在光标处就地落位（不额外造列表项）——这是合法结构
+        assertFalse(Boolean.TRUE.equals(runScript("!!document.body.querySelector('ul > p')")),
+                "<p> 不能是 <ul> 的直接子元素：" + body);
+        assertTrue(Boolean.TRUE.equals(
+                        runScript("!!document.body.querySelector('ul > li > p > img')")),
+                "图片段落应落在列表项内：" + body);
+        assertTrue(imageOwnsItsParagraph("images/c.png"), "图片独占一个段落：" + body);
+        assertTrue(body.contains("条目"), "原列表项文字保留：" + body);
+        assertFalse(hasNestedParagraph(), body);
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("没有光标/选区时插图返回 false，走 Java 侧降级且不改动文档")
+    void insertImageWithoutCaretReturnsFalse() throws Exception {
+        runScript("(function () {"
+                + " var s = window.getSelection(); if (s) { s.removeAllRanges(); }"
+                + " return true; })()");
+        String before = serialized();
+
+        assertFalse(Boolean.TRUE.equals(insertHtml("<p><img src=\"images/x.png\" alt=\"x\"/></p>")),
+                "没有选区必须返回 false——Java 侧据此走源码区降级，"
+                        + "谎报 true 会让「未能插入」被说成「已插入」");
+        assertTrue(before.equals(serialized()), "失败不应改动文档");
+    }
+
+    /** 装该图片的父元素必须是 {@code <p>}，且这段里除了图片没有别的文字（= 图片独占段落）。 */
+    private boolean imageOwnsItsParagraph(String src) throws Exception {
+        return Boolean.TRUE.equals(runScript(
+                "(function () { var i = document.body.querySelector('img[src=\"" + src + "\"]');"
+                        + " if (!i) { return false; }"
+                        + " var p = i.parentNode;"
+                        + " if (!p || p.nodeName.toLowerCase() !== 'p') { return false; }"
+                        + " return !(p.textContent || '').replace(/\\s/g, '').length; })()"));
+    }
+
+    /** 文档里是否出现 {@code <p>} 套 {@code <p>}——回写进书会让章节结构损坏。 */
+    private boolean hasNestedParagraph() throws Exception {
+        return Boolean.TRUE.equals(runScript(
+                "(function () {"
+                        + " var all = document.body.getElementsByTagName('p');"
+                        + " for (var i = 0; i < all.length; i++) {"
+                        + "   var n = all[i].parentNode;"
+                        + "   while (n && n !== document.body) {"
+                        + "     if (n.nodeName && n.nodeName.toLowerCase() === 'p') { return true; }"
+                        + "     n = n.parentNode;"
+                        + "   }"
+                        + " }"
+                        + " return false; })()"));
     }
 
     @Test

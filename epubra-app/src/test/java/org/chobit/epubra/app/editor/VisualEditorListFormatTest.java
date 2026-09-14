@@ -244,5 +244,178 @@ class VisualEditorListFormatTest extends VisualEditorTestSupport {
         assertWellFormedXhtml(serialized());
     }
 
+    @Test
+    @Timeout(60)
+    @DisplayName("Tab 链式缩进：后一项并入前一项已有的同型子列表，不并出两个平级列表")
+    void tabMergesIntoExistingSublistInsteadOfFragmenting() throws Exception {
+        setFlatList("ul", "甲", "乙", "丙");
+
+        caretInLi("乙");
+        pressTab();
+        caretInLi("丙");
+        pressTab();
+
+        String body = bodyOf(serialized());
+        // 丙 的前一项此时是「甲」（乙 已挪进甲的子列表），其尾部已有 ul——必须并入而不是再开一个
+        assertEquals(2, countIn(body, "<ul"),
+                "丙 应并入 乙 所在的子列表；再开平级列表会得到 3 个 ul：" + body);
+        assertEquals("NESTED", liParentIsTopLevel("丙"), "丙 应位于子列表里：" + body);
+        assertTrue(Boolean.TRUE.equals(runScript(
+                "(function () {"
+                        + " var sub = document.querySelector('ul > li > ul');"
+                        + " return !!sub && sub.textContent === '乙丙'; })()")),
+                "子列表应同时含 乙、丙 两项：" + body);
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("Tab 可缩到第三层，Shift+Tab 逐级降回顶层")
+    void tabDeepensToThirdLevelAndShiftTabClimbsBack() throws Exception {
+        setFlatList("ul", "甲", "乙", "丙");
+
+        caretInLi("乙");
+        pressTab();   // 乙 进 甲 的子列表（第 2 层）
+        caretInLi("丙");
+        pressTab();   // 丙 并入 甲 的子列表（第 2 层第二项）
+        caretInLi("丙");
+        pressTab();   // 丙 进 乙 的子列表（第 3 层）
+
+        String deepBody = bodyOf(serialized());
+        assertEquals(3, countIn(deepBody, "<ul"), "应形成三层列表：" + deepBody);
+        assertTrue(Boolean.TRUE.equals(runScript(
+                "(function () {"
+                        + " var deep = document.querySelector('ul > li > ul > li > ul');"
+                        + " return !!deep && deep.textContent === '丙'; })()")),
+                "第三层应挂在 乙 之下：" + deepBody);
+        assertWellFormedXhtml(serialized());
+
+        pressShiftTab();
+        pressShiftTab();
+        pressShiftTab();
+
+        String flat = bodyOf(serialized());
+        assertEquals("TOP", liParentIsTopLevel("丙"), "连按 Shift+Tab 应把 丙 降回顶层：" + flat);
+        assertEquals(3, countIn(flat, "<li"), "三项都不能丢：" + flat);
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("有序列表缩进同样并成一条子列表，序号不得被拆成从 1 重来")
+    void tabOnOrderedListKeepsOneSublist() throws Exception {
+        setFlatList("ol", "一", "二", "三");
+
+        caretInLi("二");
+        pressTab();
+        caretInLi("三");
+        pressTab();
+
+        String body = bodyOf(serialized());
+        assertEquals(2, countIn(body, "<ol"),
+                "同型子列表必须合并成一条，否则 三 的序号会从 1 重新开始：" + body);
+        assertEquals(0, countIn(body, "<ul"), "不该混入无序列表：" + body);
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("首项没有前项可挂：Tab 为无操作，绝不把制表符当文本插进正文")
+    void tabOnFirstItemIsNoOp() throws Exception {
+        setFlatList("ul", "甲", "乙");
+
+        caretInLi("甲");
+        pressTab();
+
+        String body = bodyOf(serialized());
+        assertEquals(1, countIn(body, "<ul"), "首项缩不了，列表结构不该变：" + body);
+        assertEquals(2, countIn(body, "<li"), "两项都还在：" + body);
+        assertFalse(body.contains("\t"), "Tab 不能退化成插入制表符文本：" + body);
+        assertWellFormedXhtml(serialized());
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("多层级结构合法：列表必须嵌在 li 里，不能直接相邻嵌套、不能裸 li 挂 body")
+    void nestedListsStayStructurallyLegal() throws Exception {
+        setFlatList("ul", "甲", "乙", "丙", "丁");
+
+        caretInLi("乙");
+        pressTab();
+        caretInLi("丙");
+        pressTab();
+        caretInLi("丁");
+        pressTab();
+
+        String body = bodyOf(serialized());
+        assertTrue(Boolean.TRUE.equals(runScript(
+                "(function () {"
+                        + " var bad = document.querySelectorAll('ul > ul, ol > ol, ul > ol, ol > ul,"
+                        + " body > li, li > li');"
+                        + " return bad.length === 0; })()")),
+                "列表只能嵌在 li 内，且不能有裸 li：" + body);
+        assertWellFormedXhtml(serialized());
+    }
+
     // ------------------------------------------------------------------ 脚本与断言助手
+
+    /** 把 body 换成一条干净的扁平列表（首元素为标签名，其余为各列表项文本）。 */
+    private void setFlatList(String tag, String... items) throws Exception {
+        withMember("__flat", tag + "|" + String.join("|", items), "(function () {"
+                + " var parts = String(window.__flat).split('|');"
+                + " var ns = 'http://www.w3.org/1999/xhtml';"
+                + " var b = document.body;"
+                + " while (b.firstChild) { b.removeChild(b.firstChild); }"
+                + " var list = document.createElementNS(ns, parts[0]);"
+                + " for (var i = 1; i < parts.length; i++) {"
+                + "   var li = document.createElementNS(ns, 'li');"
+                + "   li.appendChild(document.createTextNode(parts[i]));"
+                + "   list.appendChild(li); }"
+                + " b.appendChild(list);"
+                + " return true; })()");
+    }
+
+    /** 把光标收进文本恰好等于 text 的列表项——层级演练要精确落在某一项上。 */
+    private void caretInLi(String text) throws Exception {
+        Object placed = withMember("__liText", text, "(function () {"
+                + " var lis = document.body.querySelectorAll('li');"
+                + " for (var i = 0; i < lis.length; i++) {"
+                + "   if (lis[i].textContent === window.__liText) {"
+                + "     var r = document.createRange(); r.selectNodeContents(lis[i]);"
+                + "     var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);"
+                + "     return true; } }"
+                + " return false; })()");
+        assertTrue(Boolean.TRUE.equals(placed), "找不到文本为「" + text + "」的列表项");
+    }
+
+    /** 合成 Tab 键盘事件，走 document 捕获阶段的监听器（真实用户按键即这条路径）。 */
+    private void pressTab() throws Exception {
+        runScript("document.dispatchEvent(new KeyboardEvent('keydown',"
+                + " {key: 'Tab', bubbles: true, cancelable: true}))");
+    }
+
+    private void pressShiftTab() throws Exception {
+        runScript("document.dispatchEvent(new KeyboardEvent('keydown',"
+                + " {key: 'Tab', shiftKey: true, bubbles: true, cancelable: true}))");
+    }
+
+    /** 数 body 区间内某子串出现次数——head 里嵌着编辑脚本源码，不能整篇 contains。 */
+    private int countIn(String body, String needle) {
+        int n = 0;
+        for (int i = body.indexOf(needle); i >= 0; i = body.indexOf(needle, i + needle.length())) {
+            n++;
+        }
+        return n;
+    }
+
+    /** 文本恰好等于 text 的那一项，父节点是最外层列表（TOP）还是子列表（NESTED）。 */
+    private Object liParentIsTopLevel(String text) throws Exception {
+        return withMember("__liText", text, "(function () {"
+                + " var lis = document.body.querySelectorAll('li');"
+                + " var top = document.body.querySelector('ul, ol');"
+                + " for (var i = 0; i < lis.length; i++) {"
+                + "   if (lis[i].textContent === window.__liText) {"
+                + "     return lis[i].parentNode === top ? 'TOP' : 'NESTED'; } }"
+                + " return 'MISSING'; })()");
+    }
 }

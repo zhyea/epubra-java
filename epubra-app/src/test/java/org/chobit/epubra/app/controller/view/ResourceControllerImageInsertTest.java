@@ -77,8 +77,11 @@ class ResourceControllerImageInsertTest {
         assertEquals(1, h.refreshResourcesCalls.get(), "新资源要出现在资源列表中");
         assertEquals(1, h.inserted.size(), "只应触发一次插入");
 
-        String tag = h.inserted.get(0);
-        assertTrue(tag.startsWith("<img "), tag);
+        String fragment = h.inserted.get(0);
+        // 每张图自带一个段落——图片不再与上下文文字挤在同一行
+        assertTrue(fragment.startsWith("<p><img "), "图片要包成独立段落：" + fragment);
+        assertTrue(fragment.endsWith("/></p>"), fragment);
+        String tag = fragment.substring(3, fragment.length() - 4);
         assertTrue(tag.endsWith("/>"), tag);
         assertTrue(tag.contains("alt=\"cover.png\""), "alt 保留原名供无障碍：" + tag);
         // 图片本体按内容寻址命名（md5 + 原扩展名），src 不再出现用户原名
@@ -86,7 +89,7 @@ class ResourceControllerImageInsertTest {
                 "src 应为 images/<md5>.png：" + tag);
         assertFalse(tag.contains(dir.toString()),
                 "正文里不能出现本机绝对路径——必须写包内相对路径：" + tag);
-        assertParsableXml(tag);
+        assertParsableXml(fragment);
 
         Resource imported = findByContent(h.book, new byte[]{1, 2, 3, 4});
         assertTrue(imported != null,
@@ -130,10 +133,12 @@ class ResourceControllerImageInsertTest {
         awaitInsert(h);
 
         assertEquals(1, h.inserted.size(), "多张图片也应只调一次插入（拼成一串）");
-        assertEquals(2, countOf(h.inserted.get(0), "<img "), h.inserted.get(0));
-        assertEquals(1, countOf(h.inserted.get(0), "<br/>"),
-                "多张图之间必须有分隔，否则两个行内元素会挤在同一行：" + h.inserted.get(0));
-        assertParsableXml(h.inserted.get(0));
+        String fragment = h.inserted.get(0);
+        assertEquals(2, countOf(fragment, "<img "), fragment);
+        assertEquals(2, countOf(fragment, "<p><img "),
+                "每张图各占一个段落，否则两个行内元素会挤在同一行：" + fragment);
+        assertFalse(fragment.contains("<br/>"), "不再靠 <br/> 分隔：" + fragment);
+        assertParsableXml(fragment);
         assertTrue(findByContent(h.book, new byte[]{1}) != null);
         assertTrue(findByContent(h.book, new byte[]{2}) != null);
         assertEquals("已插入 2 张图片", h.statuses.get(0));

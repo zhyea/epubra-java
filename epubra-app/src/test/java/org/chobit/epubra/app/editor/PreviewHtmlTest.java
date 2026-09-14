@@ -216,6 +216,27 @@ class PreviewHtmlTest {
     }
 
     @Test
+    @DisplayName("head 掉在正文之后（畸形章节）时，base 改插到 body 之后，仍早于第一个引用 URL 的元素")
+    void baseHrefStaysBeforeContentWhenHeadIsMisplaced() {
+        // 用户实际在编的书就是这个形态：head 与 title 被写到整段正文之后，
+        // <img> 在 head 之前。按「head 开标签之后」定位会把 base 插到文件末尾。
+        String malformed = "<html xmlns=\"http://www.w3.org/1999/xhtml\">"
+                + "<body><h1>标题</h1>"
+                + "<p>作者：某人<img src=\"images/a.png\" alt=\"a\"/></p>"
+                + "<head><title>标题</title></head></body></html>";
+
+        String doc = PreviewHtml.withBaseHref(malformed, "file:///tmp/x/OEBPS/");
+
+        int bodyAt = doc.indexOf("<body");
+        int baseAt = doc.indexOf("<base");
+        int imgAt = doc.indexOf("<img");
+        assertTrue(baseAt >= 0, "畸形章节也必须注入 base：" + doc);
+        assertTrue(baseAt > bodyAt, "head 在正文后时退化为插在 body 开标签之后：" + doc);
+        assertTrue(baseAt < imgAt,
+                "base 只对其后解析的引用生效，落在 <img> 之后就等于没注入（裂图只剩 alt）：" + doc);
+    }
+
+    @Test
     @DisplayName("文档里出现 <header> 不会把 base 插错位置")
     void headDetectionIsNotConfusedByHeaderElement() {
         String withHeader = "<html xmlns=\"http://www.w3.org/1999/xhtml\">"

@@ -341,3 +341,107 @@ import javafx.scene.layout.VBox;   // L77  ← 重复
 | **P4** | O8、O9 | 依赖「书变很大」的前提，暂不急 |
 
 > Git 累计 #39~#61 未提交，拆分前建议先让当前状态落一个提交点（需你显式批准）。
+
+---
+
+## 六、第四轮（2026-09-14）：编辑器裂图 #65
+
+**症状**：编辑器中图片只剩 alt 文字（图片名，如 `xxx.jpg`），无图像。
+
+**根因**：`PreviewHtml.withBaseHref` 把 `<base>` 插在**第一个 `<head>` 开标签之后**。真实 EPUB
+章节常是畸形结构——`<head><title>` 被写到整段正文之后（用户正在编的《贩罪》即如此，镜像目录里
+抓到的原文可证）→ `<base>` 落到文件**最末尾**，而 `<img>` 全在它前面；HTML 规定 `<base>` 只对
+其**之后**解析的引用生效 → 相对引用按 `about:blank` 解析后静默失败。
+
+**实测**：head 在 body 前 `naturalWidth=4` / **head 在正文后 `=0`（即该症状）** / 无 head `=4`；
+`base` 注入位置 180 → 修复后 84（`<body>` 在 45）。
+
+**修复**：新增 `PreviewHtml.baseAnchor()` —— head 确实排在 body 之前才用 head，否则挂
+`<body>` 开标签之后；两者都无才退回 `</head>` 之前。顺带修好 **headless 章节的预览**（`withTheme`
+不合成 head，旧口径下预览也裂图）。
+
+**验证**：
+- 守卫 `PreviewHtmlTest.baseHrefStaysBeforeContentWhenHeadIsMisplaced`（字符串：base 必须早于第一个 `<img>`）；
+- 守卫 `PreviewImageLoadTest.imageLoadsWhenHeadFollowsContent`（畸形章节 + 真实 WebView）；
+- 守卫 `PreviewImageLoadTest.malformedChapterStillDropsInjectedBase`（畸形章节回写无 base 残留）；
+- 前两条均做**负向验证**（锚点退回旧口径 → 必红，`naturalWidth=0`）；
+- `mvn -B clean test` exit 0，**468**（lib 72 + app 396）；冒烟 `javafx:run` exit 124，零异常命中。
+
+> 测试基线由 465 更新为 **468**。
+
+## 七、第五轮（2026-09-14）：插图独占段落 #66
+
+**需求**：新插入的图片需要分配**独立的行或段落**。旧形态图片紧贴光标前文字、与之排在同一行。
+
+**确定形态**（与用户确认）：独立段落 `<p><img …/></p>`。
+
+**改动**：
+
+| 层 | 位置 | 改动 |
+| --- | --- | --- |
+| Java | `ResourceOps.joinInsertFragments` | 每个非空片段包一层 `<p>`，片段间 `\n` 连接（旧口径为 `<br/>` 分隔） |
+| JS | `editor-script.js` `epubraInsertHtml` | 落位改由 `insertAsOwnBlock` 负责 |
+
+**JS 落位规则**（新增 `PARAGRAPH_LIKE` / `blockHostFor` / `isEmptyParagraph` /
+`collapseAfterSelection` / `hasBlockChild` / `insertAsOwnBlock` / `wrapInTag`）：
+
+1. 片段无块级子元素 → 先包 `<p>`（否则裸 `<img/>` 直接挂 body 下）;
+2. 光标所在块属 `PARAGRAPH_LIKE`（`p/h1~h6/pre/dt/caption/address`）→ 整段插到它**之后**，
+   规避 `p>p` 非法嵌套；该块若为空占位（无文字无媒体）则被顶替——点空行插图正好落在这一行；
+3. 父容器 `ul/ol` → 裹 `li`；`dl` → 裹 `dd`；
+4. 光标不在已知块内 → 退回内联插入。
+
+> 所有分支一律返回 `true`。「排版策略不成立」返回 `false` 会触发 JS→Java fallback：
+> 退到源码区再插一次，切 tab flush 时直接冲掉章节。
+
+**关键坑**：`DocumentFragment` 的子节点在 `insertBefore` / `appendChild` 时**移交进 DOM**，
+frag 随即变空 —— `placed.lastChild` 必须**先取引用再插**，插完再取恒为 `null`（#57 同源）。
+
+**验证**：
+
+- `ResourceOpsTest` 2 条（`joinInsertFragmentsWrapsEachImageInItsOwnParagraph` /
+  `joinInsertFragmentsWrapsSingleImageAndSkipsEmpty`）；
+- `VisualEditorBlockFormatTest` 6 条，DOM 级断言：独占段落 / 段落内插不产生 `p>p` /
+  顶替空段落 / 多图不同父 / 列表内 `ul>li>p>img` 且无 `ul>p` / 无光标返回 false；
+- `ResourceControllerImageInsertTest` 2 条断言由 `<br/>` 更新为 `<p><img …/></p>`；
+- **负向验证**：`epubraInsertHtml` 临时改回内联 `insertFragment` → 前 4 条必红，
+  列表项与无光标两条保持绿（守结构/契约，非新行为）；
+- `mvn -B clean test` exit 0，**473**（lib 72 + app 401）；冒烟 `javafx:run` exit 124
+  （子进程 143 = SIGTERM 属预期），LoadException/NPE/ClassNotFound **零命中**。
+
+> 测试基线由 468 更新为 **473**。
+
+## 八、第六轮（2026-09-14）：列表 Tab 多层级 #67
+
+**需求**：列表需要支持通过 Tab 实现**多层级**列表。
+
+**现状**：`indentListItem` / `outdentListItem` 与 Tab 的 keydown 接线早已存在，单层用例
+（`listTabIndentsAndShiftTabOutdents`）也是绿的；Java 侧无 Tab 拦截。**多层级零覆盖**。
+
+**根因**：`indentListItem` 每次 `makeTag` **新建**子列表，从不复用前一项末尾已有的同型子列表。
+真实 DOM 输出：
+
+```
+<ul><li>甲<ul><li>乙</li></ul><ul><li>丙</li></ul></li></ul>
+<ol><li>一<ol><li>二</li></ol><ol><li>三</li></ol></li></ol>
+```
+
+- `丙` 与 `乙` 同级却分属两张表；
+- `<ol>` 下 `三` 的**序号从 1 重来**；
+- 碎片里没有前一项 → 再按 Tab 缩不下去 → **实际只能缩两层**（用户可见症状）。
+
+**修复**：新增 `trailingSublist(li, kind)` —— 取前一项末尾的**同型**子列表（跳过纯空白文本
+节点；若其后跟着**有内容**的文本则返回 null，避免新项插到文字前面）。`indentListItem` 改为
+「有则并入、无则新建」。
+
+**验证**：
+
+- `VisualEditorListFormatTest` 新增 5 条（全部真实 WebView DOM 断言）：
+  `tabMergesIntoExistingSublistInsteadOfFragmenting` / `tabDeepensToThirdLevelAndShiftTabClimbsBack`
+  / `tabOnOrderedListKeepsOneSublist` / `tabOnFirstItemIsNoOp` / `nestedListsStayStructurallyLegal`；
+- **负向验证**：修复前同一测试文件跑出恰好 3 条红（碎片化 2 + 三层链式 1），另两条边界用例
+  保持绿（守契约与结构，与新建/并入无关）；
+- `mvn -B clean test` exit 0，**478**（lib 72 + app 406）；冒烟 `javafx:run` exit 124，零异常命中。
+
+> 测试基线由 473 更新为 **478**。
+

@@ -170,21 +170,38 @@ public final class ResourceOps {
     }
 
     /**
-     * 把多个待插入片段连成一段可插入的 XHTML。
+     * 把多个待插入片段连成一段可插入的 XHTML，<b>每张图各自独占一个段落</b>。
      *
-     * <p><b>不能裸连</b>：{@code <img/><img/>} 只是两个相邻的行内元素，渲染出来会挤在同一行，
-     * 看起来像一张被压扁的图。中间插 {@code <br/>} 分隔——{@code <br/>} 在 {@code <p>} 之内
-     * 之外都是合法 XHTML；改用 {@code <p>} 包裹虽然「语义更像段落」，但插入点常位于某个
-     * {@code <p>} 内部，会造出非法的嵌套 {@code <p>}。
+     * <p>裸连的 {@code <img/><img/>} 只是两个相邻的行内元素，会挤在同一行；即便中间加
+     * {@code <br/>} 分隔，图片在语义上仍属于光标所在那个段落，跟前文文字排在同一条版心里。
+     * 这里给每个片段包一层 {@code <p>}：图片成为独立段落、与上下文平级，这也是 EPUB 排版里
+     * 插图的标准形态。
+     *
+     * <p><b>{@code <p>} 不能插在光标处</b>：插入点常位于某个 {@code <p>} 内部，
+     * {@code p>p} 是非法嵌套，回写进书后章节结构损坏。把整串挪到「光标所在段落之后」落位
+     * 是可视化编辑器 {@code epubraInsertHtml} 的职责（那里才有 DOM 可以判断）。
+     * 源码区是纯文本落字，两个视图的落位细节因此略有差别。
+     *
+     * <p>段落之间用换行分隔，纯为源码视图可读；块级元素之间的空白不参与渲染。
+     *
+     * @return 形如 {@code <p><img …/></p>} 或 {@code <p><img …/></p>\n<p><img …/></p>}；
+     *         入参为空（或只含空片段）时返回空串
      */
     public static String joinInsertFragments(List<String> fragments) {
         if (fragments == null || fragments.isEmpty()) {
             return "";
         }
-        if (fragments.size() == 1) {
-            return fragments.get(0);
+        StringBuilder joined = new StringBuilder();
+        for (String fragment : fragments) {
+            if (fragment == null || fragment.isEmpty()) {
+                continue;
+            }
+            if (joined.length() > 0) {
+                joined.append('\n');
+            }
+            joined.append("<p>").append(fragment).append("</p>");
         }
-        return String.join("<br/>", fragments);
+        return joined.toString();
     }
 
     /**
