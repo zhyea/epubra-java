@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.ChoiceBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.ColumnConstraints?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+
+<!--
+  章节拆分对话框：选「拆分方式」（前后缀标记 / 正则 / 每段字数），按方式显示对应参数行。
+  由 ChapterSplitDialog 以 DialogPane 装载；确定后由 TocController 执行拆分。
+-->
+<VBox xmlns="http://javafx.com/javafx/24" xmlns:fx="http://javafx.com/fxml"
+      spacing="14.0" prefWidth="540.0"
+      fx:controller="org.chobit.epubra.app.ui.dialog.ChapterSplitDialogController">
+    <padding>
+        <Insets top="14.0" right="20.0" bottom="6.0" left="20.0"/>
+    </padding>
+
+    <Label text="按选定的方式把当前章节拆成多章：标记或正则命中的段落将成为新章节的起点"
+           styleClass="muted-label" wrapText="true"/>
+
+    <GridPane hgap="10.0" vgap="10.0">
+        <columnConstraints>
+            <ColumnConstraints minWidth="90.0" prefWidth="90.0"/>
+            <ColumnConstraints hgrow="ALWAYS"/>
+            <ColumnConstraints minWidth="56.0" prefWidth="56.0"/>
+            <ColumnConstraints hgrow="ALWAYS"/>
+        </columnConstraints>
+
+        <Label text="拆分方式" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+        <ChoiceBox fx:id="modeChoice" maxWidth="Infinity" GridPane.rowIndex="0"
+                   GridPane.columnIndex="1" GridPane.columnSpan="3"/>
+
+        <!-- 前后缀标记：预设下拉填充两个输入框，也可直接改成自定义前缀 / 后缀 -->
+        <Label fx:id="presetLabel" text="常用标记" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+        <ChoiceBox fx:id="presetChoice" maxWidth="Infinity" GridPane.rowIndex="1"
+                   GridPane.columnIndex="1" GridPane.columnSpan="3"/>
+
+        <Label fx:id="prefixLabel" text="前缀" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+        <TextField fx:id="prefixField" promptText="如：第" GridPane.rowIndex="2"
+                   GridPane.columnIndex="1"/>
+        <Label fx:id="suffixLabel" text="后缀" GridPane.rowIndex="2" GridPane.columnIndex="2"/>
+        <TextField fx:id="suffixField" promptText="如：章" GridPane.rowIndex="2"
+                   GridPane.columnIndex="3"/>
+
+        <Label fx:id="regexLabel" text="正则表达式" GridPane.rowIndex="3" GridPane.columnIndex="0"/>
+        <TextField fx:id="regexField" promptText="如：第[一二三四五六七八九十百]+章"
+                   GridPane.rowIndex="3" GridPane.columnIndex="1" GridPane.columnSpan="3"/>
+
+        <Label fx:id="lengthLabel" text="每段字数" GridPane.rowIndex="4" GridPane.columnIndex="0"/>
+        <TextField fx:id="lengthField" promptText="按正文纯文本字数计，如：3000"
+                   GridPane.rowIndex="4" GridPane.columnIndex="1" GridPane.columnSpan="3"/>
+    </GridPane>
+
+    <Label fx:id="errorLabel" styleClass="dialog-error" wrapText="true"
+           visible="false" managed="false"/>
+
+    <Label styleClass="muted-label" wrapText="true"
+           text="拆分会新建章节文件并插入目录（原章节之后、同级），可用撤销回退"/>
+</VBox>

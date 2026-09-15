@@ -46,6 +46,32 @@ public final class TextSearch {
         return caseSensitive ? selected.equals(keyword) : selected.equalsIgnoreCase(keyword);
     }
 
+    /**
+     * 全书查找的章节扫描：从 {@code from}（含）起按 {@code step}（+1/-1，即方向）逐章走到
+     * {@code to}（不含）为止，返回第一个含命中的章节下标，找不到返回 -1。
+     *
+     * <p>纯列表扫描、与界面无关，故放在本类；全书查找的跳章与选中由 {@code FindController} 装配。
+     */
+    public static int nextChapterWithHit(java.util.List<String> chapterTexts, int from, int to,
+                                         int step, String keyword, boolean caseSensitive) {
+        if (step == 0) {
+            throw new IllegalArgumentException("step 不可为 0（+1 向后 / -1 向前）");
+        }
+        for (int i = from; step > 0 ? i < to : i > to; i += step) {
+            if (i < 0 || i >= chapterTexts.size()) {
+                break;
+            }
+            String text = chapterTexts.get(i);
+            int at = step > 0
+                    ? indexOf(text, keyword, 0, caseSensitive)
+                    : lastIndexOf(text, keyword, Math.max(text.length() - 1, 0), caseSensitive);
+            if (at >= 0) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     /** 替换全部出现位置；无匹配时原样返回且 count 为 0。 */
     public static ReplaceResult replaceAll(String text, String keyword, String replacement,
                                            boolean caseSensitive) {

@@ -1643,26 +1643,32 @@
     }
   }
 
-  // 返回 "hit"（直接命中）/ "wrap"（回绕命中）/ "miss"（未找到）
-  window.epubraFindNext = function (kw, cs) {
+  // 返回 "hit"（直接命中）/ "wrap"（回绕命中）/ "miss"（未找到）。
+  // allowWrap 缺省 true＝章内回绕；全书查找跳章前查当前章时传 false（回绕交给跨章逻辑）。
+  window.epubraFindNext = function (kw, cs, allowWrap) {
+    if (allowWrap === undefined) { allowWrap = true; }
     if (!kw) { return 'miss'; }
     var map = buildTextMap();
     var from = selectionIndex(map, false);
     var idx = indexOfCs(map.text, kw, from, cs);
     var wrapped = false;
-    if (idx < 0) { idx = indexOfCs(map.text, kw, 0, cs); wrapped = idx >= 0; }
+    if (idx < 0 && allowWrap) { idx = indexOfCs(map.text, kw, 0, cs); wrapped = idx >= 0; }
     if (idx < 0) { return 'miss'; }
     selectHit(map, idx, kw.length);
     return wrapped ? 'wrap' : 'hit';
   };
 
-  window.epubraFindPrev = function (kw, cs) {
+  window.epubraFindPrev = function (kw, cs, allowWrap) {
+    if (allowWrap === undefined) { allowWrap = true; }
     if (!kw) { return 'miss'; }
     var map = buildTextMap();
     var from = selectionIndex(map, true);
     var idx = lastIndexOfCs(map.text, kw, from, cs);
     var wrapped = false;
-    if (idx < 0) { idx = lastIndexOfCs(map.text, kw, map.text.length - 1, cs); wrapped = idx >= 0; }
+    if (idx < 0 && allowWrap) {
+      idx = lastIndexOfCs(map.text, kw, map.text.length - 1, cs);
+      wrapped = idx >= 0;
+    }
     if (idx < 0) { return 'miss'; }
     selectHit(map, idx, kw.length);
     return wrapped ? 'wrap' : 'hit';

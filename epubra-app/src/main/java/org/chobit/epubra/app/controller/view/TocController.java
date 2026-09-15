@@ -1,7 +1,9 @@
 package org.chobit.epubra.app.controller.view;
 
+import org.chobit.epubra.app.ui.dialog.ChapterSplitDialog;
 import org.chobit.epubra.app.ui.model.ChapterNode;
 import org.chobit.epubra.app.context.BookContext;
+import org.chobit.epubra.app.editor.ChapterSplitOps;
 import org.chobit.epubra.app.editor.TextSearch;
 import org.chobit.epubra.lib.domain.Resource;
 import org.chobit.epubra.lib.domain.TOCReference;
@@ -23,6 +25,7 @@ import javafx.scene.input.TransferMode;
 import javafx.stage.Stage;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
 
@@ -217,6 +220,49 @@ public class TocController {
             return;
         }
         renameChapter(selected.getValue());
+    }
+
+    /**
+     * 章节拆分：对话框选「前后缀标记 / 正则 / 每段字数」三种方式之一，把当前章切成多章。
+     *
+     * <p>守卫（无书 / 无选中 / 不在目录）都放在 {@code beginChange} **之前**——先拍快照再
+     * 退出会在撤销栈里留下无对应变更的空步（与 {@link #onAddChapter()} 同口径）。对话框取消
+     * 与「找不到可拆分处」同样发生在快照之前，撤销栈不会被空转消耗。纯逻辑在
+     * {@code ChapterSplitOps}（拆分 + 应用），本类只做装配与提示。
+     */
+    public void onSplitChapter() {
+        ChapterNode node = currentNode;
+        if (node == null || node.resource() == null) {
+            warner.warn("请先在目录中选择要拆分的章节");
+            return;
+        }
+        if (node.reference() == null) {
+            warner.warn("该章节还没有加入目录，无法拆分");
+            return;
+        }
+        String baseTitle = node.displayTitle();
+        Optional<ChapterSplitOps.Params> chosen =
+                ChapterSplitDialog.show(stage, baseTitle);
+        if (chosen.isEmpty()) {
+            return;
+        }
+        List<ChapterSplitOps.Segment> segments;
+        try {
+            segments = ChapterSplitOps.split(node.resource().asString(), chosen.get());
+        } catch (IllegalArgumentException invalid) {
+            warner.warn(invalid.getMessage());
+            return;
+        }
+        if (segments.size() <= 1) {
+            status.setStatus("未找到可拆分处：" + baseTitle);
+            return;
+        }
+        beginChange.run();
+        ChapterSplitOps.apply(ctx.book(), node.reference(), segments);
+        markDirty();
+        refresh();
+        selectResource(node.resource());
+        status.setStatus("已拆分为 " + segments.size() + " 章：" + baseTitle);
     }
 
     // ---- 目录树刷新 ----

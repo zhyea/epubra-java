@@ -78,6 +78,14 @@ public final class VisualEditorSession {
     private int loadSeq;
     private int loadedSeq = -1;
 
+    /**
+     * 加载完成后的一次性回调（全书查找「跳章后等页面就绪再选中命中」用）。
+     * {@code pendingAfterLoadSeq} 记录登记时的 {@link #loadSeq}：只有「登记的那次加载」
+     * 真正完成才执行——中途又发起 reload 时旧回调作废，新一次加载完成后再执行。
+     */
+    private Runnable pendingAfterLoad;
+    private int pendingAfterLoadSeq = -1;
+
     /** 页面里的内容是否就是当前章节（本次加载带内容，且加载已完成）。 */
     private boolean pageCurrent() {
         return loaded && loadedSeq == loadSeq;
@@ -107,6 +115,7 @@ public final class VisualEditorSession {
         visualEditorView.getEngine().getLoadWorker().stateProperty().addListener((obs, old, state) -> {
             if (state == javafx.concurrent.Worker.State.SUCCEEDED) {
                 loadedSeq = loadSeq;
+                runPendingAfterLoad();
             }
         });
     }
@@ -286,13 +295,48 @@ public final class VisualEditorSession {
      * @return "hit"（直接命中）/ "wrap"（回绕命中）/ "miss"（未找到）；编辑视图未就绪返回 null
      */
     public String find(String keyword, boolean backward, boolean caseSensitive) {
-        String script = backward
+        return find(keyword, backward, caseSensitive, true);
+    }
+
+    /**
+     * 同上，但可关掉章内回绕：全书查找在跳章前查当前章时传 {@code allowWrap=false}
+     * （回绕语义交给跨章扫描，「下一章还有命中」不该被章内回绕抢答成 wrap）。
+     */
+    public String find(String keyword, boolean backward, boolean caseSensitive, boolean allowWrap) {
+        String script = (backward
                 ? "window.epubraFindPrev(window." + FIND_KEYWORD_MEMBER
-                        + ", window." + FIND_CASE_MEMBER + ")"
+                + ", window." + FIND_CASE_MEMBER
                 : "window.epubraFindNext(window." + FIND_KEYWORD_MEMBER
-                        + ", window." + FIND_CASE_MEMBER + ")";
+                + ", window." + FIND_CASE_MEMBER)
+                + ", " + allowWrap + ")";
         Object out = callWithFindMembers(script, keyword, null, caseSensitive);
         return out instanceof String s ? s : null;
+    }
+
+    /**
+     * 页面加载完成后执行一次性动作；页面已就绪则立即执行。
+     *
+     * <p>全书查找跳章后用它把「选中最先命中」挂到新章节的加载完成点上——
+     * {@code reload()} 是异步的，跳章瞬间页面还是旧内容（或空白）。
+     * 中途又发起加载时本次动作作废（见 {@code pendingAfterLoadSeq} 注释）。
+     */
+    public void runWhenLoaded(Runnable action) {
+        if (ready()) {
+            action.run();
+            return;
+        }
+        pendingAfterLoad = action;
+        pendingAfterLoadSeq = loadSeq;
+    }
+
+    /** 加载完成监听器里消费一次性回调；只认登记时的那次加载。 */
+    private void runPendingAfterLoad() {
+        if (pendingAfterLoad != null && pendingAfterLoadSeq == loadedSeq) {
+            Runnable action = pendingAfterLoad;
+            pendingAfterLoad = null;
+            pendingAfterLoadSeq = -1;
+            action.run();
+        }
     }
 
     /**

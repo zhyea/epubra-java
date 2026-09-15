@@ -52,6 +52,17 @@ class VisualEditorFindTest extends VisualEditorTestSupport {
                 kw, null, cs);
     }
 
+    /** allowWrap=false：全书查找在跳章前查当前章用的口径（回绕交给跨章扫描）。 */
+    private static Object findNextNoWrap(String kw, boolean cs) throws Exception {
+        return callFind("window.epubraFindNext(window.__epubraFindKeyword, window.__epubraFindCase, false)",
+                kw, null, cs);
+    }
+
+    private static Object findPrevNoWrap(String kw, boolean cs) throws Exception {
+        return callFind("window.epubraFindPrev(window.__epubraFindKeyword, window.__epubraFindCase, false)",
+                kw, null, cs);
+    }
+
     private static Object replaceOne(String kw, String rep, boolean cs) throws Exception {
         return callFind("window.epubraReplaceOne(window.__epubraFindKeyword,"
                         + " window.__epubraFindReplacement, window.__epubraFindCase)",
@@ -117,6 +128,20 @@ class VisualEditorFindTest extends VisualEditorTestSupport {
 
         assertEquals("wrap", findNext("alpha", false), "已在最后一处，向后找应回绕到开头命中大写 Alpha");
         assertEquals("Alpha", selectedText(), "忽略大小写时选中的是原文（大写 Alpha）");
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("不回绕查找（全书模式口径）：已到末处返回 miss 且不移动选区，而不是章内回绕")
+    void noWrapFindReturnsMissInsteadOfWrapping() throws Exception {
+        loadEditable(DOC);
+        assertEquals("hit", findNext("第二段", false), "直接命中最后一处");
+
+        assertEquals("miss", findNextNoWrap("第二段", false), "已是末处，不回绕应 miss");
+        assertEquals("第二段", selectedText(), "miss 不得移动选区");
+
+        assertEquals("miss", findPrevNoWrap("第二段", false), "反向同理：前面再无命中应 miss");
+        assertEquals("第二段", selectedText());
     }
 
     @Test

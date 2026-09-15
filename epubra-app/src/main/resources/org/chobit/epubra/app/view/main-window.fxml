@@ -79,6 +79,7 @@
                     <items>
                         <MenuItem text="添加章节" onAction="#onAddChapter"/>
                         <MenuItem text="重命名章节…" onAction="#onRenameChapter" accelerator="F2"/>
+                        <MenuItem text="章节拆分…" onAction="#onSplitChapter"/>
                         <MenuItem text="删除章节" onAction="#onDeleteChapter"/>
                         <SeparatorMenuItem/>
                         <MenuItem text="上移" onAction="#onMoveUp"/>

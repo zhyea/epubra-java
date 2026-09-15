@@ -53,6 +53,11 @@ abstract class VisualEditorTestSupport {
     private static final CountDownLatch FX_STARTED = new CountDownLatch(1);
     private static WebView webView;
 
+    /** 共享 WebView 访问器：session 级测试（如 runWhenLoaded）要在它上面装 VisualEditorSession。 */
+    protected static WebView webView() {
+        return webView;
+    }
+
     /** 整个测试套只跑一次的 toolkit 启动 + 窗口创建；{@code @BeforeAll} 每个子类触发一次，故两处都要幂等。 */
     @BeforeAll
     static void bootFx() throws Exception {
@@ -250,8 +255,9 @@ abstract class VisualEditorTestSupport {
         }
     }
 
+    /** 包级可见：子类要在 FX 线程上跑自己的任务（如 session 级测试），需能向 runOnFx 传 lambda。 */
     @FunctionalInterface
-    private interface FxTask {
+    interface FxTask {
         void runWithException() throws Exception;
     }
 }

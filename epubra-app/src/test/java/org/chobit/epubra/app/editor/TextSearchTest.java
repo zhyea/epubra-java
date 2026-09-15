@@ -220,4 +220,54 @@ class TextSearchTest {
         assertTrue(TextSearch.locateAnchor("<p>正文</p>", "foo/bar/baz", false) == null,
                 "末段也搜不到时同样返回 null");
     }
+
+    // ---- 全书查找的章节扫描（nextChapterWithHit） ----
+
+    private static final java.util.List<String> CHAPTERS =
+            java.util.List.of("第一章 无命中", "第二章 有目标", "第三章 也有目标", "第四章 无");
+
+    @Test
+    @DisplayName("正向扫描：从起点之后的章节里找第一个含命中的")
+    void forwardScanFindsFirstChapterWithHit() {
+        assertEquals(1, TextSearch.nextChapterWithHit(CHAPTERS, 0, 4, 1, "目标", false));
+        assertEquals(2, TextSearch.nextChapterWithHit(CHAPTERS, 2, 4, 1, "目标", false));
+    }
+
+    @Test
+    @DisplayName("反向扫描：从起点之前的章节里找最后一个含命中的")
+    void backwardScanFindsLastChapterWithHit() {
+        assertEquals(2, TextSearch.nextChapterWithHit(CHAPTERS, 3, -1, -1, "目标", false));
+        assertEquals(1, TextSearch.nextChapterWithHit(CHAPTERS, 1, -1, -1, "目标", false));
+    }
+
+    @Test
+    @DisplayName("扫描范围不含终点：全书回绕语义由调用方分两段拼出")
+    void scanStopsBeforeExclusiveEnd() {
+        // 正向 0..1（不含 1）：第一章无命中，第二章虽有但被排除 → -1
+        assertEquals(-1, TextSearch.nextChapterWithHit(CHAPTERS, 0, 1, 1, "目标", false));
+        // 反向 3..2（不含 2）：第四章无命中，第三章虽有但被排除 → -1
+        assertEquals(-1, TextSearch.nextChapterWithHit(CHAPTERS, 3, 2, -1, "目标", false));
+        // 放开终点即命中，对照上面的排除
+        assertEquals(1, TextSearch.nextChapterWithHit(CHAPTERS, 0, 2, 1, "目标", false));
+        assertEquals(2, TextSearch.nextChapterWithHit(CHAPTERS, 3, 1, -1, "目标", false));
+    }
+
+    @Test
+    @DisplayName("区分大小写与无命中各自成立")
+    void scanHonorsCaseAndReturnsNegativeWhenMissing() {
+        java.util.List<String> mixed = java.util.List.of("Alpha alpha", "ALPHA");
+        assertEquals(1, TextSearch.nextChapterWithHit(mixed, 0, 2, 1, "ALPHA", true),
+                "区分大小写：第一章没有全大写 ALPHA，应命中第二章");
+        assertEquals(0, TextSearch.nextChapterWithHit(mixed, 0, 2, 1, "alpha", false),
+                "忽略大小写：第一章即命中");
+        assertEquals(-1, TextSearch.nextChapterWithHit(mixed, 0, 2, 1, "缺失", false),
+                "整段扫描无命中应返回 -1");
+    }
+
+    @Test
+    @DisplayName("step 为 0 直接拒绝：方向必须显式")
+    void scanRejectsZeroStep() {
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> TextSearch.nextChapterWithHit(CHAPTERS, 0, 4, 0, "目标", false));
+    }
 }

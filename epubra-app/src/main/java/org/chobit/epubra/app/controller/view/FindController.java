@@ -16,9 +16,12 @@ import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.Pane;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
  * 查找 / 替换面板控制器。
@@ -51,6 +54,10 @@ public class FindController {
     private VisualEditorSession visualSession;
     /** 当前是否停在可视化编辑页签。 */
     private BooleanSupplier visualTabActive;
+    /** 当前章节资源（全书查找定位扫描起点用）；与编辑器显示的章节同源。 */
+    private Supplier<Resource> currentChapter;
+    /** 在目录树中选中某章节资源并触发既有切章链路；不在目录时返回 false。 */
+    private Predicate<Resource> selectChapter;
     private Runnable beginChange;
     private Runnable markDirty;
     private Runnable reloadEditor;
@@ -61,6 +68,7 @@ public class FindController {
     /** FXML 加载后由父控制器注入运行时依赖；必须在任何 onAction 触发前完成。 */
     public void bind(BookContext ctx, TextArea contentArea,
                      VisualEditorSession visualSession, BooleanSupplier visualTabActive,
+                     Supplier<Resource> currentChapter, Predicate<Resource> selectChapter,
                      Runnable beginChange, Runnable markDirty,
                      Runnable reloadEditor, Runnable refreshPreview,
                      Consumer<String> setStatus, BooleanSupplier confirmDiscardChanges) {
@@ -68,6 +76,8 @@ public class FindController {
         this.contentArea = contentArea;
         this.visualSession = visualSession;
         this.visualTabActive = visualTabActive;
+        this.currentChapter = currentChapter;
+        this.selectChapter = selectChapter;
         this.beginChange = beginChange;
         this.markDirty = markDirty;
         this.reloadEditor = reloadEditor;
@@ -250,6 +260,20 @@ public class FindController {
             findStatus("请输入查找内容");
             return;
         }
+        if (wholeBookCheck != null && wholeBookCheck.isSelected()) {
+            findInWholeBook(forward, keyword, caseSensitiveCheck.isSelected());
+            return;
+        }
+        findInCurrentChapter(forward);
+    }
+
+    /** 本章查找（「全书范围」未勾选）：可视化页签路由进 WebView，源码区走 TextSearch。 */
+    private void findInCurrentChapter(boolean forward) {
+        String keyword = findField.getText();
+        if (keyword.isEmpty()) {
+            findStatus("请输入查找内容");
+            return;
+        }
         if (onVisualTab()) {
             if (!visualReady()) {
                 return;
@@ -296,6 +320,136 @@ public class FindController {
         }
         contentArea.selectRange(hit, hit + keyword.length());
         contentArea.requestFocus();
+    }
+
+    /**
+     * 全书查找（「全书范围」勾选时）：当前章从当前位置找（不章内回绕）→ 沿书脊扫描其余
+     * 章节 → 都没有再回绕（正向＝回到全书开头，反向＝回到全书末尾）。命中在其它章节时
+     * 经 {@code selectChapter} 走既有切章链路（先 flush 再载入），源码区同步选中命中；
+     * 可视化页签则把「选中命中」挂到新章节加载完成点上（页面加载是异步的）。
+     */
+    private void findInWholeBook(boolean forward, String keyword, boolean caseSensitive) {
+        List<Resource> chapters = ctx.book() == null ? List.of() : ctx.book().spineResources();
+        Resource cur = currentChapter == null ? null : currentChapter.get();
+        int idx = cur == null ? -1 : chapters.indexOf(cur);
+        if (idx < 0) {
+            // 当前章不在书脊（无书 / 异常态）：退回本章查找，不至于整条路径失效
+            findInCurrentChapter(forward);
+            return;
+        }
+        int total = chapters.size();
+
+        // ① 当前章从当前位置找（allowWrap=false：回绕交给跨章扫描，避免抢答）
+        if (hitInCurrentNoWrap(forward, keyword, caseSensitive)) {
+            findStatus("");
+            return;
+        }
+
+        // ② 沿书脊扫描其余章节：正向＝后面的章先找再回头找前面的；反向对称
+        List<String> texts = chapters.stream().map(Resource::asString).toList();
+        int jump = TextSearch.nextChapterWithHit(texts, idx + 1, total, 1, keyword, caseSensitive);
+        if (jump < 0) {
+            jump = TextSearch.nextChapterWithHit(texts, 0, idx, 1, keyword, caseSensitive);
+        }
+        if (jump >= 0) {
+            jumpToChapter(chapters, jump, forward, keyword, caseSensitive,
+                    "第 " + (jump + 1) + "/" + total + " 章");
+            return;
+        }
+
+        // ③ 整本书只剩当前章里光标前/后的部分：章内回绕找
+        if (hitInCurrentWithWrap(forward, keyword, caseSensitive)) {
+            findStatus(forward ? "已回到开头" : "已回到结尾");
+            return;
+        }
+        findStatus("全书中未找到：" + keyword);
+        setStatus.accept("全书中未找到：" + keyword);
+    }
+
+    /** 当前章内查找但不回绕；命中即选中并返回 true。可视化页签未就绪视为未命中。 */
+    private boolean hitInCurrentNoWrap(boolean forward, String keyword, boolean caseSensitive) {
+        if (onVisualTab()) {
+            if (!visualReady()) {
+                return false;
+            }
+            return "hit".equals(visualSession.find(keyword, !forward, caseSensitive, false));
+        }
+        String text = contentArea.getText();
+        if (text.isEmpty()) {
+            return false;
+        }
+        var selection = contentArea.getSelection();
+        int from = forward ? selection.getEnd() : selection.getStart() - 1;
+        int at = forward
+                ? TextSearch.indexOf(text, keyword, from, caseSensitive)
+                : TextSearch.lastIndexOf(text, keyword, from, caseSensitive);
+        if (at < 0) {
+            return false;
+        }
+        contentArea.selectRange(at, at + keyword.length());
+        contentArea.requestFocus();
+        return true;
+    }
+
+    /** 当前章内回绕查找（从全书头/尾方向）；命中即选中并返回 true。 */
+    private boolean hitInCurrentWithWrap(boolean forward, String keyword, boolean caseSensitive) {
+        if (onVisualTab()) {
+            if (!visualReady()) {
+                return false;
+            }
+            String result = visualSession.find(keyword, !forward, caseSensitive);
+            return "hit".equals(result) || "wrap".equals(result);
+        }
+        String text = contentArea.getText();
+        if (text.isEmpty()) {
+            return false;
+        }
+        int at = forward
+                ? TextSearch.indexOf(text, keyword, 0, caseSensitive)
+                : TextSearch.lastIndexOf(text, keyword,
+                        Math.max(text.length() - 1, 0), caseSensitive);
+        if (at < 0) {
+            return false;
+        }
+        contentArea.selectRange(at, at + keyword.length());
+        contentArea.requestFocus();
+        return true;
+    }
+
+    /**
+     * 跳到目标章节并选中该章内的命中处。跳章走 {@code selectChapter}（目录树选中 →
+     * 既有 showChapter 链路：先 flush 当前章再载入新章，不会丢内容）。
+     */
+    private void jumpToChapter(List<Resource> chapters, int index, boolean forward,
+                               String keyword, boolean caseSensitive, String statusText) {
+        Resource target = chapters.get(index);
+        if (selectChapter == null || !selectChapter.test(target)) {
+            findStatus("该章节不在目录中，无法跳转");
+            return;
+        }
+        findStatus(statusText);
+        if (!onVisualTab()) {
+            // selectResource → showChapter 已同步把新章内容放进 contentArea，直接按扫描结果选中
+            String text = contentArea.getText();
+            int at = forward
+                    ? TextSearch.indexOf(text, keyword, 0, caseSensitive)
+                    : TextSearch.lastIndexOf(text, keyword,
+                            Math.max(text.length() - 1, 0), caseSensitive);
+            if (at >= 0) {
+                contentArea.selectRange(at, at + keyword.length());
+                contentArea.requestFocus();
+            }
+            return;
+        }
+        // 可视化页签：showChapter 发起的页面加载是异步的，「选中最先命中」挂到加载完成点
+        if (visualSession != null) {
+            visualSession.runWhenLoaded(() -> {
+                String result = visualSession.find(keyword, !forward, caseSensitive, false);
+                if (result == null || "miss".equals(result)) {
+                    findStatus("未找到");
+                }
+            });
+        }
     }
 
     private void findStatus(String message) {

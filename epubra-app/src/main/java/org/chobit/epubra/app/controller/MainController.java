@@ -32,6 +32,7 @@ import org.chobit.epubra.app.editor.VisualEditorSession;
 import org.chobit.epubra.app.platform.AppPaths;
 import org.chobit.epubra.app.platform.AsyncTasks;
 import org.chobit.epubra.lib.domain.Book;
+import org.chobit.epubra.lib.domain.Resource;
 import org.chobit.epubra.lib.io.EpubReader;
 import org.chobit.epubra.lib.io.EpubWriter;
 import org.chobit.epubra.lib.validation.EpubValidator;
@@ -583,9 +584,16 @@ public class MainController {
 
         findBarController.bind(ctx, contentArea,
                 visualEditorSession, this::onVisualTab,
+                this::currentChapterResource, tocViewController::selectResource,
                 this::beginChange, this::markDirty,
                 this::reloadEditor, this::refreshPreview,
                 status::set, this::confirmDiscardChanges);
+    }
+
+    /** 当前章节的资源（全书查找的扫描起点）；无章节时为 null。 */
+    private Resource currentChapterResource() {
+        ChapterNode node = currentChapter();
+        return node == null ? null : node.resource();
     }
 
     /** 源码区脏标记 + 撤销快照：一段连续输入只在第一次击键时记录一次快照（此时 book 还是变更前状态）。 */
@@ -868,6 +876,14 @@ public class MainController {
     @FXML
     public void onRenameChapter() {
         tocViewController.onRenameChapter();
+    }
+
+    @FXML
+    public void onSplitChapter() {
+        // 拆分复制的是章节资源的当前内容：先把可视化页签 / 源码区的未落盘改动写回，
+        // 否则用户刚敲的字不在拆分结果里
+        flushCurrentChapter();
+        tocViewController.onSplitChapter();
     }
 
 
