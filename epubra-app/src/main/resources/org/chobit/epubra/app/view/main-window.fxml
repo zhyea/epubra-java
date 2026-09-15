@@ -246,6 +246,46 @@
                                                                 onAction="#onInsertParagraph"/>
                                                         <Button id="heading" text="标题" styleClass="flat-button"
                                                                 onAction="#onInsertHeading"/>
+
+                                                        <!-- 样式四组紧随「段落 / 标题」之后：字体、字号、文字颜色、对齐——
+                                                             与 WPS / Office 的「字体」工具组同一位置，先定字形再定结构。
+                                                             （字号是两个按钮，所以按控件数数它们占第 4、5 位。）
+
+                                                             这四类在 XHTML 里都没有对应标签，只能落到受控内联
+                                                             style 上（属性白名单在 editor-script.js，见
+                                                             EditorStyleControls 类注释）。候选项与命令装配在
+                                                             Java 侧——FXML 的 onAction 只能绑无参方法，
+                                                             而这些命令都要带值。
+
+                                                             字体下拉列本机全部字体族（Font.getFamilies()），
+                                                             可输入筛选，也能直接手输列表外的族名。
+
+                                                             字号不做下拉框：A+ / A- 两个按钮按固定档位表跳档
+                                                             （10…72px），结果是整齐值。
+
+                                                             文字颜色用 ColorPicker：自带标准色板与
+                                                             「自定义颜色…」，外观点换成「A + 色条」图标，
+                                                             不透明度拖到 0 即清除该声明。 -->
+                                                        <ComboBox fx:id="fontCombo" id="font"/>
+                                                        <Button id="size-up" text="放大字号"
+                                                                styleClass="flat-button, toolbar-action"
+                                                                onAction="#onSizeUp"/>
+                                                        <Button id="size-down" text="缩小字号"
+                                                                styleClass="flat-button, toolbar-action"
+                                                                onAction="#onSizeDown"/>
+                                                        <!-- 文字颜色：底层是 ColorPicker（自带标准色板 +「自定义颜色…」+ 不透明度），
+                                                             外观由 Java 侧叠一枚「A + 色条」图标。
+                                                             ColorPicker 是 ComboBoxBase（不是 Labeled），**没有
+                                                             graphic 属性**，所以图标只能作兄弟节点叠在它上面——
+                                                             外面的 StackPane 就是那个叠放槽（id 与样式类在槽上，
+                                                             图标由 EditorStyleControls#installColor 塞进来）。
+                                                             取色器自带的色块与颜色名文字由 CSS 隐藏，只留它当点击面。 -->
+                                                        <StackPane id="color" styleClass="toolbar-color">
+                                                            <ColorPicker fx:id="colorPicker"/>
+                                                        </StackPane>
+                                                        <!-- 对齐：MenuButton 而非普通按钮——三个方向各是一条命令 -->
+                                                        <MenuButton fx:id="alignButton" id="align"/>
+
                                                         <Button id="quote" text="引用" styleClass="flat-button"
                                                                 onAction="#onInsertQuote"/>
                                                         <Button id="list" text="列表" styleClass="flat-button"
@@ -274,31 +314,6 @@
                                                         <Button id="image" text="图片"
                                                                 styleClass="flat-button, toolbar-action"
                                                                 onAction="#onInsertImageFromDisk"/>
-
-                                                        <!-- 字体 / 字号 / 文字颜色：XHTML 里没有对应标签，
-                                                             只能落到受控内联 style 上（属性白名单在
-                                                             editor-script.js，见 EditorStyleControls 类注释）。
-                                                             下拉项与命令装配在 Java 侧——FXML 的 onAction
-                                                             只能绑无参方法，而字体/颜色要带值。
-
-                                                             字体下拉列本机全部字体族（JavaFX Font.getFamilies()），
-                                                             可输入筛选，也能直接手输列表外的族名。
-
-                                                             字号不做下拉框：放大 / 缩小两个按钮按固定档位表跳档
-                                                             （10…72px），结果是整齐值。 -->
-                                                        <ComboBox fx:id="fontCombo" id="font"/>
-                                                        <Button id="size-up" text="放大字号"
-                                                                styleClass="flat-button, toolbar-action"
-                                                                onAction="#onSizeUp"/>
-                                                        <Button id="size-down" text="缩小字号"
-                                                                styleClass="flat-button, toolbar-action"
-                                                                onAction="#onSizeDown"/>
-                                                        <!-- 颜色用 ColorPicker：自带标准色板与「Custom Color…」，
-                                                             取色器里把不透明度拖到 0 即清除该声明。 -->
-                                                        <ColorPicker fx:id="colorPicker" id="color"
-                                                                     styleClass="toolbar-color"/>
-                                                        <!-- 对齐：MenuButton 而非普通按钮——三个方向各是一条命令 -->
-                                                        <MenuButton fx:id="alignButton" id="align"/>
 
                                                         <!-- 撤销 / 重做在工具条上是「动作」而非「生效格式」：
                                                              没有当前状态可点亮，标记 toolbar-action 让

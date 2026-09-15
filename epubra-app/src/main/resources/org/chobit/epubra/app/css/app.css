@@ -131,13 +131,28 @@
     -fx-stroke-width: 2.1;
 }
 
-/* 样式控件组（字体下拉 / 文字颜色取色器 / 对齐按钮；字号走两个图标按钮）。
- * JavaFX 默认的 combo-box / menu-button / color-picker 都是「立体底 + 凹槽边框」，
+/* 文字颜色图标的色条（ColorPicker 的 graphic = 字母 A + 这条色条）。
+ * 填充色由 EditorStyleControls 按当前颜色 setFill 写入——所以这里**不能**声明 -fx-fill，
+ * 否则样式表会压掉代码设的填充；本规则只补一圈极细描边，颜色是白色时色条才不至于在
+ * 浅色工具条上「消失」，未设颜色（透明填充）时也留得下一个空心槽提示。 */
+.toolbar-color-bar {
+    -fx-stroke: -epubra-fg;
+    -fx-stroke-width: 0.5;
+}
+.editor-toolbar .color-picker:hover .toolbar-color-bar {
+    -fx-stroke: -epubra-hover-fg;
+}
+.editor-toolbar .color-picker:pressed .toolbar-color-bar {
+    -fx-stroke: -epubra-accent;
+}
+
+/* 样式控件组（字体下拉 / 文字颜色 / 对齐按钮；字号走两个图标按钮）。
+ * JavaFX 默认的 combo-box / menu-button 都是「立体底 + 凹槽边框」，
  * 直接塞进扁平的编辑工具条很突兀，统一压成与图标按钮同高同观感。
+ * 文字颜色的取色器单独处理（见下方 .toolbar-color）——它要藏掉自带色块与颜色名。
  * 命令本身不在这里——候选项与命令由 EditorStyleControls 装配。 */
 .editor-toolbar .combo-box,
-.editor-toolbar .menu-button,
-.editor-toolbar .color-picker {
+.editor-toolbar .menu-button {
     -fx-background-color: transparent;
     -fx-background-radius: 2;
     -fx-border-color: -epubra-border;
@@ -149,10 +164,43 @@
 }
 
 .editor-toolbar .combo-box:hover,
-.editor-toolbar .menu-button:hover,
-.editor-toolbar .color-picker:hover {
+.editor-toolbar .menu-button:hover {
     -fx-background-color: -epubra-hover-bg;
     -fx-border-color: -epubra-hover-bg;
+}
+
+/* 文字颜色：取色器只当点击面，外观是叠在它上面的「A + 色条」图标
+ * （ColorPicker 没有 graphic 属性，图标只能作兄弟节点叠上去，见 EditorStyleControls）。
+ * 取色器自带的色块（.picker-color）、颜色名文字（-fx-color-label-visible）与下拉箭头
+ * 一并藏掉——留着会和图标叠在一起，或把颜色名当文字显示。
+ * 边框 / hover 挂在叠放槽 .toolbar-color 上，与字体下拉、对齐按钮同高同观感。 */
+.editor-toolbar .toolbar-color {
+    -fx-background-color: transparent;
+    -fx-background-radius: 2;
+    -fx-border-color: -epubra-border;
+    -fx-border-radius: 2;
+    -fx-border-width: 1;
+    -fx-padding: 1 4 1 4;
+    -fx-cursor: hand;
+}
+
+.editor-toolbar .toolbar-color:hover {
+    -fx-background-color: -epubra-hover-bg;
+    -fx-border-color: -epubra-hover-bg;
+}
+
+.editor-toolbar .toolbar-color .color-picker {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-effect: null;
+    -fx-padding: 0;
+    -fx-color-label-visible: false;
+    -fx-cursor: hand;
+}
+
+.editor-toolbar .toolbar-color .color-picker > .arrow-button,
+.editor-toolbar .toolbar-color .color-picker .picker-color {
+    -fx-opacity: 0;
 }
 
 .editor-toolbar .combo-box > .list-cell {

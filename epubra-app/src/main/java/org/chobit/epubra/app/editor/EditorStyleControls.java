@@ -7,7 +7,9 @@ import javafx.scene.control.Control;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.Tooltip;
+import javafx.scene.layout.Pane;
 import javafx.scene.paint.Color;
+import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
 import org.chobit.epubra.app.ui.ToolbarIcons;
 
@@ -44,7 +46,8 @@ import java.util.function.BiConsumer;
  *   <li><b>字体值必须加引号</b>：{@code Font.getFamilies()} 返回的族名里过半数带空格
  *       （实测 167/258），CSS 里不加引号会被当成字体栈拆开。写进正文的一律是
  *       {@code "Microsoft YaHei"} 这种带双引号形态；回显时再剥掉引号取首段。</li>
- *   <li><b>颜色用取色器</b>（{@link ColorPicker}），自带标准色板与「自定义颜色…」。
+ *   <li><b>颜色用取色器</b>（{@link ColorPicker}），自带标准色板与「自定义颜色…」，
+ *       外观经 {@code ToolbarIcons.colorIcon()} 换成「A + 色条」图标（色条随当前颜色上色）。
  *       {@code value == null} = 正文没有 color 声明；把不透明度滑到 0 同样归一成「清除」——
  *       {@code rgba(…,0)} 与「没设颜色」视觉上无异，塞进正文只是一条无意义声明。</li>
  *   <li><b>回显必须防回环</b>：{@code update()} 是程序化设值，会触发 ComboBox 的
@@ -81,6 +84,9 @@ public final class EditorStyleControls {
     private final ColorPicker color;
     private final MenuButton align;
     private final BiConsumer<String, String> applyFormat;
+
+    /** 文字颜色图标的色条：随当前颜色改写填充（空 = 正文没有 color 声明）。 */
+    private Rectangle colorBar;
 
     /** 回显期间为 true：挡住「程序化设值 → 监听器 → 又下发一次命令」的回环（口径 5）。 */
     private boolean syncing;
@@ -305,6 +311,7 @@ public final class EditorStyleControls {
         }
         color.setFocusTraversable(false);
         applyTooltip(color, "color");
+        installColorIcon();
         // 初始「没有颜色」：null 是 ColorPicker 的合法值（自带「自定义颜色…」入口，不需要色板）
         syncing = true;
         try {
@@ -312,12 +319,51 @@ public final class EditorStyleControls {
         } finally {
             syncing = false;
         }
+        paintColorBar(null);
         color.valueProperty().addListener((obs, old, now) -> {
+            // 先上色再判断回环：回显（syncing）也要让色条跟着走，只是不下发命令
+            paintColorBar(now);
             if (syncing) {
                 return;
             }
             applyFormat.accept("color", toCssColor(now));
         });
+    }
+
+    /**
+     * 在取色器上叠一枚「A + 色条」图标。
+     *
+     * <p><b>为什么是「叠」而不是 setGraphic</b>：{@link ColorPicker} 继承 {@code ComboBoxBase}，
+     * 不是 {@code Labeled}，<b>根本没有 graphic 属性</b>。要既保留标准色板与不透明度（= 清除颜色
+     * 的口径），又要图标外观，只能把图标当兄弟节点叠在取色器上面。FXML 里取色器已经包在一个
+     * {@code StackPane} 里（{@code styleClass="toolbar-color"}），这里往那个槽再塞一层。
+     *
+     * <p>图标 {@code mouseTransparent}——不参与命中，点击继续落到下面的取色器（照旧打开色板）。
+     * 取色器自带的色块与颜色名文字由 CSS 隐藏（{@code .toolbar-color} 规则），只留它当点击面。
+     */
+    private void installColorIcon() {
+        ToolbarIcons.ColorIcon icon = ToolbarIcons.colorIcon();
+        colorBar = icon.bar();
+        Node node = icon.node();
+        node.setMouseTransparent(true);
+        // 取色器铺满叠放槽，整块都可点（图标只占中间一小块，别让边缘点不到）
+        color.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
+        if (color.getParent() instanceof Pane slot) {
+            slot.getChildren().add(node);
+        }
+    }
+
+    /**
+     * 把色条涂成当前颜色：null / 不透明度为 0 → 空心（描边仍在），表示「正文没有 color 声明」。
+     *
+     * <p>走 {@code setFill} 而不是内联 style——样式表里没写 {@code -fx-fill}，代码设的填充才不被压掉；
+     * 那圈细描边由 {@code .toolbar-color-bar} 提供，白底色时才不至于在浅色工具条上「消失」。
+     */
+    private void paintColorBar(Color value) {
+        if (colorBar == null) {
+            return;
+        }
+        colorBar.setFill(value == null || value.getOpacity() <= 0.0 ? Color.TRANSPARENT : value);
     }
 
     /**

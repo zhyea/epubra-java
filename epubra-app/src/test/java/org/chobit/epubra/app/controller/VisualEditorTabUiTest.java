@@ -171,11 +171,13 @@ class VisualEditorTabUiTest {
                         "Tooltip 显示延迟必须压到 300ms 内，实际："
                                 + button.getTooltip().getShowDelay() + "（" + button.getId() + "）");
             }
-            // 「撤销 / 重做」是动作按钮（无「当前生效格式」可言），排在新增批次的最后；
-            // 顺序 = main-window.fxml 的声明顺序。
-            assertEquals(java.util.List.of("paragraph", "heading", "quote", "list", "ol", "rule",
+            // 顺序 = main-window.fxml 的声明顺序：样式四组（字体 / 放大 / 缩小 / 颜色 / 对齐）
+            // 紧跟「段落 / 标题」之后（WPS / Office 的「字体」工具组位置），
+            // 「撤销 / 重做」是动作按钮（无「当前生效格式」可言），排在最后。
+            assertEquals(java.util.List.of("paragraph", "heading", "size-up", "size-down",
+                            "quote", "list", "ol", "rule",
                             "bold", "italic", "underline", "strike", "code", "link",
-                            "image", "size-up", "size-down", "undo", "redo"),
+                            "image", "undo", "redo"),
                     ids, "格式按钮的 id（= 格式名）与顺序必须与 window.epubraQuery() 的返回值一致");
 
             // 「图片」「撤销」「重做」「放大/缩小字号」是动作按钮（弹文件选择器 / 走快照栈 /
@@ -242,11 +244,18 @@ class VisualEditorTabUiTest {
             assertTrue(color.getTooltip().getShowDelay().toMillis() <= 300,
                     "Tooltip 显示延迟口径与图标按钮一致");
             assertFalse(color.isFocusTraversable(), "Tab 键留给编辑器内的列表缩进");
+            // 外观已换成「A + 色条」图标。ColorPicker 没有 graphic 属性，图标是**兄弟节点**
+            // 叠在它上面（见 EditorStyleControls#installColorIcon），所以断言落在叠放槽里，
+            // 而不是 color.getGraphic()。
+            FlowPane toolbar = field(mainController, "editorToolbar");
+            assertNotNull(toolbar.lookup(".toolbar-color-bar"),
+                    "工具条上应有色条节点 .toolbar-color-bar——它是「当前颜色」的显示位");
+            assertSame(toolbar.lookup(".toolbar-color"), color.getParent(),
+                    "取色器应包在 .toolbar-color 叠放槽里（图标与它同槽才叠得上去）");
 
             // ---- 字号：没有下拉框了，只有「放大 / 缩小」两个档位按钮
             assertThrows(NoSuchFieldException.class, () -> field(mainController, "sizeCombo"),
                     "字号下拉已移除（#72 二轮：改成放大/缩小两个按档位跳档的按钮）");
-            FlowPane toolbar = field(mainController, "editorToolbar");
             Button sizeUp = buttonById(toolbar, "size-up");
             Button sizeDown = buttonById(toolbar, "size-down");
             assertNotNull(sizeUp, "工具条应有「放大字号」按钮");

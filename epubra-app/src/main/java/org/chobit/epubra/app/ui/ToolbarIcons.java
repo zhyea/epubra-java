@@ -1,11 +1,14 @@
 package org.chobit.epubra.app.ui;
 
+import javafx.geometry.Pos;
 import javafx.scene.Group;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.Pane;
+import javafx.scene.layout.VBox;
+import javafx.scene.shape.Rectangle;
 import javafx.scene.shape.SVGPath;
 import javafx.util.Duration;
 
@@ -55,9 +58,10 @@ public final class ToolbarIcons {
             Map.entry("link", "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71 "
                     + "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"),
             Map.entry("image", "M3 5h18v14H3z M7.5 12a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3 M21 15l-5-5-11 9"),
-            // 字号放大 / 缩小：一个 A 加一支上下箭头（不画「A+/A-」，加号在 17px 下会和 A 糊在一起）
-            Map.entry("size-up", "M3 18.5 L7.5 7.5 L12 18.5 M4.7 15 h5.6 M17.5 18 V6.5 M14.2 9.8 L17.5 6.5 L20.8 9.8"),
-            Map.entry("size-down", "M3 18.5 L7.5 7.5 L12 18.5 M4.7 15 h5.6 M17.5 6.5 V18 M14.2 14.7 L17.5 18 L20.8 14.7"),
+            // 字号放大 / 缩小：字母 A + 右侧一个加号 / 减号（Office 惯用形态）。
+            // 两个字形之间留 3 个视口单位的空档——17px 下 A 与 +/- 挨太近会糊成一团。
+            Map.entry("size-up", "M1.5 19 L6 6 L10.5 19 M3.2 14.3 h5.6 M13.5 13 h8 M17.5 9 v8"),
+            Map.entry("size-down", "M1.5 19 L6 6 L10.5 19 M3.2 14.3 h5.6 M13.5 13 h8"),
             Map.entry("undo", "M9 14 4 9l5-5 M4 9h10.5a5.5 5.5 0 0 1 0 11H11"),
             Map.entry("redo", "M15 14l5-5-5-5 M20 9H9.5a5.5 5.5 0 0 0 0 11H13"),
             // 对齐：工具条按当前生效值换用其中一张（见 EditorStyleControls#syncAlignIcon）
@@ -91,8 +95,8 @@ public final class ToolbarIcons {
             Map.entry("redo", "重做"),
             Map.entry("align", "对齐"),
             Map.entry("font", "字体（可输入筛选）"),
-            // 颜色控件是 ColorPicker（自带色板与「Custom Color…」），不需要图标，
-            // 但提示文案仍从这里取，保证「提示只有一个来源」。
+            // 颜色控件是 ColorPicker，外观由 colorIcon() 换成「A + 色条」；
+            // 提示文案仍从这里取，保证「提示只有一个来源」。
             Map.entry("color", "文字颜色（不透明度拖到 0 = 清除）"));
 
     private ToolbarIcons() {
@@ -170,15 +174,59 @@ public final class ToolbarIcons {
     }
 
     static Node graphic(String svgPath) {
+        return graphic(svgPath, ICON_SCALE);
+    }
+
+    /**
+     * 按指定缩放把路径包成图标节点。
+     *
+     * <p>{@link Group} 的 layoutBounds 包含子节点变换：缩放后父容器按实际像素尺寸排版。
+     * 直接缩放 {@link SVGPath} 则仍按 24px 占位，按钮会被撑高——所以这里必须过一层 Group。
+     */
+    private static Group graphic(String svgPath, double scale) {
         SVGPath icon = new SVGPath();
         icon.setContent(svgPath);
         icon.setFill(null);
         icon.getStyleClass().add("toolbar-icon");
-        icon.setScaleX(ICON_SCALE);
-        icon.setScaleY(ICON_SCALE);
-        // Group 的 layoutBounds 包含子节点变换：缩放后按钮按 ~17px 计尺寸，
-        // 直接缩放 SVGPath 则仍按 24px 占位，按钮会被撑高。
+        icon.setScaleX(scale);
+        icon.setScaleY(scale);
         return new Group(icon);
+    }
+
+    // ---------------------------------------------------------------- 文字颜色图标
+
+    /** 「A」字形：占满 24×24 视口，供色条图标按较小缩放使用。 */
+    private static final String COLOR_LETTER_A = "M2 22 L12 2 L22 22 M6 15 h12";
+
+    /** 色条图标的字母缩放：整体（字母 + 色条）要压到与其它图标同为 ~17px。 */
+    private static final double COLOR_LETTER_SCALE = 0.54;
+
+    /** 色条尺寸（px）：宽约等于字母宽度，高 3px 才在 17px 图标里看得见。 */
+    private static final double COLOR_BAR_WIDTH = 12.0;
+    private static final double COLOR_BAR_HEIGHT = 3.0;
+
+    /**
+     * 文字颜色图标：字母 A + 其下方一条色条（Office 惯用形态）。
+     *
+     * <p>色条单独交出去：当前颜色只有调用方（{@code EditorStyleControls}）知道，需要随
+     * 「应用颜色 / 清除颜色」改写它。**必须用内联 style 写 `-fx-fill`**——JavaFX 的 CSS
+     * 来源优先级是「内联 > 样式表 > 代码 setFill」，代码里设的 fill 会被样式表压掉。
+     */
+    public record ColorIcon(Node node, Rectangle bar) {
+    }
+
+    /** 造一个「A + 色条」图标；色条初始为空（由调用方按当前颜色上色）。 */
+    public static ColorIcon colorIcon() {
+        Group letter = graphic(COLOR_LETTER_A, COLOR_LETTER_SCALE);
+        Rectangle bar = new Rectangle(COLOR_BAR_WIDTH, COLOR_BAR_HEIGHT);
+        bar.getStyleClass().add("toolbar-color-bar");
+        bar.setArcWidth(1.2);
+        bar.setArcHeight(1.2);
+        // 间距 1px：色条要紧贴字母底边，中间留白多了会看成两个控件
+        VBox box = new VBox(1.0, letter, bar);
+        box.setAlignment(Pos.CENTER);
+        box.setMouseTransparent(true);
+        return new ColorIcon(box, bar);
     }
 
     /** 供接线测试断言「工具条里的每个按钮 id 都有图标与提示」。 */
