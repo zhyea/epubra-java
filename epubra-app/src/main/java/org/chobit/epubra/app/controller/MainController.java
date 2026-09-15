@@ -29,6 +29,7 @@ import org.chobit.epubra.app.editor.EditorToolbarController;
 import org.chobit.epubra.app.editor.TextSearch;
 import org.chobit.epubra.app.editor.Theme;
 import org.chobit.epubra.app.editor.VisualEditorSession;
+import org.chobit.epubra.app.editor.XhtmlProlog;
 import org.chobit.epubra.app.platform.AppPaths;
 import org.chobit.epubra.app.platform.AsyncTasks;
 import org.chobit.epubra.lib.domain.Book;
@@ -1134,89 +1135,71 @@ public class MainController {
         resourceViewController.insertImagesFromDisk();
     }
 
-    // 工具条入口（段落 / 标题 / 加粗 / 斜体 / 列表）挂在「编辑」tab 的 WebView 上，
-    // 优先作用于可视化编辑器；编辑器还没就绪时退回源码区的片段插入（InsertActivity），
-    // 避免点击被吞掉。FXML 的 onAction 只能绑主控制器方法，故实现留在这里。
+    // 工具条入口（段落 / 标题 / 加粗 / 斜体 / 列表……）挂在「编辑」tab 的 WebView 上，
+    // 优先作用于可视化编辑器；只有**源码页签在前台**时才降级到源码区的片段插入
+    // （InsertActivity）。可视化页签在前台而编辑器尚未就绪时，一律状态栏提示、绝不
+    // 摸源码区——那里的光标位置是陈旧的，往隐藏控件里插标签用户根本看不见
+    // （2026-09-15 实测事故：章节刚加载完 selection 为空 → toggleInline 返回 false →
+    // fallback 把 <u></u> 插进源码区 XML 声明里，书保存后解析报「编码名称无效」）。
+    // FXML 的 onAction 只能绑主控制器方法，故实现留在这里。
 
     @FXML
     public void onInsertParagraph() {
-        if (!applyVisualFormat("paragraph")) {
-            insertActivity.paragraph();
-        }
+        applyFormatOrFallback("paragraph", insertActivity::paragraph);
     }
 
     @FXML
     public void onInsertHeading() {
-        if (!applyVisualFormat("heading")) {
-            insertActivity.heading();
-        }
+        applyFormatOrFallback("heading", insertActivity::heading);
     }
 
     @FXML
     public void onInsertBold() {
-        if (!applyVisualFormat("bold")) {
-            insertActivity.bold();
-        }
+        applyFormatOrFallback("bold", insertActivity::bold);
     }
 
     @FXML
     public void onInsertItalic() {
-        if (!applyVisualFormat("italic")) {
-            insertActivity.italic();
-        }
+        applyFormatOrFallback("italic", insertActivity::italic);
     }
 
     @FXML
     public void onInsertList() {
-        if (!applyVisualFormat("list")) {
-            insertActivity.list();
-        }
+        applyFormatOrFallback("list", insertActivity::list);
     }
 
     /** 编号列表：可视化编辑器内切换 ol；源码视图则插入一段带编号列表的 XHTML 片段。 */
     @FXML
     public void onInsertOrderedList() {
-        if (!applyVisualFormat("ol")) {
-            insertActivity.orderedList();
-        }
+        applyFormatOrFallback("ol", insertActivity::orderedList);
     }
 
     /** 引用块：可视化编辑器内切换 blockquote；源码视图退化为包一层 {@code blockquote}。 */
     @FXML
     public void onInsertQuote() {
-        if (!applyVisualFormat("quote")) {
-            insertActivity.wrapTag("blockquote");
-        }
+        applyFormatOrFallback("quote", () -> insertActivity.wrapTag("blockquote"));
     }
 
     /** 分隔线：可视化编辑器内插入 hr；源码视图插一行自闭合的 hr 片段。 */
     @FXML
     public void onInsertRule() {
-        if (!applyVisualFormat("rule")) {
-            insertActivity.insertFragment("<hr/>", "<hr/>".length());
-        }
+        applyFormatOrFallback("rule", () -> insertActivity.insertFragment("<hr/>", "<hr/>".length()));
     }
 
     @FXML
     public void onInsertUnderline() {
-        if (!applyVisualFormat("underline")) {
-            insertActivity.wrapTag("u");
-        }
+        applyFormatOrFallback("underline", () -> insertActivity.wrapTag("u"));
     }
 
     /** 删除线：可视化编辑器内包裹 del；源码视图用同一标签，保持回写净化口径一致。 */
     @FXML
     public void onInsertStrike() {
-        if (!applyVisualFormat("strike")) {
-            insertActivity.wrapTag("del");
-        }
+        applyFormatOrFallback("strike", () -> insertActivity.wrapTag("del"));
     }
 
     @FXML
     public void onInsertCode() {
-        if (!applyVisualFormat("code")) {
-            insertActivity.wrapTag("code");
-        }
+        applyFormatOrFallback("code", () -> insertActivity.wrapTag("code"));
     }
 
     /**
@@ -1370,7 +1353,7 @@ public class MainController {
                 contentArea.setDisable(true);
             } else {
                 contentArea.setDisable(false);
-                contentArea.setText(node.resource().asString());
+                contentArea.setText(XhtmlProlog.repairProlog(node.resource().asString()));
                 contentArea.positionCaret(0);
             }
         } finally {
@@ -1399,7 +1382,7 @@ public class MainController {
         }
         ctx.setLoading(true);
         try {
-            contentArea.setText(current.resource().asString());
+            contentArea.setText(XhtmlProlog.repairProlog(current.resource().asString()));
             contentArea.positionCaret(0);
         } finally {
             ctx.setLoading(false);
@@ -1509,6 +1492,29 @@ public class MainController {
     /** 带参数的格式化命令（目前只有 {@code link} 需要 href）。 */
     private boolean applyVisualFormat(String kind, String value) {
         return visualEditorSession.format(kind, value);
+    }
+
+    /**
+     * 格式命令的统一入口：优先作用于可视化编辑器；命令未生效时，<b>只有源码页签在前台</b>
+     * 才降级到源码区插片段。
+     *
+     * <p>可视化页签在前台时绝不摸源码区——源码 TextArea 此刻是隐藏控件，光标位置陈旧，
+     * 插进去的片段用户看不见，却会随下一次回写混进章节正文（2026-09-15 实测：
+     * {@code <u></u>} 落进了 XML 声明，书保存后报「编码名称 UTF-8&lt;u&gt;&lt;/u&gt; 无效」）。
+     * 编辑器尚未就绪时给状态栏提示（与 {@link #onClearFormat()} 同口径）；已就绪但命令
+     * 未生效（如光标处无可作用目标）保持静默——「没做成」不是「做错了」。
+     */
+    private void applyFormatOrFallback(String kind, Runnable sourceFallback) {
+        if (applyVisualFormat(kind)) {
+            return;
+        }
+        if (onVisualTab()) {
+            if (!visualEditorReady()) {
+                warn("编辑视图尚未就绪，格式命令暂不可用");
+            }
+            return;
+        }
+        sourceFallback.run();
     }
 
     /** 可视化编辑器是否可用于施加上下文命令（已加载完成且内容对应当前章节）。 */

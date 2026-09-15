@@ -142,7 +142,7 @@ public final class VisualEditorSession {
         ChapterNode current = currentChapter.get();
         String xhtml = current == null || current.resource() == null
                 ? ""
-                : current.resource().asString();
+                : XhtmlProlog.repairProlog(current.resource().asString());
         loaded = current != null && current.resource() != null;
         // loadContent 异步：完成前 pageCurrent() 为假，flush / 命令一律拒绝（见字段注释）
         loadSeq++;
