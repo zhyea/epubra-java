@@ -46,17 +46,15 @@ public class WelcomePageController {
     private Runnable onNewBook;
     private Consumer<Path> onOpenBook;
     private Runnable onChooseWorkspace;
-    private Runnable onExit;
     private Path currentWorkspace;
     private long rebuildGeneration;
     private Unsubscriber bookLoadedUnsubscriber;
 
     public void bind(Runnable onNewBook, Consumer<Path> onOpenBook,
-                     Runnable onChooseWorkspace, Runnable onExit) {
+                     Runnable onChooseWorkspace) {
         this.onNewBook = onNewBook;
         this.onOpenBook = onOpenBook;
         this.onChooseWorkspace = onChooseWorkspace;
-        this.onExit = onExit;
         showWorkspace(resolveInitialWorkspace());
     }
 
@@ -65,13 +63,6 @@ public class WelcomePageController {
             bookLoadedUnsubscriber.close();
         }
         bookLoadedUnsubscriber = ctx.bus().subscribe(AppEventBus.BookLoadedEvent.class, e -> hide());
-    }
-
-    @FXML
-    private void onExitAction() {
-        if (onExit != null) {
-            onExit.run();
-        }
     }
 
     public void showWorkspace(Path workspace) {
@@ -169,7 +160,7 @@ public class WelcomePageController {
         Label title = new Label("新建图书");
         title.getStyleClass().add("book-title");
         VBox card = new VBox(7, cover, title);
-        card.getStyleClass().addAll("book-card", "new-book-card");
+        card.getStyleClass().add("book-card");
         card.setOnMouseClicked(event -> {
             if (onNewBook != null) {
                 onNewBook.run();
@@ -189,7 +180,7 @@ public class WelcomePageController {
         Label title = new Label("选择工作空间");
         title.getStyleClass().add("book-title");
         VBox card = new VBox(7, cover, title);
-        card.getStyleClass().addAll("book-card", "new-book-card");
+        card.getStyleClass().add("book-card");
         card.setOnMouseClicked(event -> {
             if (onChooseWorkspace != null) {
                 onChooseWorkspace.run();

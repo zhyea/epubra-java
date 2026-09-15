@@ -254,6 +254,7 @@ public final class AppPaths {
         try {
             Files.delete(dir);
         } catch (IOException ignored) {
+            // 尽力而为：目录非空或被占用就留着，调用方不关心清理是否成功
         }
     }
 }

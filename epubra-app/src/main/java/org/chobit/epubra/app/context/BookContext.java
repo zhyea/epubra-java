@@ -188,6 +188,7 @@ public final class BookContext {
                 try {
                     Files.createDirectories(tmp);
                 } catch (IOException ignored) {
+                    // 尽力而为：连这个临时目录都建不出来时不再兜底，调用方拿到路径后自行处理写入失败
                 }
                 return tmp;
             }

@@ -199,7 +199,7 @@
     </left>
 
     <center>
-        <StackPane styleClass="main-center">
+        <StackPane>
             <children>
                 <!-- 常规编辑面板：无图书时也保留，但被 welcome-page 覆盖 -->
                 <VBox>

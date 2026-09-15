@@ -59,7 +59,7 @@ class WorkspaceShelfEmptyStateTest {
                         WorkspaceShelfEmptyStateTest.class.getResource("/org/chobit/epubra/app/view/welcome-page.fxml"));
                 loader.load();
                 WelcomePageController controller = loader.getController();
-                controller.bind(() -> { }, p -> { }, () -> { }, () -> { });
+                controller.bind(() -> { }, p -> { }, () -> { });
                 java.lang.reflect.Field f = WelcomePageController.class.getDeclaredField("bookShelf");
                 f.setAccessible(true);
                 shelf.set((FlowPane) f.get(controller));

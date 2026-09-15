@@ -68,7 +68,6 @@ import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
-import javafx.scene.web.WebEngine;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
 
@@ -371,18 +370,44 @@ public class MainController {
 
     @FXML
     public void initialize() {
-        // WebView 缓存目录必须显式指定,否则 JavaFX native 会按 main class FQCN
-        // 派生一个 ~/.Epubra/.org.chobit.epubra.app.EpubraApp/webview/ 子目录;
-        // 公开 API setUserDataDirectory 覆盖默认行为,锁定到 AppPaths.webviewCacheDir()。
-        // 必须在任何 loadContent/load 之前调用(否则 native 已创建默认目录,改不动了)。
+        configureWebViewCaches();
+        buildEditorPipeline();
+        createStatusCoordinator();
+        createEditingActivities();
+        wireChildControllers();
+        wireSourceTextTracking();
+        wireEditorTabSwitching();
+        subscribeAppEvents();
+        createLateActivities();
+        finishStartup();
+    }
+
+    /**
+     * 锁定两个 WebView 的缓存目录。
+     *
+     * <p>必须显式指定：否则 JavaFX native 会按 main class FQCN 派生一个
+     * {@code ~/.Epubra/.org.chobit.epubra.app.EpubraApp/webview/} 子目录。公开 API
+     * {@code setUserDataDirectory} 覆盖默认行为，锁定到 {@link AppPaths#webviewCacheDir()}。
+     *
+     * <p><b>必须在任何 {@code loadContent} / {@code load} 之前调用</b>——否则 native 已创建
+     * 默认目录，改不动了。编辑视图与预览视图共用同一目录，避免多套 native 缓存。
+     */
+    private void configureWebViewCaches() {
         previewView.getEngine().setUserDataDirectory(AppPaths.webviewCacheDir().toFile());
-        // 编辑视图与预览视图共用同一个 WebView 缓存目录，避免多套 native 缓存
-        WebEngine visualEngine = visualEditorView.getEngine();
-        visualEngine.setUserDataDirectory(AppPaths.webviewCacheDir().toFile());
-        // 拆分批次 B/C：外壳显隐、预览区、工具条状态、可视化编辑会话各自成类（纯搬迁）。
-        // 构造顺序有硬约束——下面把 editorToolbarController::update 交给会话，
-        // 方法引用在**求值那一刻**就必须拿到非空实例，所以工具条要先建；
-        // previewController 必须早于任何 refreshPreview()（findBar / 主题 / 切 tab 都会调它）。
+        visualEditorView.getEngine().setUserDataDirectory(AppPaths.webviewCacheDir().toFile());
+    }
+
+    /**
+     * 构造编辑管线：外壳（菜单 / 状态栏）、预览控制器、工具条、样式控件、可视化编辑会话。
+     *
+     * <p>拆分批次 B/C：外壳显隐、预览区、工具条状态、可视化编辑会话各自成类（纯搬迁）。
+     *
+     * <p><b>构造顺序有硬约束</b>：{@code editorToolbarController::update} 与
+     * {@code editorStyleControls::update} 会作为方法引用交给会话，方法引用在<b>求值那一刻</b>
+     * 就必须拿到非空实例，所以工具条 / 样式控件要先建；{@code previewController} 必须早于任何
+     * {@code refreshPreview()}（findBar / 主题 / 切 tab 都会调它）。
+     */
+    private void buildEditorPipeline() {
         editorShellActivity = new EditorShellActivity(activityBar, statusBar,
                 editMenu, chapterMenu, insertMenu, toolsMenu,
                 // 「视图」菜单的预览命令组，顺序 = FXML 声明顺序（刷新预览 / 分隔线 / 并排预览 / 分隔线）
@@ -421,7 +446,7 @@ public class MainController {
 
         // window 在每次文档加载后都是新对象，桥必须跟着重装，否则 loadContent 之后
         // 旧 window 上的 epubraBridge 就没了，页面里的改动再也回不来。
-        visualEngine.getLoadWorker().stateProperty().addListener((obs, oldState, newState) -> {
+        visualEditorView.getEngine().getLoadWorker().stateProperty().addListener((obs, oldState, newState) -> {
             if (newState == javafx.concurrent.Worker.State.SUCCEEDED) {
                 visualEditorSession.installBridge();
             }
@@ -429,9 +454,13 @@ public class MainController {
 
         // 工具条文字换图标：图形 + Tooltip 由 ToolbarIcons 统一管理（见该类 javadoc）。
         ToolbarIcons.install(editorToolbar);
+    }
 
-        // status 必须先于任何 bind 构造：子控制器拿的是 status::set 这类方法引用，
-        // 引用在求值时就要拿到非空实例，放到后面的 bind 之后再建会 NPE。
+    /**
+     * 状态协调器：<b>必须先于任何 {@code bind}</b> 构造——子控制器拿的是 {@code status::set}
+     * 这类方法引用，引用在<b>求值那一刻</b>就要拿到非空实例，放到 bind 之后再建会 NPE。
+     */
+    private void createStatusCoordinator() {
         status = new StatusCoordinator(ctx, contentArea, this::currentChapter, () -> stage,
                 statusLabel,
                 statusProgressBar, statusProgressLabel, statusProgressDivider,
@@ -439,9 +468,11 @@ public class MainController {
                 warningStatusLabel, warningStatusDivider,
                 chapterStatusLabel, wordStatusLabel, chapterWordStatusLabel,
                 undoItem, redoItem);
+    }
 
+    /** 编辑类活动：插入命令入口 + 工作空间（新建 / 打开 / 最近）。 */
+    private void createEditingActivities() {
         insertActivity = new InsertActivity(contentArea, status::set, this::beginChange);
-
         workspaceActivity = new WorkspaceActivity(ctx, recentWorkspaceMenu, () -> stage,
                 this::confirmDiscardChanges, this::warn,
                 () -> setCurrentChapter(null),
@@ -458,10 +489,14 @@ public class MainController {
                     documentActivity.openFileAsync(file);
                 },
                 () -> setEditorChromeVisible(false));
+    }
 
-        // 子控制器由 fx:include 实例化（先于本方法执行 @FXML 注入），这里统一注入
-        // BookContext 与回调。SidebarController 横跨活动栏 / 三个视图 / 底部面板多个
-        // FXML 文件，无法归属某个子 FXML，保持手动构造。
+    /**
+     * 子控制器接线：{@link SidebarController} 横跨活动栏 / 三个视图 / 底部面板多个 FXML 文件，
+     * 无法归属某个子 FXML，保持手动构造；其余子控制器由 {@code fx:include} 实例化（先于本方法
+     * 执行 @FXML 注入），这里统一注入 BookContext 与回调。
+     */
+    private void wireChildControllers() {
         sidebarController = new SidebarController(
                 activityGroup,
                 tocActivityButton, resourceActivityButton,
@@ -479,8 +514,7 @@ public class MainController {
         welcomePageController.bind(
                 this::onNew,
                 draft -> workspaceActivity.openDraft(draft),
-                this::onOpenWorkspace,
-                this::onExit);
+                this::onOpenWorkspace);
         // 订阅 BookLoadedEvent 自动收起欢迎页（新建 / 打开 / 自动暂存恢复 都触发）
         welcomePageController.subscribeVisibility(ctx);
 
@@ -507,7 +541,10 @@ public class MainController {
                 this::beginChange, this::markDirty,
                 this::reloadEditor, this::refreshPreview,
                 status::set, this::confirmDiscardChanges);
+    }
 
+    /** 源码区脏标记 + 撤销快照：一段连续输入只在第一次击键时记录一次快照（此时 book 还是变更前状态）。 */
+    private void wireSourceTextTracking() {
         contentArea.textProperty().addListener((obs, oldValue, text) -> {
             if (ctx.loading() || ctx.book() == null) {
                 return;
@@ -517,10 +554,10 @@ public class MainController {
             undoActivity.onTextInput();
             markDirty();
         });
+    }
 
-        wireEditorTabSwitching();
-        subscribeAppEvents();
-
+    /** 后置活动：主题、自动暂存指示、文件拖放、启动草稿恢复——都依赖前面已建好的控制器。 */
+    private void createLateActivities() {
         themeActivity = new ThemeActivity(statusLabel, themeStatusLabel,
                 themeLightItem, themeDarkItem, themeSepiaItem,
                 status::set, this::refreshPreview);
@@ -537,15 +574,21 @@ public class MainController {
                 status::set, this::warn, () -> stage,
                 welcomePageController::showWorkspace, welcomePageController::currentWorkspace,
                 () -> setCurrentChapter(null));
+    }
 
+    /**
+     * 收尾：建文档活动、隐藏编辑器外壳、刷新「最近」菜单。
+     *
+     * <p>故意不在这里 {@code newBook()}：启动后欢迎页是初始视图，用户从欢迎页挑一个动作
+     * （新建图书 / 打开图书 / 切换工作空间）才落到 {@code ctx.book()} 上，避免一开始就凭空
+     * 创建一本书造成「自动暂存里多出一份不会有人认领的临时草稿」的窘境。
+     *
+     * <p>启动草稿恢复提示<b>不在这里</b>，放在 {@link #setStage(Stage)} 末尾——见该方法注释。
+     */
+    private void finishStartup() {
         ensureDocumentActivity();
         setEditorChromeVisible(false);
         workspaceActivity.refreshRecentMenu();
-        // 故意不在这里 newBook()：启动后欢迎页是初始视图，用户从欢迎页挑一个动作（新建图书 /
-        // 打开图书 / 切换工作空间）才落到 ctx.book() 上，避免一开始就凭空创建一本书造成
-        // 「自动暂存里多出一份不会有人认领的临时草稿」的窘境。
-        //
-        // 启动草稿恢复提示**不在这里**，放在 setStage() 末尾——见该方法注释。
     }
 
     /**

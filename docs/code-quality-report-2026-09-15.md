@@ -116,22 +116,25 @@ epubra-app/.../editor/MetadataOps.java:82   private static String nullSafe(Strin
 
 ---
 
-## 5. 超长方法（9 个 > 60 行，可读性候选，非缺陷）
+## 5. 超长方法（原 9 个 → 现 8 个）
+
+### 5.1 已修复：`MainController.initialize()` 176 行 → **13 行**（P4，见 §9）
+
+### 5.2 剩余（8 个，可读性候选，非缺陷）
 
 | 文件 | 行 | 方法 | 行数 |
 |---|---|---|---|
-| `MainController.java` | 373 | `initialize()` | **176** |
 | `epubra-lib/.../OpfSpineRules.java` | 119 | `checkSpine()` | 90 |
 | `epubra-lib/.../OpfSpineRules.java` | 35 | `checkOpfBasics()` | 82 |
 | `epubra-lib/.../NavigationRules.java` | 101 | `checkNav()` | 79 |
 | `epubra-lib/.../NavigationRules.java` | 205 | `checkNcx()` | 70 |
-| `MainController.java` | 1124 | `onInsertLink()` | 63 |
+| `MainController.java` | 1167 | `onInsertLink()` | 63 |
 | `epubra-lib/.../ContainerRules.java` | 100 | `checkRawOpf()` | 63 |
 | `epubra-lib/.../EpubWriter.java` | 194 | `generateOpf()` | 62 |
 | `epubra-app/.../TocController.java` | 440 | `attachDragHandlers()` | 61 |
 
-- `MainController.initialize()` 176 行是真该拆（FXML 注入 + 事件接线 + 初始化编排全堆一处），但要守「跨面板编排有意留主控制器」的约定。
 - lib 侧那 5 个是「规则逐条 `if` + `findings.add`」的天然形态，强拆反而降低对照规范的直观性，**建议维持**。
+- `onInsertLink()` 63 行、`attachDragHandlers()` 61 行仅超线 1–3 行，收益低，暂不动。
 
 ---
 
@@ -168,3 +171,109 @@ epubra-app/.../editor/MetadataOps.java:82   private static String nullSafe(Strin
 | 2 | CSS 未使用 = **68** | **11** | 正着查把 JavaFX 内置皮肤类（40+）、CSS 注释里的词、后代选择器自引用全算成未使用。改为**反查**：CSS 类选择器 → 在除 `.css` 外的全源码树（含 JS）搜引用 |
 
 **两条通用教训**：① 正则匹配「空 body」`[ \t]*` vs `\s*` 是经典静默漏报点；② **凡是报「0」或「异常多」的项，都换一种写法复验一次**——报 0 通常是脚本 bug，报多通常是误报。
+
+---
+
+## 8. 修复执行记录（2026-09-15 08:40–08:45，已落地）
+
+用户决策：**P1 走「摘类名」路线**，并修复 P2、P3。
+
+### 8.1 P1 — 摘类名（4 个 FXML + 1 个 Java）
+
+| 文件 | 改动 |
+|---|---|
+| `view/welcome-page.fxml` | 摘掉 `welcome-kicker`、`welcome-workspace-title`、`welcome-hint`(×2)、`book-shelf-scroll` |
+| `view/main-window.fxml:202` | `<StackPane styleClass="main-center">` → `<StackPane>` |
+| `view/toc-view.fxml:14` | `styleClass="side-view toc-view"` → `styleClass="side-view"` |
+| `controller/view/WelcomePageController.java` | `addAll("book-card","new-book-card")` → `add("book-card")`（2 处） |
+| `test/.../WelcomePageHideTest.java` | 文档注释里指向已删类名的 `main-center` 改为「中央编辑区」 |
+
+**顺带删掉 11 条孤立 CSS 规则**（app.css 原 750–865 行整段，含 `:hover`/`:pressed` 约 30 个规则块）。理由：「摘类名」选定的方向就是当前 UI 不再区分这些层级，对应样式已无任何引用方。
+
+> 前置校验：改前先确认这 7 个类名在 **app.css / theme.css / editor-paper.css 三张表里均无定义**（若有定义，摘掉就会丢样式），并确认**测试无任何断言引用**（仅 1 处注释提及）。
+
+### 8.2 P2 — 死代码
+
+- `WelcomePageController`：删 `onExitAction()`、`onExit` 字段、`bind(...)` 的第 4 个参数 `Runnable onExit`。
+- `MainController:479-483`：`welcomePageController.bind(...)` 去掉 `this::onExit` 实参。
+- `MetadataOps`：删 `private static String nullSafe(String)`。
+- 已复核 `MainController.onExit()` **仍被菜单 `main-window.fxml:64 onAction="#onExit"` 使用**，未造出新的死代码。
+
+### 8.3 P3 — 补注释
+
+- `context/BookContext.java:190`、`platform/AppPaths.java:256` 两处空 catch 补上说明注释。
+
+### 8.4 门禁与复验
+
+| 项 | 结果 |
+|---|---|
+| `mvn -B clean test` | **lib 75 + app 444 = 519**，Failures 0 / Errors 0 / **Skipped 0**，BUILD SUCCESS，**EXIT=0** |
+| 冒烟 `javafx:run`（45s） | EXIT=124（跑满被杀 = 健康）；日志**零** FXML / 样式 / 应用层告警 |
+| 复跑审计：未使用私有方法 | **0**（原 2） |
+| 复跑审计：无注释的空 catch | **0**（原 2；13 处全部带说明注释） |
+| 复跑审计：CSS 孤儿规则 | **0**（原 11；选择器总数 114 → 103） |
+| 复跑审计：FXML 重复 id | **0** |
+
+**过程中被门禁抓到一次测试编译错误**：`WorkspaceShelfEmptyStateTest:62` 用 4 参调 `bind(...)`。这暴露了本次排查的一个盲区——**改方法签名时不能只 grep「类名」，必须一并 grep「方法名」（`bind(`）**。已修正为 3 参。
+
+### 8.5 未处理（保持现状）
+
+- §1 JSObject 过时告警 8 条：有意保留。
+- lib 侧 5 个长方法：建议维持。
+- 改动**尚未提交**，按约定需用户显式批准。
+
+---
+
+## 9. P4 拆分执行记录（2026-09-15 08:47–08:55，已落地）
+
+用户决策：**执行 P4，拆分 `MainController.initialize()`**。
+
+### 9.1 做法：纯 Extract Method，零行为变更
+
+`initialize()` **176 行 → 13 行**，按「初始化阶段」切成 8 个私有方法；方法仍留在 `MainController` 内，**守住「跨面板编排有意留主控制器」的约定**（不是把逻辑搬去别的类）。
+
+```java
+@FXML
+public void initialize() {
+    configureWebViewCaches();     // 1) 两个 WebView 的缓存目录（必须早于任何 load）
+    buildEditorPipeline();        // 2) 外壳 / 预览 / 工具条 / 样式控件 / 可视化会话
+    createStatusCoordinator();    // 3) status（必须先于任何 bind）
+    createEditingActivities();    // 4) InsertActivity / WorkspaceActivity
+    wireChildControllers();       // 5) Sidebar 构造 + 全部子控制器 bind（最长的一段）
+    wireSourceTextTracking();     // 6) 源码区脏标记 + 撤销快照
+    wireEditorTabSwitching();     //    （既有方法，直接调用）
+    subscribeAppEvents();         //    （既有方法，直接调用）
+    createLateActivities();       // 7) 主题 / 自动暂存 / 文件拖放 / 草稿恢复
+    finishStartup();              // 8) 建文档活动 / 隐藏外壳 / 刷新「最近」菜单
+}
+```
+
+**调用顺序 = 原语句顺序**，逐条对齐，因此三条硬约束全部保留：
+
+1. WebView `setUserDataDirectory` 早于任何 `loadContent`；
+2. `editorToolbarController` / `editorStyleControls` 早于 `visualEditorSession`（会话持二者的方法引用，求值时须非空）；
+3. `status` 早于**任何** `bind`（子控制器拿 `status::set`，晚建会 NPE）。
+
+这些约束原本是散在方法体里的行内注释，现已提升为各方法的 javadoc，**并显式标注了「为什么不能换顺序」**。
+
+### 9.2 顺带清理
+
+- 去掉局部变量 `WebEngine visualEngine`（原本跨两处使用，拆分后无法跨方法共享）→ 两处改为直接 `xxx.getEngine()`；`WebView.getEngine()` 幂等，返回同一实例。
+- 因此 `import javafx.scene.web.WebEngine;` 变为未使用，**一并删除**（否则会留下一条我从审计脚本里正好在查的那类垃圾）。
+
+### 9.3 代价与取舍（如实记录）
+
+- **`MainController` 文件总行数 1523 → 1566（+43）**：因为 8 个方法的 javadoc 比原来的行内注释更长。**方法内聚性提升，但文件变长**——这是把「隐式约束」写成「显式文档」的代价，判断为值得。
+- 未做进一步拆分：`MainController` 仍是 1566 行的枢纽类，但按项目约定「跨面板编排有意留主控制器」，继续拆得先改约定。
+
+### 9.4 门禁与复验
+
+| 项 | 结果 |
+|---|---|
+| `mvn -B clean test` | **lib 75 + app 444 = 519**，Failures 0 / Errors 0 / **Skipped 0**，BUILD SUCCESS，**EXIT=0** |
+| 冒烟 `javafx:run`（45s） | EXIT=124（跑满被杀 = 健康）；无 NPE、无应用层异常——**构造顺序约束实测守住** |
+| 复跑审计：超长方法 | `initialize()` **已从列表消失**；MainController 仅剩 `onInsertLink()` 63 行 |
+| 复跑审计：未使用私有方法 | **0**（8 个新方法全部被 `initialize()` 调用） |
+| 复跑审计：无注释空 catch / CSS 孤儿 / FXML 重复 id | 均 **0** |
+
+> 本节拆分属**纯结构变更**，测试用例数不变（519）即为最有力的等价性证据——所有 FXML 加载型 GUI 测试都会真实跑一遍 `initialize()`。

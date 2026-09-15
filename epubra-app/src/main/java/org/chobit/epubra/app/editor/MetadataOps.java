@@ -79,10 +79,6 @@ public final class MetadataOps {
                 && isBlank(src.description());
     }
 
-    private static String nullSafe(String s) {
-        return s == null ? "" : s;
-    }
-
     private static boolean isBlank(String s) {
         return s == null || s.isBlank();
     }

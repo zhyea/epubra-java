@@ -19,15 +19,15 @@
         </padding>
 
         <HBox alignment="CENTER_LEFT" spacing="10.0">
-            <Label text="工作空间" styleClass="welcome-kicker"/>
-            <Label fx:id="workspaceTitle" styleClass="welcome-workspace-title"/>
+            <Label text="工作空间"/>
+            <Label fx:id="workspaceTitle"/>
             <Region HBox.hgrow="ALWAYS"/>
-            <Label text="双击图书进入编辑" styleClass="welcome-hint"/>
+            <Label text="双击图书进入编辑"/>
         </HBox>
 
-        <Label fx:id="workspaceHint" styleClass="welcome-hint"/>
+        <Label fx:id="workspaceHint"/>
 
-        <ScrollPane fitToWidth="true" hbarPolicy="NEVER" styleClass="book-shelf-scroll" VBox.vgrow="ALWAYS">
+        <ScrollPane fitToWidth="true" hbarPolicy="NEVER" VBox.vgrow="ALWAYS">
             <content>
                 <FlowPane fx:id="bookShelf" alignment="TOP_LEFT"
                           hgap="18.0" vgap="20.0" prefWrapLength="980.0"

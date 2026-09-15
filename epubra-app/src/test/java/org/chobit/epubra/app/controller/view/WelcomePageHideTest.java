@@ -32,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p><b>回归现象</b>：{@code hide()} 原先只把内层 {@code welcomePane} VBox 设为不可见，
  * 而 {@code fx:include} 的根 StackPane 仍 visible=true 且 pickOnBounds=true——它的透明
- * 区域会拦截整个 main-center 的鼠标命中，用户打开书后看到界面正常，但左侧目录按钮、
+ * 区域会拦截整个中央编辑区的鼠标命中，用户打开书后看到界面正常，但左侧目录按钮、
  * 资源按钮、编辑区全部「点了没反应」。
  *
  * <p><b>断言点</b>：BookLoadedEvent 之后，欢迎页<b>根节点</b>（include 注入到
