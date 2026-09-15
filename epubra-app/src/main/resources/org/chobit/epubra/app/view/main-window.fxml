@@ -257,8 +257,14 @@
                                                              Java 侧——FXML 的 onAction 只能绑无参方法，
                                                              而这些命令都要带值。
 
-                                                             字体下拉列本机全部字体族（Font.getFamilies()），
-                                                             可输入筛选，也能直接手输列表外的族名。
+                                                             字体与对齐同形：都是**按钮下拉**（MenuButton）。
+                                                             工具条上是干净的一枚图标按钮，点开才是清单；
+                                                             清单里当前生效的那一款以单选态标出，不用把族名
+                                                             挤在按钮上撑宽工具条。
+
+                                                             清单列本机全部字体族（Font.getFamilies()），
+                                                             常用档置顶；弹层顶部一条输入框——边打边筛，
+                                                             回车可把列表外的族名直接当族名应用。
 
                                                              字号不做下拉框：A+ / A- 两个按钮按固定档位表跳档
                                                              （10…72px），结果是整齐值。
@@ -266,7 +272,7 @@
                                                              文字颜色用 ColorPicker：自带标准色板与
                                                              「自定义颜色…」，外观点换成「A + 色条」图标，
                                                              不透明度拖到 0 即清除该声明。 -->
-                                                        <ComboBox fx:id="fontCombo" id="font"/>
+                                                        <MenuButton fx:id="fontButton" id="font"/>
                                                         <Button id="size-up" text="放大字号"
                                                                 styleClass="flat-button, toolbar-action"
                                                                 onAction="#onSizeUp"/>

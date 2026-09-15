@@ -95,6 +95,12 @@ public enum Theme {
      * <p>作者自己的 XHTML 常常带内联配色，这里统一用 {@code !important} 压过文档自带样式，
      * 否则深色主题下会出现白底黑字的刺眼预览页。
      *
+     * <p><b>但文字颜色的那几条必须放过「自己带内联 {@code color} 的元素」</b>
+     * （{@code p:not([style*="color"])} 这种写法）：样式表里的 {@code !important} 声明
+     * 优先于内联 {@code style}，而工具条的「文字颜色 / 清档」正是往元素上写<b>内联</b> color。
+     * 不加这道闸，作者选的颜色会写进正文（源码区可见）却在画布上没有任何变化。
+     * 换言之：<b>压的是文档自带的样式表配色，不是作者在编辑器里显式指定的那一条。</b>
+     *
      * <p>{@code em/i} 的字体栈是给「斜体可见性」专门定制的（实测依据见
      * {@code VisualEditorInlineFormatTest} 与 {@code ThemeTest} 的诊断记录）：
      * 渲染引擎<b>不做合成斜体</b>（同字体下
@@ -109,14 +115,16 @@ public enum Theme {
         return """
                 html, body { background: %s !important; color: %s !important; }
                 body { margin: 0; padding: 18px 22px; font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 16px; line-height: 1.7; }
-                p, li, h1, h2, h3, h4, h5, h6, div, section, article, blockquote, td, th, span, figcaption { color: %s !important; border-color: %s !important; }
+                p, li, h1, h2, h3, h4, h5, h6, div, section, article, blockquote, td, th, span, figcaption { border-color: %s !important; }
+                p:not([style*="color"]), li:not([style*="color"]), h1:not([style*="color"]), h2:not([style*="color"]), h3:not([style*="color"]), h4:not([style*="color"]), h5:not([style*="color"]), h6:not([style*="color"]), div:not([style*="color"]), section:not([style*="color"]), article:not([style*="color"]), blockquote:not([style*="color"]), td:not([style*="color"]), th:not([style*="color"]), span:not([style*="color"]), figcaption:not([style*="color"]) { color: %s !important; }
                 a { color: %s !important; }
                 hr, table, th, td, pre, img { border-color: %s !important; }
-                pre, code { background: %s !important; color: %s !important; padding: 2px 4px; }
+                pre, code { background: %s !important; padding: 2px 4px; }
+                pre:not([style*="color"]), code:not([style*="color"]) { color: %s !important; }
                 img { max-width: 100%%; height: auto; }
                 em, i, dfn, cite, var { font-style: italic !important; font-family: "Segoe UI", "Times New Roman", "KaiTi", "楷体", serif !important; }
                 %s
-                """.formatted(previewBackground, previewForeground, previewForeground, previewBorder,
+                """.formatted(previewBackground, previewForeground, previewBorder, previewForeground,
                 previewLink, previewBorder, previewCodeBackground, previewForeground, scrollbarCss());
     }
 

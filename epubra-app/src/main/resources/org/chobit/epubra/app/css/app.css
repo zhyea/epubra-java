@@ -146,12 +146,11 @@
     -fx-stroke: -epubra-accent;
 }
 
-/* 样式控件组（字体下拉 / 文字颜色 / 对齐按钮；字号走两个图标按钮）。
- * JavaFX 默认的 combo-box / menu-button 都是「立体底 + 凹槽边框」，
- * 直接塞进扁平的编辑工具条很突兀，统一压成与图标按钮同高同观感。
- * 文字颜色的取色器单独处理（见下方 .toolbar-color）——它要藏掉自带色块与颜色名。
+/* 样式控件组（字体 / 对齐两个按钮下拉 + 文字颜色的取色器；字号走两个图标按钮）。
+ * JavaFX 默认的 menu-button 是「立体底 + 凹槽边框」，直接塞进扁平的编辑工具条很突兀，
+ * 统一压成与图标按钮同高同观感。文字颜色的取色器单独处理（见下方 .toolbar-color）——
+ * 它要藏掉自带色块与颜色名。
  * 命令本身不在这里——候选项与命令由 EditorStyleControls 装配。 */
-.editor-toolbar .combo-box,
 .editor-toolbar .menu-button {
     -fx-background-color: transparent;
     -fx-background-radius: 2;
@@ -163,7 +162,6 @@
     -fx-cursor: hand;
 }
 
-.editor-toolbar .combo-box:hover,
 .editor-toolbar .menu-button:hover {
     -fx-background-color: -epubra-hover-bg;
     -fx-border-color: -epubra-hover-bg;
@@ -173,7 +171,7 @@
  * （ColorPicker 没有 graphic 属性，图标只能作兄弟节点叠上去，见 EditorStyleControls）。
  * 取色器自带的色块（.picker-color）、颜色名文字（-fx-color-label-visible）与下拉箭头
  * 一并藏掉——留着会和图标叠在一起，或把颜色名当文字显示。
- * 边框 / hover 挂在叠放槽 .toolbar-color 上，与字体下拉、对齐按钮同高同观感。 */
+ * 边框 / hover 挂在叠放槽 .toolbar-color 上，与字体、对齐两个按钮下拉同高同观感。 */
 .editor-toolbar .toolbar-color {
     -fx-background-color: transparent;
     -fx-background-radius: 2;
@@ -203,23 +201,14 @@
     -fx-opacity: 0;
 }
 
-.editor-toolbar .combo-box > .list-cell {
-    -fx-background-color: transparent;
-    -fx-text-fill: -epubra-fg;
-    -fx-font-size: 12px;
-    -fx-padding: 1 2 1 4;
-}
-
-.editor-toolbar .combo-box:hover > .list-cell,
-.editor-toolbar .menu-button:hover > .label {
-    -fx-text-fill: -epubra-hover-fg;
-}
-
 .editor-toolbar .menu-button > .label {
     -fx-text-fill: -epubra-fg;
 }
 
-.editor-toolbar .combo-box .arrow,
+.editor-toolbar .menu-button:hover > .label {
+    -fx-text-fill: -epubra-hover-fg;
+}
+
 .editor-toolbar .menu-button > .arrow-button > .arrow {
     -fx-background-color: -epubra-fg;
 }

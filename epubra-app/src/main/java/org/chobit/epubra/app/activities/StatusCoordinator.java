@@ -1,6 +1,7 @@
 package org.chobit.epubra.app.activities;
 
 import javafx.animation.PauseTransition;
+import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.ProgressBar;
@@ -46,6 +47,16 @@ public class StatusCoordinator {
     private final MenuItem undoItem;
     private final MenuItem redoItem;
 
+    /**
+     * 工具条上的撤销 / 重做按钮（可能为 null——FXML 里改用 id 标注，捞不到时按「没有这个控件」处理）。
+     *
+     * <p>与上面两个 {@link MenuItem} 同源同判据，只是落点从菜单挪到了工具条。两处必须一起更新：
+     * 只改菜单时，工具条上那两枚永远是「可点」的样子，点了却没有可撤销的东西——现象就是
+     * 「按钮没被激活，且点了没反应」。
+     */
+    private final Button undoButton;
+    private final Button redoButton;
+
     public StatusCoordinator(BookContext ctx, TextArea contentArea,
                              Supplier<ChapterNode> currentChapter, Supplier<Stage> stage,
                              Label statusLabel,
@@ -53,7 +64,8 @@ public class StatusCoordinator {
                              Label errorStatusLabel, Region errorStatusDivider,
                              Label warningStatusLabel, Region warningStatusDivider,
                              Label chapterStatusLabel, Label wordStatusLabel, Label chapterWordStatusLabel,
-                             MenuItem undoItem, MenuItem redoItem) {
+                             MenuItem undoItem, MenuItem redoItem,
+                             Button undoButton, Button redoButton) {
         this.ctx = ctx;
         this.contentArea = contentArea;
         this.currentChapter = currentChapter;
@@ -71,6 +83,8 @@ public class StatusCoordinator {
         this.chapterWordStatusLabel = chapterWordStatusLabel;
         this.undoItem = undoItem;
         this.redoItem = redoItem;
+        this.undoButton = undoButton;
+        this.redoButton = redoButton;
     }
 
     public void set(String message) {
@@ -110,6 +124,12 @@ public class StatusCoordinator {
         updateTitle();
     }
 
+    /**
+     * 撤销 / 重做的可用态：菜单项与工具条按钮<b>同一个判据</b>，必须一起更新。
+     *
+     * <p>工具条那两枚曾经是漏网的（动作按钮带 {@code toolbar-action}，不参与「当前格式」点亮，
+     * 也没有任何可用态来源），于是它们永远可点、点了没反应。这里是它们唯一的可用态来源。
+     */
     public void updateHistoryControls() {
         boolean canUndo = ctx.book() != null && ctx.history().canUndo();
         boolean canRedo = ctx.book() != null && ctx.history().canRedo();
@@ -118,6 +138,12 @@ public class StatusCoordinator {
         }
         if (redoItem != null) {
             redoItem.setDisable(!canRedo);
+        }
+        if (undoButton != null) {
+            undoButton.setDisable(!canUndo);
+        }
+        if (redoButton != null) {
+            redoButton.setDisable(!canRedo);
         }
     }
 

@@ -7,9 +7,9 @@ import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.ColorPicker;
-import javafx.scene.control.ComboBox;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.RadioMenuItem;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.layout.FlowPane;
@@ -206,28 +206,42 @@ class VisualEditorTabUiTest {
             assertNotNull(field(mainController, "editorStyleControls"),
                     "样式控件组必须被构造——它是 onStyleChanged 的回显通道，漏了就到不了界面");
 
-            // ---- 字体：可编辑下拉；列表 = 默认档 + 常用档置顶 + 本机全量字体族
-            ComboBox<String> font = field(mainController, "fontCombo");
-            assertNotNull(font, "字体下拉应被 FXML 注入");
-            assertTrue(font.isEditable(),
-                    "字体下拉必须可编辑：换台机器打开时，装不到的族名要能原样显示，也能直接手输");
-            assertEquals(EditorStyleControls.FONT_DEFAULT, font.getValue(), "初始应停在默认档");
-            assertFalse(font.getItems().isEmpty(), "下拉不能是空的");
-            assertNotNull(font.getTooltip(), "下拉框要有 Tooltip（无文字图标控件的可发现性来源）");
+            // ---- 字体：按钮下拉（MenuButton），与「对齐」同形；
+            //      清单 = 筛选输入框 + 默认档 + 常用档置顶 + 本机全量字体族
+            MenuButton font = field(mainController, "fontButton");
+            assertNotNull(font, "字体控件应被 FXML 注入");
+            assertNull(font.getText(), "字体控件应是图标按钮（文字清空）——族名收在弹层里，不撑宽工具条");
+            assertNotNull(font.getGraphic(), "字体控件缺少图标图形");
+            assertNotNull(font.getTooltip(), "字体控件要有 Tooltip（图标控件的可发现性来源）");
             assertTrue(font.getTooltip().getShowDelay().toMillis() <= 300,
                     "Tooltip 显示延迟口径与图标按钮一致");
             assertFalse(font.isFocusTraversable(),
                     "Tab 键要留给编辑器内的列表缩进（JS 的 Tab 处理），不能被工具条控件截走");
 
-            // 「选择计算机上所有的字体」是本轮的核心诉求：列表必须真的跟随 Font.getFamilies()
+            // 第一项是筛选输入框（CustomMenuItem），字体选项从第二项起才是 RadioMenuItem
+            assertTrue(font.getItems().get(0) instanceof javafx.scene.control.CustomMenuItem,
+                    "字体弹层顶部应是筛选输入框（CustomMenuItem）");
+            java.util.List<RadioMenuItem> fontOptions = font.getItems().stream()
+                    .filter(RadioMenuItem.class::isInstance)
+                    .map(RadioMenuItem.class::cast)
+                    .collect(Collectors.toList());
+            assertFalse(fontOptions.isEmpty(), "字体清单不能是空的");
+            assertEquals(EditorStyleControls.FONT_DEFAULT, fontOptions.get(0).getText(),
+                    "「默认」档必须排在字体选项的最前（常用档置顶＋全量跟随）");
+            for (RadioMenuItem option : fontOptions) {
+                assertNotNull(option.getOnAction(),
+                        "每个字体项都要接了命令（选中即应用），否则是点不动的摆设：" + option.getText());
+            }
+
+            // 「选择计算机上所有的字体」是本轮的核心诉求：清单必须真的跟随 Font.getFamilies()
             assertTrue(EditorStyleControls.systemFontCount() > 0,
                     "本机字体枚举不该为空，否则「全量跟随」无从谈起");
-            assertTrue(font.getItems().containsAll(EditorStyleControls.systemFonts()),
-                    "字体下拉应列全本机字体族，实际 " + font.getItems().size()
+            java.util.List<String> listed = fontOptions.stream()
+                    .map(MenuItem::getText).collect(Collectors.toList());
+            assertTrue(listed.containsAll(EditorStyleControls.systemFonts()),
+                    "字体清单应列全本机字体族，实际 " + listed.size()
                             + " 项 / 本机 " + EditorStyleControls.systemFontCount() + " 项");
-            assertEquals(EditorStyleControls.FONT_DEFAULT, font.getItems().get(0),
-                    "「默认」档必须排在最前（常用档置顶＋全量跟随）");
-            // 输入筛选：命中项保留、条数明显收窄
+            // 输入筛选：命中项保留、条数明显收窄（弹层里的输入框走的就是同一个 fontItems）
             java.util.List<String> filtered = EditorStyleControls.fontItems("yahei");
             assertTrue(filtered.contains("Microsoft YaHei"), "输入筛选应能命中常用档：" + filtered);
             assertTrue(filtered.size() < EditorStyleControls.systemFontCount(),

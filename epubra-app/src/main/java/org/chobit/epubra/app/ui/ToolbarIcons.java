@@ -67,7 +67,10 @@ public final class ToolbarIcons {
             // 对齐：工具条按当前生效值换用其中一张（见 EditorStyleControls#syncAlignIcon）
             Map.entry("align", "M4 6h16 M4 12h10 M4 18h13"),
             Map.entry("align-center", "M4 6h16 M7 12h10 M5.5 18h13"),
-            Map.entry("align-right", "M4 6h16 M10 12h10 M7 18h13"));
+            Map.entry("align-right", "M4 6h16 M10 12h10 M7 18h13"),
+            // 字体：一枚「A」字形（字体族＝字形选择）。与文字颜色图标的「A + 色条」同族但不同形——
+            // 那一枚底下压着一条会随当前颜色上色的色条，这一枚没有，两者在 17px 下不会认错。
+            Map.entry("font", "M2.6 19.4 L9.4 4.6 L16.2 19.4 M5 14.6 h8.8"));
 
     /** id → SVG 路径；不在 {@link #PATHS} 里的 id 返回 null。 */
     static String path(String id) {

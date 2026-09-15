@@ -1,11 +1,15 @@
 package org.chobit.epubra.app.editor;
 
+import javafx.application.Platform;
 import javafx.scene.Node;
 import javafx.scene.control.ColorPicker;
-import javafx.scene.control.ComboBox;
 import javafx.scene.control.Control;
+import javafx.scene.control.CustomMenuItem;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.RadioMenuItem;
+import javafx.scene.control.TextField;
+import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.Pane;
 import javafx.scene.paint.Color;
@@ -40,9 +44,13 @@ import java.util.function.BiConsumer;
  *       {@code BLOCK_STYLE_PROPS}），这里只负责给值；值全是受控字面量，
  *       作者从本机粘贴进来的外来样式仍在 sanitize 阶段被剥掉——「外来样式不进正文」
  *       与「作者自己选的样式进正文」是两件事，别混。</li>
- *   <li><b>字体下拉列的是本机全部字体族</b>（{@code Font.getFamilies()}，实测约 258 个），
- *       常用档置顶，全量跟随；可输入筛选，也能直接手输列表外的族名——换台机器打开同一本书时，
- *       装不到的族名仍要原样显示，而不是被强行归到「默认」档（那会静默改掉作者的排版意图）。</li>
+ *   <li><b>字体是「按钮下拉」</b>（{@link MenuButton}，与对齐同形）：工具条上只留一枚图标按钮，
+ *       点开才是清单。清单列本机全部字体族（{@code Font.getFamilies()}，实测约 258 个），
+ *       常用档置顶；当前生效的那一款在清单里以<b>单选态</b>标出——按钮上不挂族名，
+ *       否则「Microsoft JhengHei」这类长名字会把工具条撑变形。
+ *       弹层顶部一条输入框：边打边筛，回车可把列表外的族名直接当族名应用。
+ *       换台机器打开同一本书时，装不到的族名仍要原样显示，而不是被强行归到「默认」档
+ *       （那会静默改掉作者的排版意图）。</li>
  *   <li><b>字体值必须加引号</b>：{@code Font.getFamilies()} 返回的族名里过半数带空格
  *       （实测 167/258），CSS 里不加引号会被当成字体栈拆开。写进正文的一律是
  *       {@code "Microsoft YaHei"} 这种带双引号形态；回显时再剥掉引号取首段。</li>
@@ -50,9 +58,10 @@ import java.util.function.BiConsumer;
  *       外观经 {@code ToolbarIcons.colorIcon()} 换成「A + 色条」图标（色条随当前颜色上色）。
  *       {@code value == null} = 正文没有 color 声明；把不透明度滑到 0 同样归一成「清除」——
  *       {@code rgba(…,0)} 与「没设颜色」视觉上无异，塞进正文只是一条无意义声明。</li>
- *   <li><b>回显必须防回环</b>：{@code update()} 是程序化设值，会触发 ComboBox 的
- *       value / editor 监听器 → 又一次 {@code applyFormat} → 又回显……用 {@code syncing} /
- *       {@code fontFiltering} 两个标志挡住（程序化改 items 与文本时也会走同一批监听器）。</li>
+ *   <li><b>回显必须防回环</b>：{@code update()} 是程序化设值，会改动清单里的选中项 ——
+ *       {@link RadioMenuItem#setSelected(boolean)} 在某些 JavaFX 版本上会连带触发
+ *       {@code onAction}，那就又是一次 {@code applyFormat} → 又回显……用 {@code syncing} /
+ *       {@code fontFiltering} 两个标志挡住（程序化重建清单与写输入框文本时也会走同一批监听器）。</li>
  * </ol>
  *
  * <p>控件全部 {@code setFocusTraversable(false)}：Tab 键留给编辑器内的列表缩进
@@ -74,16 +83,30 @@ public final class EditorStyleControls {
             "Microsoft JhengHei", "SimSun-ExtB",
             "Arial", "Times New Roman", "Georgia", "Courier New", "Verdana");
 
-    /** 字体下拉展开时一次显示多少行（全量 258 项靠输入筛选，不用滚到底）。 */
-    private static final int FONT_VISIBLE_ROWS = 14;
+    /** 字体弹层顶部输入框的提示语：两种用法（边打边筛 / 回车把输入当族名应用）都写进去。 */
+    private static final String FONT_FILTER_PROMPT = "筛选字体，回车应用";
 
     /** 本机字体族缓存（{@code Font.getFamilies()} 廉价但没必要反复枚举）。 */
     private static List<String> systemFonts;
 
-    private final ComboBox<String> font;
+    private final MenuButton font;
     private final ColorPicker color;
     private final MenuButton align;
     private final BiConsumer<String, String> applyFormat;
+
+    /** 字体清单的单选组：清单里「当前生效的是哪一款」靠它标出。 */
+    private final ToggleGroup fontGroup = new ToggleGroup();
+
+    /** 字体弹层顶部的筛选输入框。 */
+    private final TextField fontFilter = new TextField();
+
+    /**
+     * 承载筛选输入框的菜单项。
+     *
+     * <p>{@code hideOnClick=false} 是关键：输入框在弹层里，点它不能把弹层收掉，否则
+     * 「想打字筛选，一点弹层就没了」。
+     */
+    private final CustomMenuItem fontFilterItem = new CustomMenuItem(fontFilter, false);
 
     /** 文字颜色图标的色条：随当前颜色改写填充（空 = 正文没有 color 声明）。 */
     private Rectangle colorBar;
@@ -91,13 +114,13 @@ public final class EditorStyleControls {
     /** 回显期间为 true：挡住「程序化设值 → 监听器 → 又下发一次命令」的回环（口径 5）。 */
     private boolean syncing;
 
-    /** 过滤期间为 true：{@code setItems} / 写回编辑器文本会触发文本监听器，同样要挡。 */
+    /** 过滤期间为 true：重建清单 / 写回输入框文本会触发文本监听器，同样要挡。 */
     private boolean fontFiltering;
 
     /** 当前生效的字体显示名：用来判断「手输的值是否真的变了」，避免重复下发。 */
     private String appliedFont = FONT_DEFAULT;
 
-    public EditorStyleControls(ComboBox<String> font, ColorPicker color,
+    public EditorStyleControls(MenuButton font, ColorPicker color,
                                MenuButton align, BiConsumer<String, String> applyFormat) {
         this.font = font;
         this.color = color;
@@ -114,47 +137,151 @@ public final class EditorStyleControls {
         if (font == null) {
             return;
         }
-        // 可编辑：既能从列表里挑，也能手输列表外的族名（换机器打开时的兜底）。
-        font.setEditable(true);
-        font.setPrefWidth(150.0);
-        font.setVisibleRowCount(FONT_VISIBLE_ROWS);
         font.setFocusTraversable(false);
-        applyTooltip(font, "font");
-        showAllFonts();
-        font.setValue(FONT_DEFAULT);
-        appliedFont = FONT_DEFAULT;
+        // 图标 + 悬停提示：id 就是「font」，与工具条上其它控件同一套来源（ToolbarIcons）
+        ToolbarIcons.installMenuButton(font);
+        markFlat(font);
 
-        // 输入筛选：只在弹层展开时过滤。收起后恢复全量，否则「选完一项列表就只剩一项」。
-        font.getEditor().textProperty().addListener((obs, old, now) -> {
-            if (fontFiltering || !font.isShowing()) {
+        fontFilter.setPromptText(FONT_FILTER_PROMPT);
+        fontFilter.setPrefColumnCount(14);
+        // 边打边筛：清单跟着输入收窄。重建清单本身会写输入框、也会换 items，
+        // 两者都会回到这个监听器上，所以要有 fontFiltering 这道闸。
+        fontFilter.textProperty().addListener((obs, old, now) -> {
+            if (fontFiltering) {
                 return;
             }
-            filterFonts(now);
+            rebuildFontItems(now);
         });
-        // 从列表里选中一项 → 应用
-        font.valueProperty().addListener((obs, old, now) -> {
-            if (syncing || now == null) {
+        // 回车：把输入原样当族名应用（列表外族名的手输通道），随即收起弹层
+        fontFilter.setOnAction(e -> applyTypedFont());
+
+        // 每次展开都复位：清单回全量、输入框清空并聚焦——展开即可直接打字筛选。
+        // 焦点必须等弹层真正显示出来再要（runLater），否则弹层窗口还没就绪，焦点落不下去。
+        font.showingProperty().addListener((obs, was, showing) -> {
+            if (!showing) {
                 return;
             }
-            applyFont(now);
+            rebuildFontItems("");
+            setFilterText("");
+            Platform.runLater(fontFilter::requestFocus);
         });
-        // 手输：回车提交（弹层随之收起）
-        font.setOnAction(e -> commitTypedFont());
-        // 手输：点走（失焦）也提交——不然「输了字但没回车」会被静默丢弃
-        font.focusedProperty().addListener((obs, was, now) -> {
-            if (was && !now) {
-                commitTypedFont();
-            }
-        });
-        // 展开 / 收起各做一件事：展开恢复全量列表，收起把半截筛选文本还回实际生效值
-        font.setOnShowing(e -> showAllFonts());
-        font.setOnHidden(e -> restoreEditorFromValue());
+
+        // 输入框那一项只在装配时插入一次，之后原地保留：重建清单只换它后面的字体选项。
+        // 若连它一起 setAll，承载输入框的菜单项会脱离菜单再挂回去，焦点随之丢掉——
+        // 现象是「打出第一个字母之后就打不进第二个字了」。
+        font.getItems().add(fontFilterItem);
+        rebuildFontItems("");
+        appliedFont = FONT_DEFAULT;
     }
 
     /**
-     * 本机全部字体族；懒加载 + 进程内缓存，取不到时退回空表（下拉至少还有常用档）。
+     * 重建字体清单：{@code [筛选输入框] + [默认档 + 字体族…]}。
      *
-     * <p>对外可见：接线测试要断言「字体下拉确实列全了本机字体族」。
+     * <p>整份重建而不是增删差集——每一项都是新对象，就不必维护「哪一项对应哪个族名」的映射，
+     * 也不会残留上一轮的选中态。旧项先退出单选组再丢弃，免得 {@link ToggleGroup} 攥着
+     * 已经不在清单里的项不放。
+     *
+     * <p><b>筛选输入框那一项原地保留</b>（见 {@link #installFont()}）：它一动，焦点就没了。
+     */
+    private void rebuildFontItems(String typed) {
+        if (font == null) {
+            return;
+        }
+        List<MenuItem> options = new ArrayList<>();
+        for (String name : fontItems(typed)) {
+            options.add(fontOption(name));
+        }
+        fontFiltering = true;
+        try {
+            for (int i = font.getItems().size() - 1; i >= 0; i--) {
+                MenuItem existing = font.getItems().get(i);
+                if (existing == fontFilterItem) {
+                    continue;
+                }
+                if (existing instanceof RadioMenuItem radio) {
+                    radio.setToggleGroup(null);
+                }
+                font.getItems().remove(i);
+            }
+            font.getItems().addAll(options);
+        } finally {
+            fontFiltering = false;
+        }
+        syncSelection();
+    }
+
+    /** 一个字体选项：单选态 + 选中即下发命令（与对齐的 {@code alignItem} 同一形态）。 */
+    private RadioMenuItem fontOption(String display) {
+        RadioMenuItem item = new RadioMenuItem(display);
+        item.setToggleGroup(fontGroup);
+        item.setOnAction(e -> applyFont(display));
+        return item;
+    }
+
+    /**
+     * 让清单里的单选态跟住 {@link #appliedFont}。
+     *
+     * <p>族名不在清单里时（本机没装——换台机器打开同一本书）<b>临时补一项</b>并把选中给它：
+     * 归到「默认」档等于静默改掉作者的排版意图（口径 2）。
+     *
+     * <p>整个过程置 {@code syncing}：{@code setSelected} 在部分 JavaFX 版本上会连带触发
+     * {@code onAction}，不挡的话「回显」会变成「又下发一次命令」——每动一下光标就多一条历史。
+     */
+    private void syncSelection() {
+        if (font == null) {
+            return;
+        }
+        String want = appliedFont == null || appliedFont.isBlank() ? FONT_DEFAULT : appliedFont;
+        RadioMenuItem match = null;
+        for (MenuItem item : font.getItems()) {
+            if (item instanceof RadioMenuItem radio && want.equals(radio.getText())) {
+                match = radio;
+                break;
+            }
+        }
+        boolean wasSyncing = syncing;
+        syncing = true;
+        try {
+            if (match == null && !FONT_DEFAULT.equals(want)) {
+                match = fontOption(want);
+                // 紧跟筛选输入框之后、常用档之前
+                font.getItems().add(1, match);
+            }
+            if (match != null) {
+                match.setSelected(true);
+            }
+        } finally {
+            syncing = wasSyncing;
+        }
+    }
+
+    /** 程序化写输入框文本：置 {@code fontFiltering}，免得又触发一次清单重建。 */
+    private void setFilterText(String text) {
+        if (text.equals(fontFilter.getText())) {
+            return;
+        }
+        fontFiltering = true;
+        try {
+            fontFilter.setText(text);
+        } finally {
+            fontFiltering = false;
+        }
+    }
+
+    /** 手输提交：把输入框里的字原样当族名应用；空输入 = 回默认档。 */
+    private void applyTypedFont() {
+        String raw = fontFilter.getText();
+        String typed = raw == null ? "" : raw.trim();
+        font.hide();
+        applyFont(typed.isEmpty() ? FONT_DEFAULT : typed);
+        // 应用完把清单复位成全量：下次展开仍是完整可挑的状态
+        rebuildFontItems("");
+    }
+
+    /**
+     * 本机全部字体族；懒加载 + 进程内缓存，取不到时退回空表（清单至少还有常用档）。
+     *
+     * <p>对外可见：接线测试要断言「字体清单确实列全了本机字体族」。
      */
     public static synchronized List<String> systemFonts() {
         if (systemFonts == null) {
@@ -169,13 +296,13 @@ public final class EditorStyleControls {
         return systemFonts;
     }
 
-    /** 供接线测试断言「字体下拉确实列了本机全部的字体族」。 */
+    /** 供接线测试断言「字体清单确实列了本机全部的字体族」。 */
     public static int systemFontCount() {
         return systemFonts().size();
     }
 
     /**
-     * 字体下拉的候选项：{@code [默认] + 常用档（置顶）+ 全量（跟随）}，按输入做大小写不敏感子串过滤。
+     * 字体清单的候选项：{@code [默认] + 常用档（置顶）+ 全量（跟随）}，按输入做大小写不敏感子串过滤。
      *
      * <p>常用档用<b>本机返回的原始拼写</b>（{@link #canonicalName}）——{@code COMMON_FONTS} 里写的
      * 只是查表键，大小写与系统口径不一致时不能把键直接塞进列表。
@@ -223,75 +350,17 @@ public final class EditorStyleControls {
         return lowerNeedle.isEmpty() || name.toLowerCase(Locale.ROOT).contains(lowerNeedle);
     }
 
-    private void showAllFonts() {
-        replaceFontItems(fontItems(""));
-    }
-
-    private void filterFonts(String typed) {
-        replaceFontItems(fontItems(typed));
-        String want = typed == null ? "" : typed;
-        if (want.equals(font.getEditor().getText())) {
-            return;
-        }
-        // setItems 可能把编辑器文本重置掉（探针实测一般会保留，但别把「一般」当契约），
-        // 写回用户刚敲的筛选词并把光标留在末尾——不然输入框会突然变空。
-        fontFiltering = true;
-        try {
-            font.getEditor().setText(want);
-        } finally {
-            fontFiltering = false;
-        }
-        font.getEditor().positionCaret(want.length());
-    }
-
-    private void replaceFontItems(List<String> items) {
-        fontFiltering = true;
-        try {
-            font.getItems().setAll(items);
-        } finally {
-            fontFiltering = false;
-        }
-    }
-
-    /** 手输提交：把编辑器文本落成下拉值，命令由 valueProperty 监听器统一下发（不重复）。 */
-    private void commitTypedFont() {
-        if (font == null) {
-            return;
-        }
-        String raw = font.getEditor().getText();
-        String typed = raw == null ? "" : raw.trim();
-        if (typed.isEmpty()) {
-            // 清空输入 = 回默认档；值已经就是默认档时 setValue 不触发变更事件，无需再下发
-            if (!FONT_DEFAULT.equals(appliedFont)) {
-                font.setValue(FONT_DEFAULT);
-            }
-            return;
-        }
-        if (typed.equals(appliedFont)) {
-            return;
-        }
-        font.setValue(typed);
-    }
-
-    /** 关闭弹层时把编辑器文本还原成实际生效的字体：筛了一半就收起的半截文本不该留在框里。 */
-    private void restoreEditorFromValue() {
-        if (font == null) {
-            return;
-        }
-        String want = appliedFont == null ? FONT_DEFAULT : appliedFont;
-        if (want.equals(font.getEditor().getText())) {
-            return;
-        }
-        fontFiltering = true;
-        try {
-            font.getEditor().setText(want);
-        } finally {
-            fontFiltering = false;
-        }
-    }
-
+    /**
+     * 应用一款字体：记下当前档（回显要用），并把命令经 {@code applyFormat} 发出去。
+     *
+     * <p>{@code syncing} 期间只记账、不下发——那是回显路径，命令的源头已在别处
+     * （见 {@link #syncSelection()}）。
+     */
     private void applyFont(String display) {
         appliedFont = display;
+        if (syncing) {
+            return;
+        }
         applyFormat.accept("font", cssFontValue(display));
     }
 
@@ -433,9 +502,9 @@ public final class EditorStyleControls {
         try {
             if (font != null) {
                 String family = firstFamily(props.get("font-family"));
-                String display = family == null || family.isBlank() ? FONT_DEFAULT : family;
-                font.setValue(display);
-                appliedFont = display;
+                // 先把「当前档」落定，再让清单的单选态跟上来——syncSelection 读的就是它
+                appliedFont = family == null || family.isBlank() ? FONT_DEFAULT : family;
+                syncSelection();
             }
             if (color != null) {
                 color.setValue(toFxColor(props.get("color")));

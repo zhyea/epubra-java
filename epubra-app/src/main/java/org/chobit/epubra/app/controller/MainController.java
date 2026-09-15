@@ -37,11 +37,12 @@ import org.chobit.epubra.lib.io.EpubWriter;
 import org.chobit.epubra.lib.validation.EpubValidator;
 import javafx.application.Platform;
 import javafx.fxml.FXML;
+import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
+import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
-import javafx.scene.control.ComboBox;
 import javafx.scene.control.ColorPicker;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.IndexRange;
@@ -99,13 +100,28 @@ public class MainController {
      * <p>候选项与命令在 {@link EditorStyleControls} 里装配——FXML 的 {@code onAction}
      * 只能绑无参方法，而这三个控件下发的命令都要带值，所以在 Java 侧接线。
      * 字号不在此列：它由 {@code size-up} / {@code size-down} 两个按钮驱动，见 {@link #onSizeUp()}。
+     *
+     * <p>字体与对齐都是 {@link MenuButton}（按钮下拉）：清单、含「当前生效哪一款」都收在弹层里，
+     * 工具条上只留一枚图标按钮，不会被一长串族名撑宽。
      */
     @FXML
-    private ComboBox<String> fontCombo;
+    private MenuButton fontButton;
     @FXML
     private ColorPicker colorPicker;
     @FXML
     private MenuButton alignButton;
+    /**
+     * 工具条上的撤销 / 重做按钮。
+     *
+     * <p>FXML 只给了它们 {@code id}（没有 {@code fx:id}），注入不进来，所以在
+     * {@link #buildEditorPipeline()} 里按 id 从 {@link #editorToolbar} 里捞出来。
+     *
+     * <p>这两个字段存在的唯一目的：交给 {@link StatusCoordinator} 跟着历史可用态亮灭。
+     * 工具条上的动作按钮带 {@code toolbar-action} 类、不参与「当前格式」点亮，于是它们
+     * 曾经既没有点亮态也没有可用态——永远可点、点了没反应（用户反馈的撤销/重做问题）。
+     */
+    private Button undoToolbarButton;
+    private Button redoToolbarButton;
     @FXML
     private TabPane editorTabs;
     /**
@@ -422,7 +438,7 @@ public class MainController {
         editorToolbarController = new EditorToolbarController(editorToolbar);
         // 样式控件（字体 / 文字颜色 / 对齐）：同样要先于会话构造——会话持它的方法引用。
         // 命令经 this::applyVisualFormat 出去，与十二个格式按钮走同一条路。
-        editorStyleControls = new EditorStyleControls(fontCombo, colorPicker, alignButton,
+        editorStyleControls = new EditorStyleControls(fontButton, colorPicker, alignButton,
                 this::applyVisualFormat);
         visualEditorSession = new VisualEditorSession(ctx, visualEditorView, contentArea,
                 this::currentChapter, this::previewBaseHref,
@@ -454,6 +470,31 @@ public class MainController {
 
         // 工具条文字换图标：图形 + Tooltip 由 ToolbarIcons 统一管理（见该类 javadoc）。
         ToolbarIcons.install(editorToolbar);
+
+        // 撤销 / 重做按钮按 id 捞出来，交给 StatusCoordinator 一起管可用态。
+        // 必须在这里捞（而不是等 createStatusCoordinator）：本方法先于它执行，
+        // 而那个构造点是「方法引用求值即须非空」的同一批硬约束。
+        undoToolbarButton = toolbarButton("undo");
+        redoToolbarButton = toolbarButton("redo");
+    }
+
+    /**
+     * 按 id 在编辑工具条里找按钮。
+     *
+     * <p>FXML 里这些按钮只写了 {@code id}（{@code Node.getId()}）而没有 {@code fx:id}，
+     * 注入不进控制器字段，只能这样捞。找不到返回 null——调用方一律按「没有这个控件」处理，
+     * 不让一个缺失的按钮升级成启动失败。
+     */
+    private Button toolbarButton(String id) {
+        if (editorToolbar == null) {
+            return null;
+        }
+        for (Node child : editorToolbar.getChildren()) {
+            if (child instanceof Button button && id.equals(button.getId())) {
+                return button;
+            }
+        }
+        return null;
     }
 
     /**
@@ -467,7 +508,7 @@ public class MainController {
                 errorStatusLabel, errorStatusDivider,
                 warningStatusLabel, warningStatusDivider,
                 chapterStatusLabel, wordStatusLabel, chapterWordStatusLabel,
-                undoItem, redoItem);
+                undoItem, redoItem, undoToolbarButton, redoToolbarButton);
     }
 
     /** 编辑类活动：插入命令入口 + 工作空间（新建 / 打开 / 最近）。 */

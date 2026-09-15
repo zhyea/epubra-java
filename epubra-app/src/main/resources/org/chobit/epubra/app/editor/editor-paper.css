@@ -1,8 +1,14 @@
     html, body { background: #faf9f5 !important; color: #2b2b28 !important; }
-    p, li, h1, h2, h3, h4, h5, h6, div, section, article, blockquote, td, th, span, figcaption { color: #2b2b28 !important; border-color: #dedbd2 !important; }
+    p, li, h1, h2, h3, h4, h5, h6, div, section, article, blockquote, td, th, span, figcaption { border-color: #dedbd2 !important; }
+    /* 文字颜色必须放过「自己带内联 color」的元素：样式表里的 !important 声明会压过内联
+       style，而工具条的文字颜色 / 清档正是往元素上写内联 color —— 少了这道 :not()，
+       作者选的颜色进了正文（源码区可见）却在画布上不变色。
+       边框仍按纸面口径强制：边框颜色不是工具条管的四类属性之一。 */
+    p:not([style*="color"]), li:not([style*="color"]), h1:not([style*="color"]), h2:not([style*="color"]), h3:not([style*="color"]), h4:not([style*="color"]), h5:not([style*="color"]), h6:not([style*="color"]), div:not([style*="color"]), section:not([style*="color"]), article:not([style*="color"]), blockquote:not([style*="color"]), td:not([style*="color"]), th:not([style*="color"]), span:not([style*="color"]), figcaption:not([style*="color"]) { color: #2b2b28 !important; }
     a { color: #1a5fb4 !important; }
     hr, table, th, td, pre, img { border-color: #dedbd2 !important; }
-    pre, code { background: #f1efe8 !important; color: #2b2b28 !important; }
+    pre, code { background: #f1efe8 !important; }
+    pre:not([style*="color"]), code:not([style*="color"]) { color: #2b2b28 !important; }
     ::selection { background: #cfe0f5 !important; color: #2b2b28 !important; }
     /* 滚动条：与目录侧栏同样的 7px 细条口径（WebView 的滚动条引擎自己画，
        JavaFX 样式表够不到，只能在这里用 ::-webkit-scrollbar 覆盖）。
