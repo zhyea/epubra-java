@@ -61,8 +61,27 @@ public final class VisualEditorSession {
     private final Consumer<String> toolbarState;
     private final Consumer<String> styleState;
 
-    /** 编辑视图当前内容是否<b>对应当前章节</b>；口径见类注释第 1 条。 */
+    /** 本次加载是否带实际章节内容（章节存在且有资源）；「页面内容对应当前章节」还要看加载序号。 */
     private boolean loaded;
+
+    /**
+     * 页面加载序号：{@code reload()} 每发起一次加载就 {@code ++loadSeq}；加载**完成**
+     * （loadWorker SUCCEEDED）时 {@code loadedSeq} 才追上来。两者相等 ⟺ 页面里的内容
+     * 就是当前章节的最新加载结果。
+     *
+     * <p>为什么必须有这层：{@code loadContent} 是<b>异步</b>的——撤销 / 重做回读后立刻
+     * 再按一次撤销，第二次的 {@link #flush()} 会从<b>还没重载完的旧文档</b>里拉内容写回书里，
+     * 等于把第一次撤销悄悄抹掉，还往撤销栈里塞一条幽灵快照；表现在用户那里就是
+     * 「多次撤销后重做的内容缺失、撤销像可以无限按」。所以加载完成前一律视为
+     * 「页面内容对不上当前章节」，flush / 命令全部拒绝执行。
+     */
+    private int loadSeq;
+    private int loadedSeq = -1;
+
+    /** 页面里的内容是否就是当前章节（本次加载带内容，且加载已完成）。 */
+    private boolean pageCurrent() {
+        return loaded && loadedSeq == loadSeq;
+    }
 
     public VisualEditorSession(BookContext ctx, WebView visualEditorView, TextArea contentArea,
                                Supplier<ChapterNode> currentChapter,
@@ -85,6 +104,11 @@ public final class VisualEditorSession {
         this.statusRefresh = statusRefresh;
         this.toolbarState = toolbarState;
         this.styleState = styleState;
+        visualEditorView.getEngine().getLoadWorker().stateProperty().addListener((obs, old, state) -> {
+            if (state == javafx.concurrent.Worker.State.SUCCEEDED) {
+                loadedSeq = loadSeq;
+            }
+        });
     }
 
     /**
@@ -111,6 +135,8 @@ public final class VisualEditorSession {
                 ? ""
                 : current.resource().asString();
         loaded = current != null && current.resource() != null;
+        // loadContent 异步：完成前 pageCurrent() 为假，flush / 命令一律拒绝（见字段注释）
+        loadSeq++;
         visualEditorView.getEngine().loadContent(
                 PreviewHtml.editableDocument(xhtml, theme.get(), baseHref.apply(current)),
                 "application/xhtml+xml");
@@ -121,14 +147,14 @@ public final class VisualEditorSession {
         loaded = false;
     }
 
-    /** 编辑视图里的内容是否对应当前章节。 */
+    /** 编辑视图里的内容是否对应当前章节（加载已完成；加载进行中一律视为不对应）。 */
     public boolean isLoaded() {
-        return loaded;
+        return pageCurrent();
     }
 
     /** 可视化编辑器是否可用于施加上下文命令（已加载完成且内容对应当前章节）。 */
     public boolean ready() {
-        return visualEditorView != null && loaded;
+        return visualEditorView != null && pageCurrent();
     }
 
     /**
@@ -139,7 +165,9 @@ public final class VisualEditorSession {
      * @return 是否确实写回了内容；调用方据此避免再用旧的源码文本覆盖
      */
     public boolean flush() {
-        if (visualEditorView == null || !loaded) {
+        // 页面还没重载完成时（撤销回读后紧接着的再撤销正落在这个窗口里），拉到的是
+        // 旧文档的内容——写回书里等于把刚做的撤销抹掉，还会记下幽灵快照
+        if (visualEditorView == null || !pageCurrent()) {
             return false;
         }
         try {
@@ -178,10 +206,12 @@ public final class VisualEditorSession {
      *
      * <p>kind 取值：{@code paragraph} / {@code heading} / {@code quote} / {@code list} /
      * {@code ol} / {@code rule} / {@code bold} / {@code italic} / {@code underline} /
-     * {@code strike} / {@code code} / {@code link} / {@code unlink}，全部是硬编码的 ASCII
-     * 字面量，可直接拼进脚本，无需转义。
+     * {@code strike} / {@code code} / {@code link} / {@code unlink} /
+     * {@code font} / {@code size} / {@code size-up} / {@code size-down} / {@code color} /
+     * {@code align} / {@code clear}，全部是硬编码的 ASCII 字面量，可直接拼进脚本，无需转义。
      *
-     * @param value 仅 {@code link} 需要（href）；经 {@code window} 上的临时成员传入
+     * @param value 仅 {@code link}（href）/ {@code font} / {@code size} / {@code color} /
+     *              {@code align} 需要；经 {@code window} 上的临时成员传入
      * @return 是否真的改了内容；false 表示编辑视图还没就绪或命令被拒绝
      */
     public boolean format(String kind, String value) {
@@ -235,6 +265,86 @@ public final class VisualEditorSession {
             return href instanceof String s ? s : "";
         } catch (RuntimeException notLoadedYet) {
             return "";
+        }
+    }
+
+    // ---------------------------------------------------------------- 查找 / 替换
+    //
+    // 查找条原来只作用在源码区 TextArea：可视化页签上点「查找」其实在隐藏的源码区里
+    // 选中了，页面上毫无可见变化（用户看到「查找没有生效」）。这里把查找 / 替换路由进
+    // 可视化编辑器；关键词与替换词经 window 临时成员传入，与格式命令同口径（不拼脚本）。
+
+    /** 查找条在 window 上的临时成员：关键词 / 替换词 / 大小写开关。 */
+    private static final String FIND_KEYWORD_MEMBER = "__epubraFindKeyword";
+    private static final String FIND_REPLACEMENT_MEMBER = "__epubraFindReplacement";
+    private static final String FIND_CASE_MEMBER = "__epubraFindCase";
+
+    /**
+     * 在可视化编辑器内查找下一处 / 上一处（含回绕），命中处选中并滚到可见。
+     *
+     * @param backward true = 上一个
+     * @return "hit"（直接命中）/ "wrap"（回绕命中）/ "miss"（未找到）；编辑视图未就绪返回 null
+     */
+    public String find(String keyword, boolean backward, boolean caseSensitive) {
+        String script = backward
+                ? "window.epubraFindPrev(window." + FIND_KEYWORD_MEMBER
+                        + ", window." + FIND_CASE_MEMBER + ")"
+                : "window.epubraFindNext(window." + FIND_KEYWORD_MEMBER
+                        + ", window." + FIND_CASE_MEMBER + ")";
+        Object out = callWithFindMembers(script, keyword, null, caseSensitive);
+        return out instanceof String s ? s : null;
+    }
+
+    /**
+     * 在可视化编辑器内替换当前选中的一处（选区文本与关键词一致才动手，与源码区同口径）。
+     *
+     * @return "hit"（已替换）/ "nomatch"（当前选区不是命中）/ "miss"（没有选区）；
+     *         编辑视图未就绪返回 null
+     */
+    public String replaceOne(String keyword, String replacement, boolean caseSensitive) {
+        String script = "window.epubraReplaceOne(window." + FIND_KEYWORD_MEMBER
+                + ", window." + FIND_REPLACEMENT_MEMBER
+                + ", window." + FIND_CASE_MEMBER + ")";
+        Object out = callWithFindMembers(script, keyword, replacement, caseSensitive);
+        return out instanceof String s ? s : null;
+    }
+
+    /**
+     * 在可视化编辑器内替换本章全部命中（命中可跨行内元素），改动经 push() 走既有回写。
+     *
+     * @return 命中数；编辑视图未就绪返回 -1
+     */
+    public int replaceAllInChapter(String keyword, String replacement, boolean caseSensitive) {
+        String script = "window.epubraReplaceAll(window." + FIND_KEYWORD_MEMBER
+                + ", window." + FIND_REPLACEMENT_MEMBER
+                + ", window." + FIND_CASE_MEMBER + ")";
+        Object out = callWithFindMembers(script, keyword, replacement, caseSensitive);
+        return out instanceof Number n ? n.intValue() : -1;
+    }
+
+    /** 查找类命令的公共通道：挂临时成员 → 执行 → 摘成员。 */
+    private Object callWithFindMembers(String script, String keyword,
+                                       String replacement, boolean caseSensitive) {
+        if (!ready()) {
+            return null;
+        }
+        try {
+            WebEngine engine = visualEditorView.getEngine();
+            JSObject window = (JSObject) engine.executeScript("window");
+            window.setMember(FIND_KEYWORD_MEMBER, keyword == null ? "" : keyword);
+            if (replacement != null) {
+                window.setMember(FIND_REPLACEMENT_MEMBER, replacement);
+            }
+            window.setMember(FIND_CASE_MEMBER, Boolean.valueOf(caseSensitive));
+            Object out = engine.executeScript(script);
+            window.setMember(FIND_KEYWORD_MEMBER, null);
+            window.setMember(FIND_CASE_MEMBER, null);
+            if (replacement != null) {
+                window.setMember(FIND_REPLACEMENT_MEMBER, null);
+            }
+            return out;
+        } catch (RuntimeException notLoadedYet) {
+            return null;
         }
     }
 

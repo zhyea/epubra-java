@@ -130,9 +130,9 @@ class VisualEditorTabUiTest {
             TabPane tabs = field(mainController, "editorTabs");
             FlowPane toolbar = field(mainController, "editorToolbar");
             assertNotNull(toolbar, "editorToolbar 字段应被 FXML 注入");
-            assertEquals(20, toolbar.getChildren().size(),
-                    "工具条应有 十二个格式按钮 + 图片/撤销/重做 + 放大字号/缩小字号 + 字体/文字颜色/对齐"
-                            + " 共二十个控件");
+            assertEquals(21, toolbar.getChildren().size(),
+                    "工具条应有 十二个格式按钮 + 清除格式 + 图片/撤销/重做"
+                            + " + 放大字号/缩小字号 + 字体/文字颜色/对齐 共二十一个控件");
 
             Node tabContent = tabs.getTabs().get(0).getContent();
             assertSame(tabContent, toolbar.getParent(),
@@ -176,16 +176,16 @@ class VisualEditorTabUiTest {
             // 「撤销 / 重做」是动作按钮（无「当前生效格式」可言），排在最后。
             assertEquals(java.util.List.of("paragraph", "heading", "size-up", "size-down",
                             "quote", "list", "ol", "rule",
-                            "bold", "italic", "underline", "strike", "code", "link",
+                            "bold", "italic", "underline", "strike", "code", "clear-format", "link",
                             "image", "undo", "redo"),
                     ids, "格式按钮的 id（= 格式名）与顺序必须与 window.epubraQuery() 的返回值一致");
 
-            // 「图片」「撤销」「重做」「放大/缩小字号」是动作按钮（弹文件选择器 / 走快照栈 /
-            // 相对跳档），不是格式状态：必须带 toolbar-action 标记，否则 updateToolbarState
-            // 会把它们当格式按钮参与点亮——而 epubraQuery 永远不会返回它们的 id，
-            // 它们就只是永不点亮的摆设（P3 修复的回归守卫）。
+            // 「图片」「撤销」「重做」「放大/缩小字号」「清除格式」是动作按钮（弹文件选择器 /
+            // 走快照栈 / 相对跳档 / 一次性清理），不是格式状态：必须带 toolbar-action 标记，
+            // 否则 updateToolbarState 会把它们当格式按钮参与点亮——而 epubraQuery 永远不会
+            // 返回它们的 id，它们就只是永不点亮的摆设（P3 修复的回归守卫）。
             java.util.Set<String> actions = java.util.Set.of(
-                    "image", "size-up", "size-down", "undo", "redo");
+                    "image", "size-up", "size-down", "undo", "redo", "clear-format");
             for (Node child : toolbar.getChildren()) {
                 if (!(child instanceof Button button)) {
                     continue;

@@ -637,10 +637,25 @@
     return null;
   }
 
+  // 选区的两个端点是不是落在**同一个块**里。行内包裹只在此时才合法：
+  // 一个 span 包住块级结构（span>p / span>ul）是非法 XHTML，回写进书结构就坏了。
+  function spansOneBlock(range) {
+    if (range.collapsed) { return true; }
+    var from = closestBlock(range.startContainer) || topBlock(range.startContainer);
+    var to = closestBlock(range.endContainer) || topBlock(range.endContainer);
+    return !!from && from === to;
+  }
+
   // 行内样式（字体 / 字号 / 颜色）：
-  //   有选区时包一层带 style 的 span（选区已完整落在一个 span 内则就地改它，
-  //   于是「先设字体再设颜色」落在同一层，不会套成 span 叠 span）；
-  //   光标收起时落到所在块上——用户改字体/颜色常常不划选，落在块上才有反馈。
+  //   光标收起时落到所在块上——用户改字体/颜色常常不划选，落在块上才有反馈；
+  //   有选区时按「选区整体」处理：先把选区内容取出来，在**片段**里剥掉同一属性，
+  //   再包一层带新值的 span 放回去。**不是**在原文档上就地 surroundContents——
+  //   选区端点常常切在既有样式元素中间（`前面<span 18px>正文内容</span>后面` 里
+  //   用户只选「文内」），就地包围会失败并退化成「抽出 → 插入」，抽出的片段里带着
+  //   **克隆的旧样式壳**，它嵌在新 span 的内层、旧值在内层胜出 —— 用户看到的就是
+  //   「点了没反应」（#72 收尾）。extractContents 自己负责把切在中间的旧样式元素拆开，
+  //   于是「只改选中的那一段」天然成立：未选中部分留在原元素上，选中部分得到新值。
+  //   选区完整落在一个 span 里时仍然就地改它——「先设字体再设颜色」落在同一层。
   function applyInlineStyle(prop, value) {
     var s = activeSelection();
     if (!s || !s.rangeCount) { return false; }
@@ -650,19 +665,39 @@
       if (block) { setStyleProp(block, prop, value); }
       return true;
     }
+    if (!spansOneBlock(range)) {
+      // 跨块选区：值落到选区触及的每个块上（与光标态同一落点），不产出包住段落的 span
+      var touched = touchedBlocks(range);
+      for (var i = 0; i < touched.length; i++) { setStyleProp(touched[i], prop, value); }
+      return true;
+    }
     var host = inlineStyleHost(range);
     if (host) { setStyleProp(host, prop, value); return true; }
+    var frag = range.extractContents();
+    if (hasBlockChild(frag)) {
+      // 兜底：片段里带了块级元素（手写源码里的非法嵌套）。不套 span，原样放回，
+      // 值落到块上——宁可粗一点，也不能把 span>p 写进正文
+      insertAtPoint(frag, range);
+      var fallback = touchedBlocks(range);
+      for (var k = 0; k < fallback.length; k++) { setStyleProp(fallback[k], prop, value); }
+      return true;
+    }
+    // 切在既有样式元素中间时先把它切开：不切的话放回去的内容仍落在它的「洞」里，
+    // 旧值继续罩着新值（见 splitManagedAncestors / liftToEnd）
+    splitManagedAncestors(range.startContainer, range.startOffset);
+    // 片段内已有的同一属性声明全部清掉：值统一由外层新建的这一层提供，
+    // 免得内层旧值在内侧胜出（这正是「同一样式再设一次无效」的另一半原因）
+    var inner = frag.querySelectorAll('*');
+    for (var j = 0; j < inner.length; j++) { setStyleProp(inner[j], prop, ''); }
     var el = makeTag('span');
     setStyleProp(el, prop, value);
-    if (!el.getAttribute('style')) { return true; }
-    try {
-      range.surroundContents(el);
-    } catch (err) {
-      el.appendChild(range.extractContents());
-      range.insertNode(el);
+    if (!el.getAttribute('style')) {
+      // 清档（「默认」）：片段上的声明已剥掉，不再包新层——也不留下空包裹
+      if (frag.firstChild) { insertAtPoint(frag, range); }
+      return true;
     }
-    // 清档（「默认」）时不留下空包裹：剥掉刚建的 span 还原原样
-    if (!el.getAttribute('style')) { unwrapEl(el); return true; }
+    el.appendChild(frag);
+    insertAtPoint(el, range);
     selectContents(el);
     return true;
   }
@@ -778,6 +813,314 @@
     return applyInlineStyle('font-size', next + 'px');
   }
 
+  // ---- 格式清除（工具条「清除格式」） ------------------------------
+  //
+  // 把选区上**工具条管得着的格式**全部去掉，回到干净正文：
+  //   · 行内声明 font-family / font-size / color；
+  //   · 块级声明 text-align；
+  //   · 强调类包裹 strong / em / u / del / code（含 b / i / s 这类别名写法）；
+  //   · 块结构：标题 / 引用 / 列表项 → 普通段落。
+  //
+  // **不动**：`<a>`（链接是语义不是格式）、作者自己写的非受管声明（text-indent 这类
+  // 排版信息）、`<img>` 等媒体、`<hr>` / `<pre>` / `<table>` 这类结构性元素、
+  // 带 class / id 的作者包裹（拆了属性就跟着没了，只清声明不拆元素）。
+  //
+  // 粒度与工具条其它块级命令一致（对齐 / 段落 / 列表）：**按「选区触及的块」处理**。
+  // 单块内的选区做「按选中内容」的精确清理；跨块选区逐块按整块处理（见 clearFormat）。
+  var EMPHASIS_TAGS = { strong: 1, em: 1, u: 1, del: 1, code: 1, b: 1, i: 1, s: 1 };
+
+  // 判定「这是不是行内元素」，只用来决定**切不切**。
+  // 块级元素（段落 / 列表 / div / 表格单元格…）上的声明属于整块，切块（把一个段落
+  // 劈成两段）不是清除格式该干的事；表外一律按行内处理（span / em / code / small…）。
+  var BLOCKISH = { p: 1, h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1, ul: 1, ol: 1, li: 1,
+                   blockquote: 1, pre: 1, div: 1, hr: 1, table: 1, thead: 1, tbody: 1,
+                   tfoot: 1, tr: 1, td: 1, th: 1, caption: 1, dl: 1, dt: 1, dd: 1,
+                   figure: 1, figcaption: 1, section: 1, article: 1, aside: 1, nav: 1,
+                   header: 1, footer: 1, main: 1, form: 1, fieldset: 1, address: 1 };
+
+  function isInlineElement(el) {
+    var t = tagOf(el);
+    return !!t && !BLOCKISH[t];
+  }
+
+  // 元素身上有没有受管的**行内**声明（字体 / 字号 / 颜色）。
+  // 块级对齐写在块上，不参与「行内样式载体」的判定。
+  function hasManagedInlineStyle(el) {
+    var props = readStyle(el);
+    for (var k in INLINE_STYLE_PROPS) { if (props[k]) { return true; } }
+    return false;
+  }
+
+  // 清掉元素上的受管行内声明，其余声明（含作者自己的 text-indent 等）原样保留。
+  // 声明全清空时 writeStyle 会把 style 属性整个摘掉。
+  function stripManagedInline(el) {
+    var props = readStyle(el);
+    for (var k in INLINE_STYLE_PROPS) { delete props[k]; }
+    writeStyle(el, props);
+  }
+
+  // 把 el 在 (node, offset) 处一分为二：切点之后的内容移进一个克隆（插到 el 之后），
+  // 克隆保留 el 的属性（style / class…），于是切完两半的原样式都还在。
+  // 深层切点交给 extractContents 处理（它会克隆路径上的中间元素）——手写这套拆分
+  // 很容易在文本节点 / 嵌套元素上出错，让 DOM 自己算才可靠。
+  function splitElementAt(el, node, offset) {
+    if (!el || !el.parentNode) { return null; }
+    var left = document.createRange();
+    left.setStart(el, 0);
+    left.setEnd(node, offset);
+    if (left.collapsed) { return null; }            // 切点就在 el 开头，不用切
+    var right = document.createRange();
+    right.setStart(node, offset);
+    right.setEnd(el, el.childNodes.length);
+    if (right.collapsed) { return null; }           // 切点在 el 末尾，不用切
+    var clone = el.cloneNode(false);
+    clone.appendChild(right.extractContents());
+    el.parentNode.insertBefore(clone, el.nextSibling);
+    return clone;
+  }
+
+  // 在（折叠的）切点上把带受管行内样式的**行内**祖先一分为二。
+  // 清除格式必须做这一步：选区端点常常切在旧样式元素中间，不切的话，取出来再放回去的
+  // 内容仍落在那个元素的「洞」里，照样继承旧值——用户看到「清不掉」。
+  // 链上从内到外逐个切：切内层不会动到外层（内容的前半段始终留在原位），
+  // 所以同一个 (node, offset) 对每一层都成立。
+  // 切开之后那半段（克隆）插在原元素之后，落点仍是「原元素的内部末尾」——
+  // 所以放回内容必须走 insertAtPoint（liftToEnd 会把落点提到克隆之前）。
+  function splitManagedAncestors(node, offset) {
+    var el = (node && node.nodeType === 1) ? node : (node ? node.parentNode : null);
+    var chain = [];
+    for (var n = el; n && n !== document.body; n = n.parentNode) {
+      if (isInlineElement(n) && hasManagedInlineStyle(n)) { chain.push(n); }
+    }
+    for (var i = 0; i < chain.length; i++) { splitElementAt(chain[i], node, offset); }
+  }
+
+  // 裸的强调类包裹直接拆掉（keep text）。带 class / id 的是作者自己的语义，
+  // 拆了属性就跟着没了——那种只清声明、保留元素。
+  function unwrapEmphasisIfBare(el) {
+    if (EMPHASIS_TAGS[tagOf(el)] && styleOnly(el) && el.parentNode) { unwrapEl(el); }
+  }
+
+  // 选区取出来的那一小片：清受管声明 + 拆强调包裹。
+  // 只在片段上跑，所以碰不到未选中的部分——这正是「拆分」想要的粒度。
+  // querySelectorAll 是**静态**快照（getElementsByTagName 是实时的，边拆边遍历会漏元素）。
+  function cleanFragment(frag) {
+    var els = frag.querySelectorAll('*');
+    for (var i = 0; i < els.length; i++) { stripManagedInline(els[i]); }
+    for (var j = 0; j < els.length; j++) { unwrapEmphasisIfBare(els[j]); }
+  }
+
+  // li → p：摘出列表，作为段落落在列表之后（与 formatBlock('p') 对列表项的处理同一口径）。
+  // li 里的块级孩子（Tab 缩进的子列表等）不能进段落——摘出来跟在后面。
+  function liToParagraph(li) {
+    var list = li.parentNode;
+    if (!list || !isList(list)) { return null; }
+    var p = makeTag('p');
+    // 同 resetBlockFormat：作者在 li 上写的非受管声明跟着搬进新段落
+    var foreign = splitStyle(li).foreign;
+    if (foreign.length) { p.setAttribute('style', foreign.join('; ')); }
+    var blocks = pullOutBlocks(li);
+    moveChildren(li, p);
+    list.parentNode.insertBefore(p, list.nextSibling);
+    appendBlocksAfter(blocks, p);
+    list.removeChild(li);
+    if (!list.querySelector('li')) { list.parentNode.removeChild(list); }
+    return p;
+  }
+
+  // node 在父节点里的位置 + 1（=「node 之后」那个折点的 offset）
+  function indexAfter(node) {
+    var at = 0;
+    for (var c = node.previousSibling; c; c = c.previousSibling) { at++; }
+    return at + 1;
+  }
+
+  // 折点落在带样式的**行内**元素末尾时，把落点逐层提到它外面。
+  //
+  // 为什么必须提：`(span, span.childNodes.length)` 与 `(span.parentNode, indexOf(span)+1)`
+  // 是同一个 DOM 位置，但 insertNode 的语义完全不同——前者把内容塞进 span **里面**
+  // （照样吃它的样式），后者才落在它外面。清除格式要求内容必须在样式元素外面，否则
+  // 用户看到「清不掉」；「同一样式再设一次」也会因此退化成嵌套壳（#72 收尾）。
+  // 只对行内元素提：块上的声明属于整块，内容不该被搬出段落。
+  // 折点也可能落在**文本节点**的末尾（抽取正文中段时最典型）：`(text, text.length)`
+  // 与「父元素里 text 之后的那个折点」是同一个 DOM 位置，但 insertNode 会把内容塞进
+  // 父元素**里面**。safari 系的实现里 extractContents 之后收起的 Range 正是这种形态，
+  // 所以只认元素节点会让「选中间几个字」这条路径整条漏掉（清除/改字号都清不掉）。
+  // 每一层都要求「折点恰好在末尾」才是**同一个位置**的等价改写；中途不是末尾就停——
+  // 那种折点是真的在行内元素内部，搬出去会把内容移过后面的兄弟节点（位置就变了）。
+  function liftToEnd(node, offset) {
+    var n = node;
+    var at = offset;
+    while (n) {
+      var parent = n.parentNode;
+      if (!parent || parent.nodeType !== 1) { break; }
+      var atEnd = (n.nodeType === 1) ? (at === n.childNodes.length) : (at === n.nodeValue.length);
+      if (!atEnd) { break; }
+      if (n.nodeType === 1) {
+        // 元素：前提是它本身是行内容器（块上的声明属于整块，内容不该被搬出段落）
+        if (!isInlineElement(n)) { break; }
+      } else if (!isInlineElement(parent)) {
+        // 文本节点直接躺在块里（<p>文字|</p>）：折点本来就不在任何行内容器内部，不必提
+        break;
+      }
+      // 提到父节点里「紧跟 n 之后」那个折点——与 (n, 末尾) 是同一个位置，
+      // 但 insertNode 的语义从「n 里面」变成「n 外面」。注意下一步要走到 **parent**：
+      // 元素节点上写成 n 自己会原地打转，offset 被多加一格 → setStart 越界。
+      at = indexAfter(n);
+      n = parent;
+    }
+    return { node: n, offset: at };
+  }
+
+  // 把片段插到（折叠的）折点上，落点先经 liftToEnd 提到样式元素外面
+  function insertAtPoint(frag, range) {
+    var at = liftToEnd(range.startContainer, range.startOffset);
+    var box = document.createRange();
+    box.setStart(at.node, at.offset);
+    box.collapse(true);
+    box.insertNode(frag);
+  }
+
+  // 选区端点直接落在**节点自身**（而不是父节点的索引上）：随后的块结构替换会把子节点
+  // 搬进新块里，端点在父节点上的 Range 会随父节点一起失效，落在节点上的不会。
+  function selectBetween(first, last) {
+    var s = activeSelection();
+    if (!s || !first || !last) { return; }
+    var r = document.createRange();
+    r.setStart(first, 0);
+    r.setEnd(last, last.nodeType === 3 ? last.nodeValue.length : last.childNodes.length);
+    s.removeAllRanges();
+    s.addRange(r);
+  }
+
+  // 选区**整块**覆盖的块：只有这种块才连它自己声明的样式一起清。
+  // 部分覆盖的块不动它的声明——那些声明作用于整块，清掉会连累没选中的文字。
+  function fullyCoveredBlocks(range, blocks) {
+    var out = [];
+    for (var i = 0; i < blocks.length; i++) {
+      if (fullyCovers(range, blocks[i])) { out.push(blocks[i]); }
+    }
+    return out;
+  }
+
+  // 块结构退回普通段落 + 清掉块级受管声明（对齐）。
+  // 列表 → 每个 li 各转一段；标题 / 引用 → p；段落 / 分隔线 / 代码块 / 表格 / div
+  // 是**结构**不是格式，原样保留。返回处理后的块（被替换时是新元素），无法处理返回 null。
+  function resetBlockFormat(block) {
+    if (!block || !block.parentNode) { return null; }
+    setStyleProp(block, 'text-align', '');
+    var t = tagOf(block);
+    if (isList(block)) { return listToBlocks(block) || null; }
+    if (t === 'li') { return liToParagraph(block); }
+    if (t === 'p' || t === 'hr' || t === 'pre' || t === 'table' || t === 'div') { return block; }
+    var fresh = makeTag('p');
+    // 作者自己的非受管声明（text-indent 这类排版信息）跟着块一起搬过去——
+    // 换标签不是丢排版信息的理由。受管的四类不搬：对齐在上面已清掉，
+    // 行内三类由调用方按「整块是否都在选区里」决定清不清。
+    var foreign = splitStyle(block).foreign;
+    if (foreign.length) { fresh.setAttribute('style', foreign.join('; ')); }
+    var moved = pullOutBlocks(block);
+    moveChildren(block, fresh);
+    block.parentNode.replaceChild(fresh, block);
+    appendBlocksAfter(moved, fresh);
+    // 块里只有块级孩子（引用套段落这种）时新段落是空壳——空段落是噪音，不留
+    if (isEmptyParagraph(fresh)) {
+      fresh.parentNode.removeChild(fresh);
+      return moved.length ? moved[0] : null;
+    }
+    return fresh;
+  }
+
+  // 「块结构退回段落」的落点 = 选区触及的**格式块**：引用 / 标题 / 列表项。
+  //
+  // 刻意不把 `<ul>` / `<ol>` 当目标：整列表退回段落会把**没选中的列表项**一起转掉
+  // （用户选了十项里的一项，十项全变成段落）。列表项本身才是格式块，选中哪几项就退哪几项，
+  // 与「段落」按钮对列表项的处理同一口径（formatBlock 把 li 摘出来变成一个 p）。
+  // 段落 / div 不是格式，不进目标；引用块里套的段落也不必进来——引用块整体换成段落时，
+  // 里面的块级孩子会被摘出来跟在后面，结构照样合法。
+  var FORMAT_BLOCKS = 'blockquote,h1,h2,h3,h4,h5,h6,li';
+
+  function structureTargets(range) {
+    var out = [];
+    if (range.collapsed) {
+      var one = closestBlock(range.startContainer) || topBlock(range.startContainer);
+      if (one) { out.push(one); }
+      return out;
+    }
+    var els = document.body.querySelectorAll(FORMAT_BLOCKS);
+    for (var i = 0; i < els.length; i++) {
+      if (range.intersectsNode(els[i])) { out.push(els[i]); }
+    }
+    return out;
+  }
+
+  // 选区范围内（原文档上）逐个元素清：受管行内声明 + 裸的强调包裹。
+  // 用于跨块选区——那种选区不做「取出 → 放回」（块级结构来回搬会错位）。
+  // 注意粒度：跨块选区按**块粒度**清理，边界上被切到的元素会连未选中部分一起去掉声明；
+  // 单块选区不走这条路，那里是按选中内容精确清的（见 clearFormat）。
+  function stripFormatWithin(range) {
+    var els = document.body.querySelectorAll('*');
+    for (var i = 0; i < els.length; i++) {
+      if (!range.intersectsNode(els[i])) { continue; }
+      stripManagedInline(els[i]);
+      unwrapEmphasisIfBare(els[i]);
+    }
+  }
+
+  function clearFormat() {
+    var s = activeSelection();
+    if (!s || !s.rangeCount) { return false; }
+    var range = s.getRangeAt(0);
+    // 块结构稍后要整体替换（重置返回的是新元素），先把落点定格下来
+    var structures = structureTargets(range);
+
+    if (range.collapsed) {
+      // 光标态：没有「选中的一段」可分，清理落在光标链上的每一层
+      //（强调包裹 + 受管声明），块结构与对齐落到光标所在的块。
+      // 链要先收成数组：拆掉一层会让它的 parentNode 变成 null，边走边拆会当场断在半路，
+      // 块上的声明就漏掉了（光标在 <p style=…><strong>x</strong></p> 里时踩实过）。
+      var chain = [];
+      var el = (range.startContainer.nodeType === 1)
+              ? range.startContainer : range.startContainer.parentNode;
+      for (var n = el; n && n !== document.body; n = n.parentNode) { chain.push(n); }
+      for (var i = 0; i < chain.length; i++) {
+        if (chain[i].nodeType !== 1) { continue; }
+        stripManagedInline(chain[i]);
+        unwrapEmphasisIfBare(chain[i]);
+      }
+      for (var b = 0; b < structures.length; b++) {
+        var after = resetBlockFormat(structures[b]);
+        // 块被换成新元素时原 Range 落在已脱离文档的旧块上，把光标挪进新块
+        if (after && after !== structures[b]) { collapseInto(after); }
+      }
+      return true;
+    }
+
+    if (!spansOneBlock(range)) {
+      stripFormatWithin(range);
+      for (var c = 0; c < structures.length; c++) { resetBlockFormat(structures[c]); }
+      return true;
+    }
+
+    var full = fullyCoveredBlocks(range, touchedBlocks(range));
+    // 整块都在选区里的块：块**自己**的受管行内声明也清掉（只清它不影响没选中的文字）。
+    // 必须在块结构替换之前做——替换之后旧元素已脱离文档，再清它等于没清。
+    for (var e = 0; e < full.length; e++) { stripManagedInline(full[e]); }
+    var frag = range.extractContents();
+    // 取出来之后只剩一个折点：此时把带受管样式的行内祖先切开，选中的内容才可能脱离
+    // 旧样式（见 splitManagedAncestors）。不切的话放回去的内容仍落在那个元素的「洞」里。
+    splitManagedAncestors(range.startContainer, range.startOffset);
+    cleanFragment(frag);
+    var first = frag.firstChild;
+    var last = frag.lastChild;
+    if (first) { insertAtPoint(frag, range); }
+    // 块结构退回段落放在内容放回**之后**：替换块元素会把子节点搬进新块，
+    // 先放回、后替换，内容才跟着一起搬过去
+    for (var d = 0; d < structures.length; d++) { resetBlockFormat(structures[d]); }
+    if (first) { selectBetween(first, last); }
+    return true;
+  }
+
   // ---- 命令表（工具条 / 快捷键共用） ------------------------------
   window.epubraFormat = function (kind, value) {
     var ok = false;
@@ -801,6 +1144,8 @@
     else if (kind === 'size-down') { ok = stepFontSize(-1); }
     else if (kind === 'color') { ok = applyInlineStyle('color', value); }
     else if (kind === 'align') { ok = applyBlockStyle('text-align', value); }
+    // 清除格式：一次清掉受控四类声明 + 强调类包裹 + 块结构（详见 clearFormat）
+    else if (kind === 'clear') { ok = clearFormat(); }
     if (ok) { push(); }
     return ok;
   };
@@ -1201,6 +1546,177 @@
   //
   // 返回 false 会让 Java 侧退回源码区再插一次（切 tab 时 flush 会把章节冲掉），
   // 所以「排版策略不成立」不能返回 false——那种情况一律退回内联插入。
+  // ---- 查找 / 替换（可视化编辑器内） ------------------------------
+  //
+  // 查找条原来只作用在源码区 TextArea：可视化页签上点「查找」其实在隐藏的源码区里
+  // 选中了，页面上毫无可见变化（用户看到「查找没有生效」）。这里把同一套语义
+  // （正向 / 反向 + 回绕 + 区分大小写）搬到 DOM 上：正文展开成纯文本做索引推进，
+  // 命中后映射回文本节点，用 Range 选中并滚到可见；替换改动经 push() 走既有回写。
+  //
+  // 关键词 / 替换词经 window 临时成员传入（与格式命令同口径），不拼进脚本字符串。
+
+  // 正文全部文本节点 + 各自的纯文本起点：索引推进在纯文本上做，命中再映射回来
+  function buildTextMap() {
+    var nodes = [];
+    var text = '';
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+    var n;
+    while ((n = walker.nextNode())) {
+      if (!n.nodeValue) { continue; }
+      nodes.push({ node: n, start: text.length });
+      text += n.nodeValue;
+    }
+    return { nodes: nodes, text: text };
+  }
+
+  // 纯文本全局索引 → (文本节点, 节点内偏移)。二分找「起点 <= index 的最后一个」条目
+  function locateInMap(map, index) {
+    var lo = 0;
+    var hi = map.nodes.length - 1;
+    while (lo < hi) {
+      var mid = (lo + hi + 1) >> 1;
+      if (map.nodes[mid].start <= index) { lo = mid; } else { hi = mid - 1; }
+    }
+    var entry = map.nodes[lo];
+    return { node: entry.node, offset: index - entry.start };
+  }
+
+  // (node, offset) 折点 → 纯文本全局索引。文本节点直接按登记序号；
+  // 元素上的折点取「第一个不早于折点的文本节点」的开头（正文末尾折点返回总长）。
+  function globalIndexAt(node, offset, map) {
+    if (node && node.nodeType === 3) {
+      for (var i = 0; i < map.nodes.length; i++) {
+        if (map.nodes[i].node === node) { return map.nodes[i].start + offset; }
+      }
+    }
+    if (!node) { return 0; }
+    if (offset > node.childNodes.length) { offset = node.childNodes.length; }
+    var probe = document.createRange();
+    probe.setStart(node, offset);
+    probe.collapse(true);
+    for (var j = 0; j < map.nodes.length; j++) {
+      if (probe.comparePoint(map.nodes[j].node, 0) >= 0) { return map.nodes[j].start; }
+    }
+    return map.text.length;
+  }
+
+  function indexOfCs(text, kw, from, cs) {
+    if (from > text.length) { from = text.length; }
+    if (from < 0) { from = 0; }
+    return cs ? text.indexOf(kw, from) : text.toLowerCase().indexOf(kw.toLowerCase(), from);
+  }
+
+  // 与源码区 TextSearch.lastIndexOf 同口径：from 是匹配**起点**允许的最大索引
+  function lastIndexOfCs(text, kw, from, cs) {
+    if (from > text.length - 1) { from = text.length - 1; }
+    if (from < 0) { return -1; }
+    return cs ? text.lastIndexOf(kw, from) : text.toLowerCase().lastIndexOf(kw.toLowerCase(), from);
+  }
+
+  // 当前选区在纯文本里的推进起点：正向从选区末尾（跳过当前命中），反向从选区开头 - 1
+  function selectionIndex(map, backward) {
+    var s = activeSelection();
+    if (!s || !s.rangeCount) { return backward ? map.text.length - 1 : 0; }
+    var r = s.getRangeAt(0);
+    if (backward) {
+      return globalIndexAt(r.startContainer, r.startOffset, map) - 1;
+    }
+    return globalIndexAt(r.endContainer, r.endOffset, map);
+  }
+
+  // 选中命中并滚到可见。注意不能走 activeSelection()——它要求 rangeCount>=1，
+  // 而「从未点进正文 / 查找条刚打开」时选区是空的（rangeCount==0），那正是第一次
+  // 查找的场景；window.getSelection() 本身此时依然有效，addRange 照常工作。
+  function selectHit(map, idx, len) {
+    var a = locateInMap(map, idx);
+    var b = locateInMap(map, idx + len);
+    var r = document.createRange();
+    r.setStart(a.node, a.offset);
+    r.setEnd(b.node, b.offset);
+    var s = window.getSelection();
+    if (!s) { return; }
+    s.removeAllRanges();
+    s.addRange(r);
+    var el = (b.node.nodeType === 1) ? b.node : b.node.parentNode;
+    if (el && el.scrollIntoView) {
+      try { el.scrollIntoView({ block: 'center' }); } catch (err) { el.scrollIntoView(); }
+    }
+  }
+
+  // 返回 "hit"（直接命中）/ "wrap"（回绕命中）/ "miss"（未找到）
+  window.epubraFindNext = function (kw, cs) {
+    if (!kw) { return 'miss'; }
+    var map = buildTextMap();
+    var from = selectionIndex(map, false);
+    var idx = indexOfCs(map.text, kw, from, cs);
+    var wrapped = false;
+    if (idx < 0) { idx = indexOfCs(map.text, kw, 0, cs); wrapped = idx >= 0; }
+    if (idx < 0) { return 'miss'; }
+    selectHit(map, idx, kw.length);
+    return wrapped ? 'wrap' : 'hit';
+  };
+
+  window.epubraFindPrev = function (kw, cs) {
+    if (!kw) { return 'miss'; }
+    var map = buildTextMap();
+    var from = selectionIndex(map, true);
+    var idx = lastIndexOfCs(map.text, kw, from, cs);
+    var wrapped = false;
+    if (idx < 0) { idx = lastIndexOfCs(map.text, kw, map.text.length - 1, cs); wrapped = idx >= 0; }
+    if (idx < 0) { return 'miss'; }
+    selectHit(map, idx, kw.length);
+    return wrapped ? 'wrap' : 'hit';
+  };
+
+  // 替换当前选中的一处：选区文本与关键词一致才动手（与源码区 replaceOne 同口径）。
+  // 返回 "hit" / "nomatch"（当前选区不是命中）/ "miss"（没有选区）。
+  window.epubraReplaceOne = function (kw, replacement, cs) {
+    if (!kw) { return 'miss'; }
+    var s = activeSelection();
+    if (!s || !s.rangeCount) { return 'miss'; }
+    var r = s.getRangeAt(0);
+    var selected = r.toString();
+    var hit = cs ? (selected === kw) : (selected.toLowerCase() === kw.toLowerCase());
+    if (!selected || !hit) { return 'nomatch'; }
+    r.deleteContents();
+    var t = document.createTextNode(replacement);
+    r.insertNode(t);
+    var after = document.createRange();
+    after.setStart(t, 0);
+    after.setEnd(t, replacement.length);
+    s.removeAllRanges();
+    s.addRange(after);
+    push();
+    return 'hit';
+  };
+
+  // 替换本章全部命中，返回命中数。命中可跨行内元素（如「第一<b>段</b>」里的「第一段」）：
+  // 定位与替换都走 Range，从最后一个命中往前替换，前面的索引不受影响。
+  window.epubraReplaceAll = function (kw, replacement, cs) {
+    if (!kw) { return 0; }
+    var map = buildTextMap();
+    var haystack = cs ? map.text : map.text.toLowerCase();
+    var needle = cs ? kw : kw.toLowerCase();
+    var hits = [];
+    var at = haystack.indexOf(needle);
+    while (at >= 0) {
+      hits.push(at);
+      at = haystack.indexOf(needle, at + needle.length);
+    }
+    if (!hits.length) { return 0; }
+    for (var i = hits.length - 1; i >= 0; i--) {
+      var a = locateInMap(map, hits[i]);
+      var b = locateInMap(map, hits[i] + kw.length);
+      var r = document.createRange();
+      r.setStart(a.node, a.offset);
+      r.setEnd(b.node, b.offset);
+      r.deleteContents();
+      r.insertNode(document.createTextNode(replacement));
+    }
+    push();
+    return hits.length;
+  };
+
   window.epubraInsertHtml = function (html) {
     if (!html) { return false; }
     var s = activeSelection();

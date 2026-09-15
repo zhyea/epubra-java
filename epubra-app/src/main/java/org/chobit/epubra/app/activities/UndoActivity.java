@@ -38,6 +38,9 @@ public class UndoActivity {
     private Runnable flushCurrentChapter;
     private Runnable flushMetadata;
 
+    /** {@link #finishEditStep()} 的重入护栏（flush 链可能再次触发计时器，但不该递归落盘）。 */
+    private boolean finishingStep;
+
     public UndoActivity(BookContext ctx, StatusSink status) {
         this(ctx, status, () -> {});
     }
@@ -48,7 +51,7 @@ public class UndoActivity {
         this.status = status;
         this.validationClearer = validationClearer;
         this.editStepPause = new PauseTransition(Duration.millis(ctx.editStepIdle().toMillis()));
-        this.editStepPause.setOnFinished(event -> ctx.setEditCaptured(false));
+        this.editStepPause.setOnFinished(event -> finishEditStep());
     }
 
     /**
@@ -69,7 +72,7 @@ public class UndoActivity {
             this.editStepPause = null; // 见 playEditStepTimer
         } else {
             this.editStepPause = new PauseTransition(Duration.millis(ctx.editStepIdle().toMillis()));
-            this.editStepPause.setOnFinished(event -> ctx.setEditCaptured(false));
+            this.editStepPause.setOnFinished(event -> finishEditStep());
         }
     }
 
@@ -82,6 +85,9 @@ public class UndoActivity {
         commitPendingEdits();
         BookHistory.Snapshot snapshot = ctx.history().undo(ctx.book(), ctx.dirty());
         if (snapshot == null) {
+            // 与上方守卫同一口径，**不再静默返回**：canUndo() 刚过却拿不到快照，
+            // 说明这条命令确实没生效。静默的话用户看到的是「按了没反应」。
+            status.setStatus("没有可撤销的操作");
             return;
         }
         restore(snapshot, "已撤销");
@@ -93,9 +99,13 @@ public class UndoActivity {
             status.setStatus("没有可重做的操作");
             return;
         }
+        // commitPendingEdits() 会先 flush 界面上的待提交编辑；若这次 flush 记入了一条新的
+        // 历史记录，BookHistory.record 会清空重做栈（有了新分支，重做不再成立），
+        // 于是下面的 redo() 返回 null。这是真实可达路径，必须给反馈而不是静默返回。
         commitPendingEdits();
         BookHistory.Snapshot snapshot = ctx.history().redo(ctx.book(), ctx.dirty());
         if (snapshot == null) {
+            status.setStatus("没有可重做的操作");
             return;
         }
         restore(snapshot, "已重做");
@@ -174,6 +184,30 @@ public class UndoActivity {
         if (editStepPause != null) {
             editStepPause.playFromStart();
         }
+    }
+
+    /**
+     * 编辑步结束（静默期到点）：先把界面上的待写回内容落进 book，再结束编辑步。
+     * headless 构造没有计时器，测试直接调本方法模拟静默期到点。
+     *
+     * <p>**为什么必须先落盘**：编辑步的「变更前」快照在<b>步首</b>就记下了，此刻界面上的
+     * 待写回内容属于本步，落盘不另记快照（flush 链里的 onTextInput 看到
+     * {@code editCaptured} 仍为 true 会跳过记录）。不落的话 book 一直滞留在上一步之前的值，
+     * 下一个编辑步步首记到的「变更前状态」就还是更旧的旧值——连续几个输入步会在撤销栈里
+     * 堆出<b>重复的陈旧快照</b>：撤销按很多次都在同几个状态之间打转（用户看到「可以无限撤销」），
+     * 重做时这些陈旧状态又被逐个弹回（用户看到「重做的内容缺失」）。
+     */
+    void finishEditStep() {
+        if (finishingStep) {
+            return;
+        }
+        finishingStep = true;
+        try {
+            commitPendingEdits();
+        } finally {
+            finishingStep = false;
+        }
+        ctx.setEditCaptured(false);
     }
 
     // ---- 单元测试 / 未来编程入口 ----

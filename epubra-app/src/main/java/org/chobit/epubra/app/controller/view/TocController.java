@@ -147,6 +147,14 @@ public class TocController {
     // ---- FXML 入口 ----
 
     public void onAddChapter() {
+        // 守卫必须在 beginChange **之前**：先拍快照再退出会在历史里留下一条无对应变更的记录，
+        // 用户按撤销会「什么都没变」。当前书架态下「章节」菜单是收起的（EditorShellActivity），
+        // 所以这条路正常碰不到——但菜单显隐一旦调整、或该命令被快捷键 / 右键 / 自动化调到，
+        // 就会把 NPE 抛到 FX 事件线程，表现为「按了没反应」。与 onDeleteChapter 同形守卫。
+        if (ctx.book() == null) {
+            warner.warn("请先打开或新建一本图书");
+            return;
+        }
         beginChange.run();
         String title = "第 " + (ctx.book().spine().size() + 1) + " 章";
         Resource chapter = ctx.book().addChapter(title, null);

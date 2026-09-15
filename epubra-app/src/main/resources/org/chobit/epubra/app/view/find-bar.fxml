@@ -10,8 +10,14 @@
 <!--
   查找替换条：默认隐藏，Ctrl+F 唤出。由 main-window.fxml 以
   <fx:include fx:id="findBar"/> 引入，控制器实例注入父控制器的 findBarController 字段。
+
+  ⚠ 根节点必须带 fx:id="findBar"：fx:include 的 fx:id 只负责把根节点注入**父控制器**的
+  同名字段，子控制器（FindController）自己的 findBar 字段仍由**本文件**的 fx:id 注入。
+  漏掉它时 FindController.findBar 恒为 null，showBar() / closeBar() 会静默返回——
+  症状是「Ctrl+F 与菜单『查找替换…』点了没反应，Esc 也关不掉」（2026-09-15 修复）。
 -->
 <HBox xmlns="http://javafx.com/javafx/24" xmlns:fx="http://javafx.com/fxml"
+      fx:id="findBar"
       styleClass="find-bar" spacing="6.0" alignment="CENTER_LEFT"
       visible="false" managed="false"
       fx:controller="org.chobit.epubra.app.controller.view.FindController">

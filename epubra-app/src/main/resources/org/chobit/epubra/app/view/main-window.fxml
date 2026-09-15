@@ -2,6 +2,7 @@
 
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
+<?import javafx.scene.control.CheckMenuItem?>
 <?import javafx.scene.control.ColorPicker?>
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
@@ -103,7 +104,10 @@
                     <items>
                         <MenuItem fx:id="refreshPreviewItem" text="刷新预览" onAction="#onRefreshPreview"/>
                         <SeparatorMenuItem fx:id="previewSeparatorTop"/>
-                        <MenuItem fx:id="splitPreviewItem" text="并排预览" onAction="#onToggleSplitPreview"/>
+                        <!-- 勾选态菜单项（CheckMenuItem）：文字固定「并排预览」，当前是否开启看勾选。
+                             不用「开启中改文字为『标签预览』」那套翻转式文字——文字应表达「这是什么」，
+                             而不是「点了会怎样」；翻转文字还会让按文字定位的代码/测试在开关一次后失效。 -->
+                        <CheckMenuItem fx:id="splitPreviewItem" text="并排预览" onAction="#onToggleSplitPreview"/>
                         <SeparatorMenuItem fx:id="previewSeparatorBottom"/>
                         <RadioMenuItem fx:id="themeLightItem" text="浅色" onAction="#onThemeLight"
                                        selected="true">
@@ -310,6 +314,15 @@
                                                                 onAction="#onInsertStrike"/>
                                                         <Button id="code" text="行内代码" styleClass="flat-button"
                                                                 onAction="#onInsertCode"/>
+                                                        <!-- 清除格式：紧跟「行内代码」——两者都在「行内」这一组里
+                                                             收尾（前者加、后者清）。一次清掉受控四类声明
+                                                             （字体/字号/颜色/对齐）、强调类包裹与块结构，
+                                                             口径见 editor-script.js 的 clearFormat。
+                                                             toolbar-action = 动作按钮：它没有「当前光标处
+                                                             格式已生效」的状态，updateToolbarState 会跳过它。 -->
+                                                        <Button id="clear-format" text="清除格式"
+                                                                styleClass="flat-button, toolbar-action"
+                                                                onAction="#onClearFormat"/>
                                                         <Button id="link" text="链接" styleClass="flat-button"
                                                                 onAction="#onInsertLink"/>
                                                         <!-- 图片与菜单「插入 → 插入图片」同一个入口（从已导入资源里选），

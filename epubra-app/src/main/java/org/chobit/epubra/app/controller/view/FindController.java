@@ -3,6 +3,7 @@ package org.chobit.epubra.app.controller.view;
 import org.chobit.epubra.app.context.BookContext;
 import org.chobit.epubra.app.editor.FindOps;
 import org.chobit.epubra.app.editor.TextSearch;
+import org.chobit.epubra.app.editor.VisualEditorSession;
 import org.chobit.epubra.lib.domain.Resource;
 import javafx.fxml.FXML;
 import javafx.scene.control.CheckBox;
@@ -46,6 +47,10 @@ public class FindController {
 
     private BookContext ctx;
     private TextArea contentArea;
+    /** 可视化编辑会话：可视化页签激活时查找 / 替换路由进 WebView，而不是隐藏的源码区。 */
+    private VisualEditorSession visualSession;
+    /** 当前是否停在可视化编辑页签。 */
+    private BooleanSupplier visualTabActive;
     private Runnable beginChange;
     private Runnable markDirty;
     private Runnable reloadEditor;
@@ -55,11 +60,14 @@ public class FindController {
 
     /** FXML 加载后由父控制器注入运行时依赖；必须在任何 onAction 触发前完成。 */
     public void bind(BookContext ctx, TextArea contentArea,
+                     VisualEditorSession visualSession, BooleanSupplier visualTabActive,
                      Runnable beginChange, Runnable markDirty,
                      Runnable reloadEditor, Runnable refreshPreview,
                      Consumer<String> setStatus, BooleanSupplier confirmDiscardChanges) {
         this.ctx = ctx;
         this.contentArea = contentArea;
+        this.visualSession = visualSession;
+        this.visualTabActive = visualTabActive;
         this.beginChange = beginChange;
         this.markDirty = markDirty;
         this.reloadEditor = reloadEditor;
@@ -107,7 +115,10 @@ public class FindController {
         }
         findBar.setVisible(false);
         findBar.setManaged(false);
-        contentArea.requestFocus();
+        // 可视化页签上把焦点塞给隐藏的源码区没有意义（用户看不见它），焦点留在原地即可
+        if (!visualTabActive.getAsBoolean()) {
+            contentArea.requestFocus();
+        }
     }
 
     public void findNext() {
@@ -125,10 +136,23 @@ public class FindController {
             return;
         }
         boolean caseSensitive = caseSensitiveCheck.isSelected();
+        String replacement = replaceField.getText();
+        if (onVisualTab()) {
+            if (!visualReady()) {
+                return;
+            }
+            // 可视化路径：替换改动经页面 push() 走既有回写（onEdited 内记撤销步 + 脏标记），
+            // 不再 beginChange——那会在替换后重复拍一张快照
+            String result = visualSession.replaceOne(keyword, replacement, caseSensitive);
+            if ("hit".equals(result)) {
+                findStatus("已替换 1 处");
+            }
+            findInChapter(true);
+            return;
+        }
         if (TextSearch.matches(contentArea.getSelectedText(), keyword, caseSensitive)) {
             // 显式开一个编辑步：只依赖输入合并机制的话，600ms 静默窗口内的首次替换不会进历史
             beginChange.run();
-            String replacement = replaceField.getText();
             int start = contentArea.getSelection().getStart();
             contentArea.replaceSelection(replacement);
             contentArea.selectRange(start, start + replacement.length());
@@ -146,29 +170,23 @@ public class FindController {
         boolean caseSensitive = caseSensitiveCheck.isSelected();
         String replacement = replaceField.getText();
         if (wholeBookCheck != null && wholeBookCheck.isSelected()) {
-            // 先算命中再开编辑步：没命中时压一条空快照会让撤销「空转」一次
-            Map<Resource, String> pending = new LinkedHashMap<>();
-            int total = 0;
-            for (Resource chapter : ctx.book().spineResources()) {
-                TextSearch.ReplaceResult result =
-                        TextSearch.replaceAll(chapter.asString(), keyword, replacement, caseSensitive);
-                if (result.count() > 0) {
-                    pending.put(chapter, result.text());
-                    total += result.count();
-                }
+            // 全书范围：直接改各章资源，与本页签无关（结束后 reloadEditor 会重载编辑视图）
+            replaceAllInWholeBook(keyword, replacement, caseSensitive);
+            return;
+        }
+        if (onVisualTab()) {
+            if (!visualReady()) {
+                return;
             }
-            if (total == 0) {
-                setStatus.accept("全书中未找到：" + keyword);
+            int count = visualSession.replaceAllInChapter(keyword, replacement, caseSensitive);
+            if (count <= 0) {
+                setStatus.accept("当前章节未找到：" + keyword);
                 findStatus("未找到");
                 return;
             }
-            beginChange.run();
-            pending.forEach(Resource::setString);
-            reloadEditor.run();
-            refreshPreview.run();
-            markDirty.run();
-            setStatus.accept("全书共替换 " + total + " 处");
-            findStatus("全书 " + total + " 处");
+            // 脏标记与撤销步由页面 push() 的 onEdited 链路负责，这里不重复
+            setStatus.accept("当前章节共替换 " + count + " 处");
+            findStatus("本章 " + count + " 处");
             return;
         }
         TextSearch.ReplaceResult result =
@@ -185,10 +203,64 @@ public class FindController {
         findStatus("本章 " + result.count() + " 处");
     }
 
+    /** 全书范围替换：改各章资源 → 重载编辑器 → 刷新预览（与页签无关）。 */
+    private void replaceAllInWholeBook(String keyword, String replacement, boolean caseSensitive) {
+        // 先算命中再开编辑步：没命中时压一条空快照会让撤销「空转」一次
+        Map<Resource, String> pending = new LinkedHashMap<>();
+        int total = 0;
+        for (Resource chapter : ctx.book().spineResources()) {
+            TextSearch.ReplaceResult result =
+                    TextSearch.replaceAll(chapter.asString(), keyword, replacement, caseSensitive);
+            if (result.count() > 0) {
+                pending.put(chapter, result.text());
+                total += result.count();
+            }
+        }
+        if (total == 0) {
+            setStatus.accept("全书中未找到：" + keyword);
+            findStatus("未找到");
+            return;
+        }
+        beginChange.run();
+        pending.forEach(Resource::setString);
+        reloadEditor.run();
+        refreshPreview.run();
+        markDirty.run();
+        setStatus.accept("全书共替换 " + total + " 处");
+        findStatus("全书 " + total + " 处");
+    }
+
+    /** 可视化页签激活但编辑视图尚未就绪（加载中）：给状态而不是静默无效。 */
+    private boolean visualReady() {
+        if (visualSession == null || !visualSession.ready()) {
+            findStatus("编辑视图尚未就绪，请稍后再试");
+            return false;
+        }
+        return true;
+    }
+
+    /** 是否停在可视化编辑页签。 */
+    private boolean onVisualTab() {
+        return visualTabActive != null && visualTabActive.getAsBoolean();
+    }
+
     private void findInChapter(boolean forward) {
         String keyword = findField.getText();
         if (keyword.isEmpty()) {
             findStatus("请输入查找内容");
+            return;
+        }
+        if (onVisualTab()) {
+            if (!visualReady()) {
+                return;
+            }
+            String result = visualSession.find(keyword, !forward, caseSensitiveCheck.isSelected());
+            if (result == null || "miss".equals(result)) {
+                findStatus("未找到");
+                return;
+            }
+            // "wrap" → 已回绕提示；"hit" → 清空状态（与源码区 FindOps.wrapStatus 同口径）
+            findStatus("wrap".equals(result) ? (forward ? "已回到开头" : "已回到结尾") : "");
             return;
         }
         String text = contentArea.getText();

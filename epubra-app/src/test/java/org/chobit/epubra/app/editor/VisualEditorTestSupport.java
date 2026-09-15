@@ -136,6 +136,31 @@ abstract class VisualEditorTestSupport {
         return withMember("__testHtml", html, "window.epubraInsertHtml(window.__testHtml)");
     }
 
+    /**
+     * 挂<b>多个</b> window 临时成员后在 FX 线程执行脚本，最后摘除全部成员。
+     * 查找条的关键词 / 替换词 / 大小写开关就是多个成员一起传的场景；
+     * {@link #withMember} 只支持一个，成员的 setMember 必须在 FX 线程上做。
+     */
+    protected static Object runScriptWithMembers(java.util.LinkedHashMap<String, Object> members,
+                                                 String script) throws Exception {
+        AtomicReference<Object> out = new AtomicReference<>();
+        runOnFx(() -> {
+            netscape.javascript.JSObject window =
+                    (netscape.javascript.JSObject) webView.getEngine().executeScript("window");
+            for (java.util.Map.Entry<String, Object> entry : members.entrySet()) {
+                window.setMember(entry.getKey(), entry.getValue());
+            }
+            try {
+                out.set(webView.getEngine().executeScript(script));
+            } finally {
+                for (java.util.Map.Entry<String, Object> entry : members.entrySet()) {
+                    window.setMember(entry.getKey(), null);
+                }
+            }
+        });
+        return out.get();
+    }
+
     /** 同上，调粘贴净化器（净化入口同样不把 HTML 拼进脚本文本）。 */
     protected Object sanitize(String html) throws Exception {
         return withMember("__testHtml", html, "window.epubraSanitize(window.__testHtml)");

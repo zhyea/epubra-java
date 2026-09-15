@@ -1,6 +1,6 @@
 package org.chobit.epubra.app.controller.view;
 
-import javafx.scene.control.MenuItem;
+import javafx.scene.control.CheckMenuItem;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
@@ -39,7 +39,14 @@ public final class PreviewController {
     private final TextArea contentArea;
     private final TabPane editorTabs;
     private final SplitPane splitPreviewPane;
-    private final MenuItem splitPreviewItem;
+
+    /**
+     * 「视图 → 并排预览」菜单项。类型是 {@link CheckMenuItem}（而非普通 {@code MenuItem}）：
+     * 条目的**文字固定**为「并排预览」，当前是否开启由**勾选态**表达——文字写「点了会切到哪」
+     * 会把「现在是什么」和「点了变成什么」混为一谈，且文字成了不稳定标识（任何按文字定位的
+     * 代码/测试在开关一次后失效）。
+     */
+    private final CheckMenuItem splitPreviewItem;
     private final Supplier<ChapterNode> currentChapter;
     private final Supplier<Theme> theme;
     private final int sourceTabIndex;
@@ -59,7 +66,7 @@ public final class PreviewController {
     private boolean splitPreview;
 
     public PreviewController(BookContext ctx, WebView previewView, TextArea contentArea,
-                             TabPane editorTabs, SplitPane splitPreviewPane, MenuItem splitPreviewItem,
+                             TabPane editorTabs, SplitPane splitPreviewPane, CheckMenuItem splitPreviewItem,
                              Supplier<ChapterNode> currentChapter, Supplier<Theme> theme,
                              int sourceTabIndex, int previewTabIndex) {
         this.ctx = ctx;
@@ -163,6 +170,15 @@ public final class PreviewController {
      * 抛「节点已有父容器」异常。
      */
     private void applyMode() {
+        // 勾选态只跟随 splitPreview 状态，与节点是否已就绪无关——必须放在下方守卫之前，
+        // 否则提前 return 会把状态翻新了、菜单项的勾选态却停在旧值（显示与实际不一致）。
+        //
+        // ⚠ 这一句是勾选态的**唯一**来源：实测 `CheckMenuItem.fire()` 自己不会翻选中态
+        // （`MenuItem.fire()` 只发 ActionEvent；和 RadioMenuItem 同一机制），
+        // 所以把它注掉会让 MenuAuditTest 立刻变红（已负向验证过）。
+        if (splitPreviewItem != null) {
+            splitPreviewItem.setSelected(splitPreview);
+        }
         if (splitPreviewPane == null || editorTabs == null
                 || editorTabs.getTabs().size() <= previewTabIndex) {
             return;
@@ -181,8 +197,5 @@ public final class PreviewController {
         // 两个容器互斥显示：visible 与 managed 必须同步，否则隐藏的那个仍占 StackPane 布局
         FxNodes.setVisibleManaged(editorTabs, !splitPreview);
         FxNodes.setVisibleManaged(splitPreviewPane, splitPreview);
-        if (splitPreviewItem != null) {
-            splitPreviewItem.setText(splitPreview ? "标签预览" : "并排预览");
-        }
     }
 }

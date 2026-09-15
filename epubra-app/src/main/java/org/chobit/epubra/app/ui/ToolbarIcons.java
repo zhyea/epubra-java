@@ -70,7 +70,16 @@ public final class ToolbarIcons {
             Map.entry("align-right", "M4 6h16 M10 12h10 M7 18h13"),
             // 字体：一枚「A」字形（字体族＝字形选择）。与文字颜色图标的「A + 色条」同族但不同形——
             // 那一枚底下压着一条会随当前颜色上色的色条，这一枚没有，两者在 17px 下不会认错。
-            Map.entry("font", "M2.6 19.4 L9.4 4.6 L16.2 19.4 M5 14.6 h8.8"));
+            Map.entry("font", "M2.6 19.4 L9.4 4.6 L16.2 19.4 M5 14.6 h8.8"),
+            // 清除格式：一块 45° 斜放的橡皮 + 台面线（Office 惯用的「清除格式」意象）。
+            // 橡皮由两个短边 + 两个长边围出（相邻边严格垂直：7.2 × 14.4），中间一短线
+            // 标出用秃的那一端；台面线在它下方 2 个单位，像搁在桌面上。
+            // 尺寸按「整体占满 24×24 视口」反推——只占大半个视口时，17px 下比旁边一圈
+            // 图标明显小一号（第一版就是那样，肉眼比对 target/toolbar-icons.png 后改的）。
+            // **不用「A 加斜杠」**：工具条上已经有「A」（字体）与「A + 色条」（颜色）两枚
+            // 同族图标，再来一枚只差一条斜杠的，17px 下认不出来。
+            Map.entry("clear-format",
+                    "M13.5 3.8 L18.6 9 L8.5 19.2 L3.4 14 Z M10.3 7.1 L15.4 12.2 M2.5 21.5 H21.5"));
 
     /** id → SVG 路径；不在 {@link #PATHS} 里的 id 返回 null。 */
     static String path(String id) {
@@ -90,6 +99,7 @@ public final class ToolbarIcons {
             Map.entry("underline", "下划线"),
             Map.entry("strike", "删除线"),
             Map.entry("code", "行内代码"),
+            Map.entry("clear-format", "清除格式"),
             Map.entry("link", "链接"),
             Map.entry("image", "插入图片（从本机选择）"),
             Map.entry("size-up", "放大字号"),
@@ -235,5 +245,25 @@ public final class ToolbarIcons {
     /** 供接线测试断言「工具条里的每个按钮 id 都有图标与提示」。 */
     public static boolean covers(String buttonId) {
         return PATHS.containsKey(buttonId) && LABELS.containsKey(buttonId);
+    }
+
+    /**
+     * 已登记的按钮 id 全集。
+     *
+     * <p>供渲染自检用：路径串写错时 JavaFX 会静默画出一个空图形（不抛异常），
+     * 光断言「登记过」是拦不住的，得把那枚图形真的量一遍（见 {@code ToolbarIconsRenderTest}）。
+     */
+    static java.util.Set<String> registeredIds() {
+        return PATHS.keySet();
+    }
+
+    /**
+     * 已登记提示文案的 id 全集。
+     *
+     * <p>比 {@link #registeredIds()} 少几个——{@code align-center} / {@code align-right} 是
+     * 「对齐」按钮按当前生效值换用的图形变体，不是独立的按钮，没有自己的文案。
+     */
+    static java.util.Set<String> labeledIds() {
+        return LABELS.keySet();
     }
 }

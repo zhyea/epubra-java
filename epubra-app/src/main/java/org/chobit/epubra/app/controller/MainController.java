@@ -43,6 +43,7 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.CheckMenuItem;
 import javafx.scene.control.ColorPicker;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.IndexRange;
@@ -191,8 +192,10 @@ public class MainController {
     private MenuItem refreshPreviewItem;
     @FXML
     private SeparatorMenuItem previewSeparatorTop;
+
+    /** 「并排预览」是**勾选态**菜单项：文字固定，当前是否开启看勾选（见 `PreviewController.applyMode`）。 */
     @FXML
-    private MenuItem splitPreviewItem;
+    private CheckMenuItem splitPreviewItem;
     @FXML
     private SeparatorMenuItem previewSeparatorBottom;
 
@@ -579,6 +582,7 @@ public class MainController {
                 this::currentChapter);
 
         findBarController.bind(ctx, contentArea,
+                visualEditorSession, this::onVisualTab,
                 this::beginChange, this::markDirty,
                 this::reloadEditor, this::refreshPreview,
                 status::set, this::confirmDiscardChanges);
@@ -1200,6 +1204,21 @@ public class MainController {
     }
 
     /**
+     * 清除格式：把选区（或光标所在处）的受控内联样式（字体 / 字号 / 颜色）、对齐、
+     * 强调类包裹（加粗 / 斜体 / 下划线 / 删除线 / 行内代码）一并去掉，块结构（标题 /
+     * 引用 / 列表项）退回普通段落——细则见 {@code editor-script.js} 的 {@code clearFormat}。
+     *
+     * <p>不做源码区兜底：源码视图里没有「格式」可言，能做的只有手工删标签；与其猜用户
+     * 想删哪一段，不如明说这里不生效（applyVisualFormat 返回 false = 编辑视图还没就绪）。
+     */
+    @FXML
+    public void onClearFormat() {
+        if (!applyVisualFormat("clear")) {
+            status.set("编辑视图尚未就绪，清除格式暂不可用");
+        }
+    }
+
+    /**
      * 链接弹窗：输入框占整行（标签放输入框上方，而不是 TextInputDialog 的「标签： 输入框」
      * 同行布局），光标已在链接里时回填现有地址，并提供「取消链接」按钮拆掉
      * {@code <a>} 保留文字。确认后交给可视化编辑器把选区（或空选区）包成 {@code <a href>}。
@@ -1584,13 +1603,20 @@ public class MainController {
         return alert.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK;
     }
 
+    /**
+     * 「操作前置条件不满足」这类**用户可见失败**的统一出口：写状态栏，**不弹模态框**。
+     *
+     * <p><b>为什么不是弹窗</b>：同一个失败族在 {@code TocController} 里早已走状态栏
+     * （「已经是同级中的第一个」「无法移动到该位置」），而这里却弹模态——同类反馈两种口径。
+     * 更要紧的是 {@code Alert#showAndWait()} 会把 FX 线程挂在嵌套事件循环上，
+     * 于是这一整条路径**永远无法被自动化测试覆盖**（本类 4 处 + 章节菜单 6 处调用点）。
+     * 改成状态栏后：不阻塞、口径统一、可断言。
+     *
+     * <p><b>不要顺手把 {@link #confirm} 也改掉</b>：那个需要用户返回值（是否丢弃未保存修改），
+     * 模态才是正确的。这里只改「纯提示」——不需要用户决策的那一类。
+     */
     private void warn(String message) {
-        Alert alert = new Alert(Alert.AlertType.WARNING);
-        alert.setTitle("提示");
-        alert.setHeaderText(null);
-        alert.setContentText(message);
-        alert.initOwner(stage);
-        alert.showAndWait();
+        status.flash(message);
     }
 
     private void markDirty() {
